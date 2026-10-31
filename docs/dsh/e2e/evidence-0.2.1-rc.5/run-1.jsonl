@@ -1,0 +1,9 @@
+{"type":"session","sessionId":"session-0eeec841-08d5-40d0-9ff2-4782d8734791","cwd":"/home/sandbox/w/mc/packages/dsh-plugin/scripts/e2e"}
+{"type":"status","phase":"turn_start","turn":1}
+{"type":"status","phase":"step_start","turn":1,"step":1}
+{"type":"text","text":"pong"}
+{"type":"status","phase":"step_end","turn":1,"step":1,"usage":{"inputTokens":10143,"outputTokens":3,"totalTokens":10146}}
+[magic-context] historian trigger: pct=42 threshold=40 budget=5000 window=24000 fires=true
+{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"completed"}}
+{"type":"final","text":"pong"}
+rc=0 elapsed=4.3s log=/home/sandbox/w/e2e/logs/run-1.log

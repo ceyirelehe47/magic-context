@@ -1,0 +1,10 @@
+{"type":"session","sessionId":"session-0eeec841-08d5-40d0-9ff2-4782d8734791","cwd":"/home/sandbox/w/mc/packages/dsh-plugin/scripts/e2e"}
+{"type":"status","phase":"turn_start","turn":2}
+[magic-context] historian trigger: pct=42 threshold=40 budget=5000 window=24000 fires=true
+{"type":"status","phase":"step_start","turn":2,"step":1}
+{"type":"text","text":"§6§ A hash map is a data structure that stores key–value pairs and uses a hash function to compute each key's bucket index, giving average O(1) lookups, inserts, and deletes. It trades ordering for speed, typically handling collisions via chaining or open addressing and resizing when the load factor grows too high."}
+{"type":"status","phase":"step_end","turn":2,"step":1,"usage":{"inputTokens":10349,"outputTokens":104,"totalTokens":10453}}
+[magic-context] historian trigger: pct=44 threshold=40 budget=5000 window=24000 fires=true
+{"type":"status","phase":"turn_end","turn":2,"reason":{"kind":"completed"}}
+{"type":"final","text":"§6§ A hash map is a data structure that stores key–value pairs and uses a hash function to compute each key's bucket index, giving average O(1) lookups, inserts, and deletes. It trades ordering for speed, typically handling collisions via chaining or open addressing and resizing when the load factor grows too high."}
+rc=0 elapsed=8.6s log=/home/sandbox/w/e2e/logs/run-2.log
