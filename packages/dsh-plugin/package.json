@@ -4,12 +4,15 @@
   "type": "module",
   "description": "Magic Context — DeepSeek Harness adapter (Host / Agent / Client + profile bundle). Loads the shared Magic SQLite store and registers ctx_* tools, /ctx-* commands, knowledge injection, historian/dreamer scheduling, compaction policy, and the Typert Remote surface for the DSH client.",
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "types": "./types/index.d.ts",
   "bin": {
     "dsh-magic-context": "dist/cli.js"
   },
   "exports": {
-    ".": "./dist/index.js",
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./dist/index.js"
+    },
     "./agent": "./dist/entries/agent.js",
     "./compaction": "./dist/entries/compaction.js",
     "./commands": "./dist/entries/commands.js",
@@ -22,12 +25,13 @@
   "license": "MIT",
   "files": [
     "dist",
+    "types",
     "src",
     "cordis.patch.yml",
     "NOTICE"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target node --format esm --splitting --external @deepseek-ai/dsh-session --external @deepseek-ai/dsh-compaction --external @deepseek-ai/dsh-compaction-basic --external @deepseek-ai/dsh-token-meter --external @deepseek-ai/dsh-llm --external @deepseek-ai/cordis && bun build src/doctor/cli.ts --outdir dist --target node --format esm && bun build src/entries/agent.ts src/entries/compaction.ts src/entries/commands.ts src/entries/tools.ts src/entries/remote.ts src/entries/preset-include.ts --outdir dist/entries --target node --format esm --splitting --external @deepseek-ai/cordis --external @deepseek-ai/dsh-session --external @deepseek-ai/dsh-llm --external @deepseek-ai/dsh-tools --external @deepseek-ai/dsh-subagent --external @deepseek-ai/dsh-compaction --external @deepseek-ai/dsh-compaction-basic --external @deepseek-ai/dsh-token-meter --external @deepseek-ai/cordis-plugin-include && bun run build:workers && tsc --emitDeclarationOnly",
+    "build": "bun build src/index.ts --outdir dist --target node --format esm --splitting --external @deepseek-ai/dsh-session --external @deepseek-ai/dsh-compaction --external @deepseek-ai/dsh-compaction-basic --external @deepseek-ai/dsh-token-meter --external @deepseek-ai/dsh-llm --external @deepseek-ai/cordis && bun build src/doctor/cli.ts --outdir dist --target node --format esm && bun build src/entries/agent.ts src/entries/compaction.ts src/entries/commands.ts src/entries/tools.ts src/entries/remote.ts src/entries/preset-include.ts --outdir dist/entries --target node --format esm --splitting --external @deepseek-ai/cordis --external @deepseek-ai/dsh-session --external @deepseek-ai/dsh-llm --external @deepseek-ai/dsh-tools --external @deepseek-ai/dsh-subagent --external @deepseek-ai/dsh-compaction --external @deepseek-ai/dsh-compaction-basic --external @deepseek-ai/dsh-token-meter --external @deepseek-ai/cordis-plugin-include && bun run build:workers",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "clean": "rm -rf dist",

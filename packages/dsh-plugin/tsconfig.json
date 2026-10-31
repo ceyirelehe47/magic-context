@@ -24,6 +24,6 @@
             "dsh-magic-context-adapter/*": ["../adapter-api/src/*"]
         }
     },
-    "include": ["src/**/*.ts", "src/**/*.d.ts"],
+    "include": ["src/**/*.ts", "src/**/*.d.ts", "types/**/*.d.ts"],
     "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
 }
