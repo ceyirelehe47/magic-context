@@ -4,9 +4,10 @@
  * Checklist (each item reports ok/warn/fail + a fix hint):
  *   1. DSH version vs the compatibility expectation (exact rc 0.2.1-rc.5);
  *   2. bundle install state (profile package.json `dsh.profile.bundles`);
- *   3. magic-standard preset generated + stock layout still contract-valid
- *      (re-runs scanStockPresetLayout against the stock file the include row
- *      points at, and applyMagicPatches as a dry-run);
+ *   3. profile patch layer (DSH 0.2): the setup-managed block in each Magic
+ *      profile's cordis.patch.yml matches the rows derived from the current
+ *      stock layout (dsh-base root rows / dsh-web-app preset-standard), and
+ *      that layout still passes the contract scan;
  *   4. shared DB: storage dir location + openDatabaseAsync result
  *      classification (schema fence / migration guard / fatal) + liveness
  *      marker scan;
@@ -27,10 +28,6 @@ import {
   openDatabaseAsync,
 } from "@magic-context/core/features/magic-context/storage-db";
 import type { Database } from "@magic-context/core/shared/sqlite";
-import {
-  applyMagicPatches,
-  scanStockPresetLayout,
-} from "../compat/dsh-0.1/preset";
 import type { RpcPortFileRecord } from "../compat/dsh-0.1/liveness";
 import {
   DSH_COMPAT_EXPECTED_VERSION,
@@ -38,15 +35,20 @@ import {
   MAGIC_CONTEXT_PACKAGE,
   errorMessage,
   locateDshInstall,
-  magicEntryPath,
-  magicStandardAgentCordisPath,
-  magicStandardDir,
-  magicStandardPresetYamlPath,
   parseFlags,
   resolveDshHome,
   stringFlag,
 } from "./env";
-import { parseEntryListYaml } from "./setup";
+import { parseEntryListYaml, planProfileWiring } from "./profile-wiring";
+import { readManagedBlock } from "../compat/dsh-0.1/profile-patch";
+
+function safeParse(text: string): Record<string, unknown>[] {
+  try {
+    return parseEntryListYaml(text);
+  } catch {
+    return [];
+  }
+}
 
 export type CheckStatus = "ok" | "warn" | "fail";
 
@@ -68,7 +70,6 @@ export interface DshDoctorOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly dshHome?: string;
   readonly dshInstallDir?: string;
-  readonly stockPresetPath?: string;
   /** Workspace directory (project config + liveness project scope). */
   readonly directory?: string;
   /** Restrict the bundle check to one profile name. */
@@ -241,12 +242,11 @@ export async function runDshDoctor(
   const env = options.env ?? process.env;
   const dshHome = options.dshHome ?? stringFlag(flags, "dsh-home") ?? resolveDshHome(env);
   const dshInstallDir = options.dshInstallDir ?? stringFlag(flags, "dsh-install");
-  const stockPresetPath = options.stockPresetPath ?? stringFlag(flags, "stock-preset");
   const directory = options.directory ?? stringFlag(flags, "directory") ?? process.cwd();
   const profileFilter = options.profile ?? stringFlag(flags, "profile");
 
   const checks: DoctorCheck[] = [];
-  const located = locateDshInstall({ dshHome, dshInstallDir, stockPresetPath, env });
+  const located = locateDshInstall({ dshHome, dshInstallDir, env });
 
   // 1. DSH version vs the compatibility expectation.
   if (located.dshInstallDir === undefined) {
@@ -281,7 +281,7 @@ export async function runDshDoctor(
           id: "dsh-version",
           title: "DSH version",
           status: "ok",
-          detail: `${located.dshInstallDir} → ${installedVersion} (matches the compat contract ${DSH_COMPAT_EXPECTED_VERSION}).`,
+          detail: `${located.dshInstallDir} (via ${located.source}) → ${installedVersion} (matches the compat contract ${DSH_COMPAT_EXPECTED_VERSION}).`,
         });
       } else {
         checks.push({
@@ -344,104 +344,55 @@ export async function runDshDoctor(
     }
   }
 
-  // 3. magic-standard preset generated + layout still contract-valid.
-  const presetDir = magicStandardDir(dshHome);
-  const agentCordisPath = magicStandardAgentCordisPath(dshHome);
-  const presetYamlPath = magicStandardPresetYamlPath(dshHome);
-  if (!existsSync(agentCordisPath) || !existsSync(presetYamlPath)) {
-    checks.push({
-      id: "preset-generated",
-      title: "magic-standard preset",
-      status: "fail",
-      detail:
-        `${presetDir} is missing (${existsSync(presetYamlPath) ? "" : "preset.yml, "}` +
-        `${existsSync(agentCordisPath) ? "" : "agent.cordis.yml"}).`,
-      fix: "Run `dsh-magic-context setup` to generate the thin preset.",
-    });
-  } else {
-    let presetStatus: CheckStatus = "ok";
-    let presetDetail = `${presetDir}: generated.`;
-    try {
-      const thinEntries = parseEntryListYaml(readFileSync(agentCordisPath, "utf8"));
-      const includeRow = thinEntries.find((row) => row.id === "magic-include-standard");
-      const includeConfig = includeRow?.config as
-        | { path?: unknown; patches?: unknown }
-        | undefined;
-      // The generated include path is a file:// URL (setup emits it that way
-      // so Windows drive paths survive the loader's URL resolution); convert
-      // it back to a filesystem path before reading.
-      const includePath =
-        typeof includeConfig?.path === "string" && includeConfig.path.startsWith("file:")
-          ? fileURLToPath(includeConfig.path)
-          : includeConfig?.path;
-      if (
-        includeRow === undefined ||
-        typeof includePath !== "string" ||
-        !existsSync(includePath)
-      ) {
-        presetStatus = "fail";
-        presetDetail = `${agentCordisPath}: the include row is missing or its stock path no longer exists.`;
-      } else if (includeRow.name === "@deepseek-ai/cordis-plugin-include") {
-        // Regression guard: the raw include inherits the loader's write-back,
-        // which truncates the SHIPPED stock composition to `[]` the first time
-        // a session ends (dsh-agent-presets' PresetTree documents this exact
-        // hazard). setup must emit our no-write entry instead.
-        presetStatus = "fail";
-        presetDetail =
-          `${agentCordisPath}: the include row still uses the raw ` +
-          `@deepseek-ai/cordis-plugin-include, which truncates the shipped ` +
-          `stock preset on the first agent teardown (loader write-back).`;
-      } else {
-        // The include row must mount the shipped stock file through OUR
-        // no-write entry (dist/entries/preset-include.js).
-        const expectedIncludeEntry = pathToFileURL(
-          magicEntryPath("preset-include"),
-        ).href;
-        const entryFile =
-          typeof includeRow.name === "string" && includeRow.name.startsWith("file:")
-            ? fileURLToPath(includeRow.name)
-            : includeRow.name;
-        if (
-          includeRow.name !== expectedIncludeEntry ||
-          typeof entryFile !== "string" ||
-          !existsSync(entryFile)
-        ) {
-          presetStatus = "fail";
-          presetDetail =
-            `${agentCordisPath}: the include row does not name this package's ` +
-            `no-write entry (${expectedIncludeEntry})` +
-            `${typeof entryFile === "string" && existsSync(entryFile) ? "" : " and the entry file is missing"}.`;
-        } else {
-          // Re-run the contract scan against the STOCK file the include row
-          // references, then prove the guarded patch still applies (dry run).
-          const stockEntries = parseEntryListYaml(readFileSync(includePath, "utf8"));
-          const layoutIssue = scanStockPresetLayout(stockEntries);
-          if (layoutIssue !== undefined) {
-            presetStatus = "fail";
-            presetDetail =
-              `${includePath}: stock layout changed (${layoutIssue}) — the ` +
-              `guarded patch no longer applies; the generated preset is stale.`;
-          } else {
-            applyMagicPatches(stockEntries, { stockPresetPath: includePath });
-            presetDetail =
-              `${presetDir}: valid; stock layout at ${includePath} re-scanned ` +
-              `and the guarded patch applies cleanly.`;
-          }
-        }
-      }
-    } catch (error) {
-      presetStatus = "fail";
-      presetDetail = `${agentCordisPath}: ${errorMessage(error)}`;
+  // 3. Profile wiring (DSH 0.2): the managed block in each Magic profile's
+  //    cordis.patch.yml must match what setup derives from the CURRENT stock
+  //    layout, and the stock layout must still pass the contract scan.
+  if (located.dshInstallDir !== undefined) {
+    const wired = profiles.filter((name) => profileBundleFacts(dshHome, name).bundleInstalled);
+    if (wired.length === 0) {
+      checks.push({
+        id: "profile-wiring",
+        title: "Profile patch layer",
+        status: "warn",
+        detail: "no profile carries the Magic bundle; nothing to check.",
+        fix: "Run `dsh-magic-context setup --profile <name>`.",
+      });
     }
-    checks.push({
-      id: "preset-generated",
-      title: "magic-standard preset",
-      status: presetStatus,
-      detail: presetDetail,
-      fix: presetStatus === "ok"
-        ? undefined
-        : "Run `dsh-magic-context setup` to regenerate (it fails closed on a layout mismatch).",
-    });
+    for (const name of wired) {
+      const plan = planProfileWiring({ dshHome, dshInstallDir: located.dshInstallDir, profile: name });
+      const text = existsSync(plan.patchPath) ? readFileSync(plan.patchPath, "utf8") : "";
+      const block = readManagedBlock(text);
+      let status: CheckStatus = "ok";
+      let detail: string;
+      if (plan.issue !== undefined || plan.blockBody === undefined) {
+        status = "fail";
+        detail = `${plan.scannedFile ?? plan.profileDir}: stock layout changed (${plan.issue ?? "no wiring"}).`;
+      } else if (block === undefined) {
+        // A hand-written layer is acceptable when it carries the same rows.
+        const rows = safeParse(text);
+        const ids = new Set(rows.flatMap((row) => [row, ...(Array.isArray(row.insert) ? (row.insert as Record<string, unknown>[]) : [])]).map((row) => row.id));
+        const hand = plan.layout === "flat"
+          ? ids.has("magic-compaction") && ids.has("magic-agent")
+          : ids.has("preset-magic-standard");
+        status = hand ? "warn" : "fail";
+        detail = hand
+          ? `${plan.patchPath}: Magic rows present but not in the setup-managed block (hand-written layer).`
+          : `${plan.patchPath}: no Magic rows — compaction-basic still active, the Magic agent plane is not mounted.`;
+      } else if (block !== plan.blockBody) {
+        status = "fail";
+        detail = `${plan.patchPath}: managed block is stale (differs from the rows derived from ${plan.scannedFile}).`;
+      } else {
+        detail =
+          `${plan.patchPath}: managed block up to date; layout ${plan.layout}; stock ${plan.scannedFile} re-scanned OK.`;
+      }
+      checks.push({
+        id: `profile-wiring.${name}`,
+        title: `Profile patch layer — profile ${name}`,
+        status,
+        detail,
+        fix: status === "ok" ? undefined : `Run \`dsh-magic-context setup --profile ${name}\` (fails closed on a layout mismatch).`,
+      });
+    }
   }
 
   // 4. Shared DB.

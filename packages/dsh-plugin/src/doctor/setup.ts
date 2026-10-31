@@ -1,45 +1,47 @@
 /**
- * doctor/setup — `dsh-magic-context setup` (Phase 2 slice C).
+ * doctor/setup — `dsh-magic-context setup` (DSH 0.2 layout).
  *
  * The DSH adapter's own setup tool (a package bin, NOT a dsh CLI command):
- *   1. locate the DSH install and the system standard preset
- *      (profile/install double anchor, dsh-reference §A.1);
- *   2. contract-scan the stock layout (scanStockPresetLayout) — a mismatch
- *      FAILS CLOSED and nothing is written;
- *   3. generate the `magic-standard` thin preset
- *      (`$DSH_HOME/.agent-presets/magic-standard/`: preset.yml metadata +
- *      agent.cordis.yml = buildThinPresetEntries output), atomic writes with
- *      0600 permissions;
- *   4. bootstrap/validate `~/.config/cortexkit/magic-context.jsonc` — never
- *      overwrites an existing file, only hints about missing keys;
- *   5. print next steps (profile install + preset usage).
+ *   1. locate the DSH install the `dsh` launcher runs from;
+ *   2. pick the profile (`--profile`, or the only profile under $DSH_HOME);
+ *   3. contract-scan the stock layout for that profile's flavour
+ *      (flat: `@deepseek-ai/dsh-base` root `compaction-basic`; preset/web:
+ *      `@deepseek-ai/dsh-web-app` `preset-standard`) — a mismatch FAILS
+ *      CLOSED and nothing is written;
+ *   4. make sure `dsh-magic-context` is in the profile's
+ *      `dsh.profile.bundles` (only when the package is resolvable there);
+ *   5. write the Magic rows as a managed block in the profile's own
+ *      `cordis.patch.yml` (flat: disable compaction-basic + insert
+ *      magic-compaction / magic-agent; web: a `magic-standard` agent preset);
+ *   6. bootstrap/validate `~/.config/cortexkit/magic-context.jsonc` — never
+ *      overwrites an existing file, only hints about missing keys.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { load as yamlLoad, dump as yamlDump } from "js-yaml";
-import { entryListSchema } from "@deepseek-ai/cordis-plugin-include";
+import { join } from "node:path";
 import { resolveCortexKitUserConfigPath } from "@magic-context/core/config/migrate-config-location";
 import {
   parseJsonc,
   readJsoncFile,
 } from "@magic-context/core/shared/jsonc-parser";
-import {
-  buildThinPresetEntries,
-  scanStockPresetLayout,
-} from "../compat/dsh-0.1/preset";
+import { mergeManagedBlock, readManagedBlock, MAGIC_PRESET_ID } from "../compat/dsh-0.1/profile-patch";
 import {
   DSH_COMPAT_EXPECTED_VERSION,
   MAGIC_CONTEXT_PACKAGE,
   errorMessage,
   locateDshInstall,
-  magicEntryPath,
-  magicStandardAgentCordisPath,
-  magicStandardDir,
-  magicStandardPresetYamlPath,
   parseFlags,
   resolveDshHome,
   stringFlag,
   writeFileAtomic,
 } from "./env";
+import { listProfiles } from "./doctor";
+import {
+  dumpEntryListYaml,
+  parseEntryListYaml,
+  planProfileWiring,
+} from "./profile-wiring";
+
+export { dumpEntryListYaml, parseEntryListYaml };
 
 /** Thin preset identity (dsh-reference §A.6 custom preset metadata). */
 export const MAGIC_STANDARD_PRESET = {
@@ -82,11 +84,9 @@ export interface DshSetupOptions {
   readonly dshHome?: string;
   /** DSH install override (tests / `--dsh-install`). */
   readonly dshInstallDir?: string;
-  /** Stock preset override (tests / `--stock-preset`). */
-  readonly stockPresetPath?: string;
   /** Validate + report but write nothing. */
   readonly dryRun?: boolean;
-  /** Profile name for the next-steps hint. */
+  /** Profile to wire (`--profile`). */
   readonly profile?: string;
 }
 
@@ -115,16 +115,6 @@ function presentTopLevelKeys(configPath: string): Set<string> {
   return new Set(Object.keys(parsed));
 }
 
-/** Parse a stock/standard `agent.cordis.yml` entry list (loader YAML dialect). */
-export function parseEntryListYaml(text: string): Record<string, unknown>[] {
-  return yamlLoad(text, { schema: entryListSchema }) as Record<string, unknown>[];
-}
-
-/** Render an entry list back to the loader YAML dialect. */
-export function dumpEntryListYaml(entries: Record<string, unknown>[]): string {
-  return yamlDump(entries, { schema: entryListSchema });
-}
-
 export async function runDshSetup(
   argv: readonly string[],
   options: DshSetupOptions = {},
@@ -133,131 +123,156 @@ export async function runDshSetup(
   const env = options.env ?? process.env;
   const dshHome = options.dshHome ?? stringFlag(flags, "dsh-home") ?? resolveDshHome(env);
   const dshInstallDir = options.dshInstallDir ?? stringFlag(flags, "dsh-install");
-  const stockPresetPath = options.stockPresetPath ?? stringFlag(flags, "stock-preset");
   const dryRun = options.dryRun ?? flags["dry-run"] === true;
-  const profile = options.profile ?? stringFlag(flags, "profile");
+  let profile = options.profile ?? stringFlag(flags, "profile");
 
   const steps: SetupStep[] = [];
   const generatedFiles: string[] = [];
   let failed = false;
+  let layoutLabel: string | undefined;
 
   // 1. DSH home.
   steps.push({ status: "ok", title: "DSH home", detail: dshHome });
 
-  // 2. DSH install + system standard preset.
-  const located = locateDshInstall({ dshHome, dshInstallDir, stockPresetPath, env });
-  if (located.stockPresetPath === undefined) {
+  // 2. DSH install (launcher anchor).
+  const located = locateDshInstall({ dshHome, dshInstallDir, env });
+  if (located.dshInstallDir === undefined) {
     steps.push({
       status: "fail",
-      title: "DSH install / system standard preset",
+      title: "DSH install",
       detail:
-        `Could not locate the system standard preset ` +
+        `Could not locate the @deepseek-ai/dsh launcher package ` +
         `(${DSH_COMPAT_EXPECTED_VERSION} expected). Probed:\n` +
         located.tried.map((candidate) => `  - ${candidate}`).join("\n") +
-        `\nFix: install DSH ${DSH_COMPAT_EXPECTED_VERSION}, or pass ` +
-        `--dsh-install <dir> / --stock-preset <file>.`,
+        `\nFix: install DSH ${DSH_COMPAT_EXPECTED_VERSION}, put \`dsh\` on PATH, or pass --dsh-install <dir>.`,
     });
     failed = true;
   } else {
+    const versionOk = located.version === DSH_COMPAT_EXPECTED_VERSION;
     steps.push({
-      status: "ok",
-      title: "DSH install / system standard preset",
-      detail: located.stockPresetPath,
+      status: versionOk ? "ok" : "warn",
+      title: "DSH install",
+      detail:
+        `${located.dshInstallDir} (${located.version ?? "unknown version"}, found via ${located.source})` +
+        (versionOk ? "" : ` — the adapter pins ${DSH_COMPAT_EXPECTED_VERSION}; the contract scan below decides.`),
     });
   }
 
-  // 3. Contract scan (fail closed — nothing is written on a mismatch).
-  let stockEntries: Record<string, unknown>[] | undefined;
-  if (!failed && located.stockPresetPath !== undefined) {
-    try {
-      stockEntries = parseEntryListYaml(
-        readFileSync(located.stockPresetPath, "utf8"),
-      );
-      const layoutIssue = scanStockPresetLayout(stockEntries);
-      if (layoutIssue !== undefined) {
-        steps.push({
-          status: "fail",
-          title: "Stock preset contract scan",
-          detail:
-            `${located.stockPresetPath}: ${layoutIssue}. The guarded patch cannot ` +
-            `be applied — refusing to generate magic-standard (fail closed). ` +
-            `Fix: check that the DSH install matches ${DSH_COMPAT_EXPECTED_VERSION}.`,
-        });
-        failed = true;
-      } else {
-        steps.push({
-          status: "ok",
-          title: "Stock preset contract scan",
-          detail: `${located.stockPresetPath}: compaction group + compaction-basic match the expected layout.`,
-        });
-      }
-    } catch (error) {
+  // 3. Profile selection.
+  if (!failed && profile === undefined) {
+    const profiles = listProfiles(dshHome);
+    if (profiles.length === 1) {
+      profile = profiles[0];
+    } else {
       steps.push({
         status: "fail",
-        title: "Stock preset contract scan",
-        detail: `${located.stockPresetPath}: ${errorMessage(error)}`,
+        title: "Profile",
+        detail:
+          profiles.length === 0
+            ? `no profiles under ${join(dshHome, "profiles")}; boot one first (e.g. \`dsh --profile headless --dump-config\`).`
+            : `several profiles (${profiles.join(", ")}); pass --profile <name>.`,
       });
       failed = true;
     }
   }
 
-  // 4. Generate the thin preset (atomic, 0600).
-  if (!failed && stockEntries !== undefined && located.stockPresetPath !== undefined) {
-    try {
-      const presetDir = magicStandardDir(dshHome);
-      const presetYamlPath = magicStandardPresetYamlPath(dshHome);
-      const agentCordisPath = magicStandardAgentCordisPath(dshHome);
-      const thinEntries = buildThinPresetEntries({
-        stockPresetPath: located.stockPresetPath,
-        magicEngineEntry: magicEntryPath("compaction"),
-        includeEntry: magicEntryPath("preset-include"),
-        magicRows: [
-          { id: "magic-agent", name: magicEntryPath("agent") },
-        ],
+  // 4. Contract scan + wiring plan (fail closed).
+  let plan: ReturnType<typeof planProfileWiring> | undefined;
+  if (!failed && located.dshInstallDir !== undefined && profile !== undefined) {
+    plan = planProfileWiring({ dshHome, dshInstallDir: located.dshInstallDir, profile });
+    layoutLabel = plan.layout === "flat" ? "flat (headless/tui root tree)" : "preset (web agent presets)";
+    if (plan.issue !== undefined || plan.blockBody === undefined) {
+      steps.push({
+        status: "fail",
+        title: "Stock layout contract scan",
+        detail:
+          `${plan.scannedFile ?? plan.profileDir}: ${plan.issue ?? "no wiring derived"}. ` +
+          `Refusing to write the profile patch (fail closed). Fix: check that the DSH install matches ${DSH_COMPAT_EXPECTED_VERSION}.`,
       });
-      const presetYaml = yamlDump({
-        name: MAGIC_STANDARD_PRESET.name,
-        description: MAGIC_STANDARD_PRESET.description,
-        order: MAGIC_STANDARD_PRESET.order,
+      failed = true;
+    } else {
+      steps.push({
+        status: "ok",
+        title: "Stock layout contract scan",
+        detail: `profile ${profile}: layout ${layoutLabel}; ${plan.scannedFile} matches the expected rows.`,
       });
-      const agentCordis = dumpEntryListYaml(thinEntries);
+    }
+  }
 
-      if (dryRun) {
-        steps.push({
-          status: "ok",
-          title: "Generate magic-standard preset (dry run)",
-          detail:
-            `${presetDir} would be written with agent.cordis.yml (include row ` +
-            `over the stock file + guarded patches).`,
-        });
+  // 5. Bundle membership (the rows reference dsh-magic-context/* specifiers,
+  //    so the package must resolve from the profile before anything is written).
+  if (!failed && plan !== undefined) {
+    const resolvable = [
+      join(plan.profileDir, "node_modules", MAGIC_CONTEXT_PACKAGE, "package.json"),
+      join(dshHome, "profiles", "node_modules", MAGIC_CONTEXT_PACKAGE, "package.json"),
+    ].some((file) => existsSync(file));
+    if (plan.bundles.includes(MAGIC_CONTEXT_PACKAGE)) {
+      steps.push({
+        status: resolvable ? "ok" : "fail",
+        title: "Profile bundle",
+        detail: resolvable
+          ? `${MAGIC_CONTEXT_PACKAGE} is in dsh.profile.bundles and resolvable.`
+          : `${MAGIC_CONTEXT_PACKAGE} is in dsh.profile.bundles but NOT installed in the profile.`,
+      });
+      if (!resolvable) failed = true;
+    } else if (!resolvable) {
+      steps.push({
+        status: "fail",
+        title: "Profile bundle",
+        detail:
+          `${MAGIC_CONTEXT_PACKAGE} is not installed in profile ${plan.profile}. ` +
+          `Fix: dsh plugin --profile ${plan.profile} add ${MAGIC_CONTEXT_PACKAGE}, then re-run setup.`,
+      });
+      failed = true;
+    } else if (dryRun) {
+      steps.push({ status: "ok", title: "Profile bundle (dry run)", detail: `would add ${MAGIC_CONTEXT_PACKAGE} to ${plan.packageJsonPath}.` });
+    } else {
+      try {
+        const pkg = JSON.parse(readFileSync(plan.packageJsonPath, "utf8")) as {
+          dsh?: { profile?: { bundles?: string[] } };
+        };
+        pkg.dsh ??= {};
+        pkg.dsh.profile ??= {};
+        pkg.dsh.profile.bundles = [...(pkg.dsh.profile.bundles ?? []), MAGIC_CONTEXT_PACKAGE];
+        writeFileAtomic(plan.packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 0o644);
+        generatedFiles.push(plan.packageJsonPath);
+        steps.push({ status: "ok", title: "Profile bundle", detail: `added ${MAGIC_CONTEXT_PACKAGE} to ${plan.packageJsonPath}.` });
+      } catch (error) {
+        steps.push({ status: "fail", title: "Profile bundle", detail: errorMessage(error) });
+        failed = true;
+      }
+    }
+  }
+
+  // 6. Profile patch layer (managed block).
+  if (!failed && plan !== undefined && plan.blockBody !== undefined) {
+    try {
+      const existing = existsSync(plan.patchPath) ? readFileSync(plan.patchPath, "utf8") : undefined;
+      if (existing !== undefined && readManagedBlock(existing) === plan.blockBody) {
+        steps.push({ status: "ok", title: "Profile patch layer", detail: `${plan.patchPath} already up to date (unchanged).` });
       } else {
-        const unchangedPreset = existsSync(presetYamlPath) &&
-          readFileSync(presetYamlPath, "utf8") === presetYaml;
-        const unchangedAgent = existsSync(agentCordisPath) &&
-          readFileSync(agentCordisPath, "utf8") === agentCordis;
-        if (unchangedPreset && unchangedAgent) {
-          steps.push({
-            status: "ok",
-            title: "Generate magic-standard preset",
-            detail: `${presetDir} already up to date (unchanged).`,
-          });
+        const merged = mergeManagedBlock(existing, plan.blockBody);
+        // Round-trip parse: never leave a profile layer the loader cannot read.
+        parseEntryListYaml(merged);
+        if (dryRun) {
+          steps.push({ status: "ok", title: "Profile patch layer (dry run)", detail: `would write the managed block into ${plan.patchPath}:\n${plan.blockBody}` });
         } else {
-          writeFileAtomic(presetYamlPath, presetYaml);
-          writeFileAtomic(agentCordisPath, agentCordis);
-          generatedFiles.push(presetYamlPath, agentCordisPath);
+          writeFileAtomic(plan.patchPath, merged, 0o644);
+          generatedFiles.push(plan.patchPath);
           steps.push({
             status: "ok",
-            title: "Generate magic-standard preset",
-            detail: `wrote ${presetDir} (preset.yml + agent.cordis.yml, 0600).`,
+            title: "Profile patch layer",
+            detail:
+              `wrote the managed block into ${plan.patchPath} (` +
+              (plan.layout === "flat"
+                ? "compaction-basic disabled; magic-compaction + magic-agent inserted"
+                : `agent preset ${MAGIC_PRESET_ID} inserted`) +
+              ").",
           });
         }
       }
     } catch (error) {
-      steps.push({
-        status: "fail",
-        title: "Generate magic-standard preset",
-        detail: errorMessage(error),
-      });
+      steps.push({ status: "fail", title: "Profile patch layer", detail: `${plan.patchPath}: ${errorMessage(error)}` });
       failed = true;
     }
   }
@@ -328,26 +343,18 @@ export async function runDshSetup(
     }
   }
 
-  // 6. Next steps.
+  // 7. Next steps.
   const nextSteps: string[] = [];
   if (failed) {
     nextSteps.push("Fix the failing steps above, then re-run `dsh-magic-context setup`.");
-  } else {
-    if (profile !== undefined) {
+  } else if (plan !== undefined) {
+    nextSteps.push(`Check the composed tree: dsh --profile ${plan.profile} --dump-config | grep magic-`);
+    if (plan.layout === "preset") {
       nextSteps.push(
-        `Install the bundle into the profile: dsh plugin --profile ${profile} add ${MAGIC_CONTEXT_PACKAGE}`,
-      );
-    } else {
-      nextSteps.push(
-        `Install the bundle into a profile: dsh plugin --profile <name> add ${MAGIC_CONTEXT_PACKAGE} ` +
-        `(or add it to the profile's dsh.profile.bundles manually).`,
+        `Select the \`${MAGIC_PRESET_ID}\` agent preset for new sessions (Settings → Agent preset).`,
       );
     }
-    nextSteps.push(
-      "Select the `magic-standard` preset for new sessions (Settings → Agent preset), " +
-      `or set it as the default in settings.yaml (agent-presets.default). Preset location: ${magicStandardDir(dshHome)}`,
-    );
-    nextSteps.push("Verify with: dsh-magic-context doctor");
+    nextSteps.push(`Verify with: dsh-magic-context doctor --profile ${plan.profile}`);
   }
 
   return {
