@@ -35,6 +35,13 @@ bun run test:dsh        # bun test for both packages
 bun run contracts:dsh   # DSH vocabulary gate + core import-surface contract
 ```
 
+Use **bun 1.4.4** (`packageManager` says 1.4.2; 1.4.4 is what the e2e
+bootstrap and the last full verification used). Do not use npm: it is
+OOM-killed on small (8 GB) sandboxes. On sandboxes whose root/home overlay is
+RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
+cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
+and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
+
 Without `@huggingface/transformers` installed (e.g. a slimmed local install)
 `typecheck:dsh` reports exactly one environmental error in core
 `features/magic-context/memory/embedding-local.ts` (dynamic import). The CI
@@ -97,6 +104,172 @@ All `@deepseek-ai/*` vocabulary is supposed to live behind
 3. fix the compat layer first, then call sites;
 4. `bun run test:dsh`, then a real-DSH smoke (see `docs/dsh/e2e/README.md`).
 
+## `setup` / `doctor` (0.2 profile layer)
+
+`dsh-magic-context setup|doctor` is the package bin (`dist/cli.js`, built
+from `src/doctor/cli.ts`; `@deepseek-ai/cordis` is inlined so it runs outside
+a DSH tree). It is **not** a `dsh` sub-command.
+
+```bash
+dsh-magic-context setup  [--dsh-home <dir>] [--dsh-install <dir>] [--stock-preset <file>] [--profile <name>] [--dry-run]
+dsh-magic-context doctor [--dsh-home <dir>] [--dsh-install <dir>] [--stock-preset <file>] [--profile <name>] [--directory <dir>]
+```
+
+How `setup` works (`src/doctor/setup.ts`, `profile-wiring.ts`, `env.ts`,
+`compat/dsh-0.1/profile-patch.ts`):
+
+1. **Locate the DSH install through the launcher.** DSH 0.2 ships no
+   `config/agent-presets` tree; every bundle is a dependency of the
+   `@deepseek-ai/dsh` launcher package. Candidate order: `--dsh-install`,
+   `$DSH_INSTALL_DIR`, the `dsh` executable on `PATH` realpath'd up to its
+   package root (what `dsh` actually boots), `$DSH_HOME/profiles/node_modules/…`
+   and `$DSH_HOME/profiles/<name>/node_modules/…`, then global bun/npm roots.
+   Stock patch files are resolved from that launcher's dependency tree.
+2. **Pick the profile**: `--profile`, or the only profile under
+   `$DSH_HOME/profiles` (`DSH_HOME` empty = `~/.dsh`). Several profiles and no
+   flag → it asks for `--profile`.
+3. **Contract-scan the stock layout** for the profile's flavour — flat
+   (headless/tui): `@deepseek-ai/dsh-base/cordis.patch.yml` root
+   `compaction-basic`; web: `@deepseek-ai/dsh-web-app` `preset-standard`. A
+   mismatch **fails closed**: nothing is written.
+4. Add `dsh-magic-context` to the profile `package.json`
+   `dsh.profile.bundles` — only when the package is resolvable from that
+   profile (otherwise it refuses).
+5. **Write the managed block** into the profile's own patch layer
+   `$DSH_HOME/profiles/<name>/cordis.patch.yml` (applied after every bundle
+   layer). The block is delimited by
+
+   ```yaml
+   # >>> dsh-magic-context (managed by `dsh-magic-context setup`; do not edit inside) >>>
+   - id: compaction-basic
+     disabled: true
+   - insert:
+       - id: magic-compaction
+         name: dsh-magic-context/compaction
+         config:
+           auto: true
+       - id: magic-agent
+         name: dsh-magic-context/agent
+   # <<< dsh-magic-context <<<
+   ```
+
+   (flat layout; the web layout instead gets a `magic-standard` agent preset
+   with the guarded compaction patch). Re-running replaces the block in place
+   (`mergeManagedBlock`) and keeps every user row outside it; a flow-style
+   non-empty list is refused. `--dry-run` prints the block and writes
+   nothing. Put your own overrides (e.g. `magic-agent` `historian.model`)
+   **outside** the block, as separate `- id: magic-agent` rows.
+6. Create `~/.config/cortexkit/magic-context.jsonc` from defaults once; an
+   existing file is never overwritten (only missing recommended keys are
+   hinted).
+
+`doctor` re-derives the same plan and checks: DSH version == exact
+`DSH_COMPAT_EXPECTED_VERSION` (0.2.1-rc.5); bundle present in the profile;
+**profile wiring** — the managed block exists and equals the rows derived
+from the *current* stock layout (fails on "never set up", "Magic rows present
+but not in the managed block (hand-written layer)" and "managed block is
+stale"); shared DB open classification (schema fence / migration guard /
+fatal) + liveness markers; config load outcome. After a DSH upgrade run
+`doctor`, and if the block is stale just re-run `setup`.
+
+Reference outputs: `docs/dsh/e2e/evidence-0.2.1-rc.5/{setup.txt,doctor.txt,profile-cordis.patch.yml}`.
+The old hand overlay is kept only for diffing:
+`packages/dsh-plugin/scripts/e2e/manual-overlay-headless.yml`.
+
+## Historian configuration
+
+The historian runs as a background pass fired from the pre-step chain when
+context pressure crosses `historian.executeThresholdPercentage` (proactive
+floor = threshold − 2). Config lives on the **`magic-agent` row**
+(cordis plugin config), e.g. in the profile patch layer or a `--patch` file:
+
+```yaml
+- id: magic-agent
+  config:
+    historian:
+      model: opencode-go-big/deepseek-v4.1-flash   # provider/model, large-window route
+      executeThresholdPercentage: 40
+      awaitAtTurnEndMs: 60000                      # optional, headless only
+```
+
+- **`historian.model`** (`provider/model`) routes the compartment call (and
+  the Magic compaction summarize hook) to a dedicated route. Point it at a
+  **large-window** route: the compartment prompt alone is ~60 KB (~18k
+  tokens), so a small-window main route fails with `finish=max-tokens` after
+  ~1 output token (the error message says "point historian.model at a
+  larger-window route"). Without it the current session route is used.
+  Fallback when unset on the row: core config `historian.model` (legacy flat
+  string) or `historian.opencode.model` (string or `{ model }`) — DSH reads
+  the `opencode` harness block because DSH refs are `provider/model`.
+- **Drain** (`agent/historian-drain.ts`). Passes are fire-and-forget, and
+  `dsh headless` exits right after the turn (~5 s shutdown budget), which
+  used to kill the pass mid-flight (`reclaimed compartment lease from dead
+  owner`, no compartment written). Two bounded waits, neither cancels the pass:
+  1. on plugin unload: wait up to `UNLOAD_DRAIN_MS` = 4000 ms (always on);
+  2. at the turn boundary (`agent/turn-stopping`, which DSH awaits): wait up
+     to **`historian.awaitAtTurnEndMs`**, falling back to env
+     **`MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS`**. Config wins over
+     env; non-positive / unset = **off** (default). It also re-evaluates the
+     trigger with the final pressure. Enable it only for headless/one-shot
+     runs — interactive surfaces (web/tui) must not stall the turn end.
+
+## E2E scripts (real DSH, Linux)
+
+`packages/dsh-plugin/scripts/e2e/` (the Linux/0.2 harness; `docs/dsh/e2e/`
+keeps the original Windows/0.1 notes, helpers and the 0.2.1-rc.5 evidence).
+Everything is isolated under `E2E_ROOT` (default `~/w/e2e`): `dsh/` = local
+`@deepseek-ai/dsh` install, `home/` = scratch `DSH_HOME`, `xdg/` = XDG dirs
+(Magic SQLite + user config). Nothing global (`~/.dsh`, `~/.config`) is touched.
+
+```bash
+cd packages/dsh-plugin
+scripts/e2e/bootstrap.sh                 # bun 1.4.4 + filtered workspace install + local DSH (DSH_VERSION, default 0.2.1-rc.5)
+bun run build                            # dist/ (required by install-profile)
+scripts/e2e/install-profile.sh test headless   # profile "test" from the headless template; packs + extracts the plugin,
+                                         # symlinks node_modules/@deepseek-ai to the launcher install (single module
+                                         # instances), copies the ai-tokenizer runtime dep
+source scripts/e2e/env.sh
+node dist/cli.js setup  --profile test   # managed block in $DSH_HOME/profiles/test/cordis.patch.yml
+node dist/cli.js doctor --profile test
+export OPENCODE_API_KEY=...              # real model runs only
+scripts/e2e/run-headless.sh "<task>" [session-id]   # -> $E2E_ROOT/logs/run-<n>.log, prints rc/elapsed
+bun scripts/e2e/inspect-db.ts [db-path]  # harness attribution, compartments, historian_runs, tags
+```
+
+`run-headless.sh` always applies `model-opencode-go.yml` (OpenCode Go:
+`opencode-go` 24k window to create real pressure, `opencode-go-big` 200k
+window as the historian route, `magic-agent.historian.model` set to it).
+Knobs: `PROFILE` (test), `EXTRA_PATCH` (extra `--patch` file),
+`MC_HISTORIAN_THRESHOLD` (default 40), `RUN_TIMEOUT` (240 s),
+`MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS` (default **60000** in this
+script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
+
+## Known limitations
+
+1. **Surface replacement turns assistant content into `user` role.** DSH
+   never lets a plugin rewrite a message in place; tagging/drops are applied
+   as surface-replace ops, and folded tool results *and their tool-call
+   assistant message* land in the following `user` message
+   (`agent/transcript.ts`). This is a DSH design constraint, not a bug to fix
+   in the adapter.
+2. **Nudge U/T are approximations; `hasRecentReduce` is always `false`**
+   (no post-reduce grace). See open point 1 below.
+3. **Protection window counts tags, not a token floor**
+   (`countProtectionWindow`). See open point 2.
+4. **Core borrows the `opencode` model harness** (`historian.opencode`,
+   `dreamer.opencode`); there is no first-class `dsh` harness in core. See
+   open point 3.
+5. **Unpublished rc.5 client packages.** `@deepseek-ai/dsh-client-runtime`
+   (and the other `dsh-client-*` inject targets in `package.json` `dsh.client`)
+   are not published at 0.2.1-rc.5, so the Web panel (`client/client.js`) may
+   fail to load. Server-side features are unaffected.
+6. **Worker tool allowlist not verified against a real DSH runtime** (unit
+   tests only; no production path uses the worker yet). See open point 4.
+7. **No bubblewrap on the verification machine.** The Linux sandbox used for
+   the e2e runs has no `bwrap`, so DSH's sandboxed shell/tool execution was
+   not exercised there; tool calls that depend on the DSH sandbox are
+   unverified on Linux.
+
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
 | module | why it is DSH-only |
@@ -106,7 +279,7 @@ All `@deepseek-ai/*` vocabulary is supposed to live behind
 | `compat/dsh-0.1/subagent.ts` + `agent/worker.ts` | DSH subagent activation (`startActivation`, caller delivery), delegated-policy pinning, tool allowlist on the child scope |
 | `agent/transcript.ts` | maps the DSH event log/surface to core `RawMessage[]` + a recording transcript so core tagging/drops become surface-replace ops (DSH never lets a plugin rewrite messages in place) |
 | `agent/coordinator.ts`, `agent/outbox.ts` | CAS + saga that applies those ops through DSH's surface transaction with crash-safe SQLite outbox; no core equivalent (OpenCode/Pi mutate the request array) |
-| `agent/context-plane.ts`, `agent/knowledge-gate.ts`, `agent/system-guidance.ts`, `agent/auto-search.ts` | DSH "inject, don't rewrite" delivery of m0/m1 knowledge, guidance and hints through `agent.inject` + watermark de-dup |
+| `agent/context-plane.ts`, `agent/knowledge-gate.ts`, `agent/system-guidance.ts`, `agent/auto-search.ts` | DSH "inject, don't rewrite" delivery of m0/m1 knowledge, guidance and the `<ctx-search-hint>`: appended to the **current** pre-step batch (never `agent.inject`, no next-step inbox copy) + watermark de-dup |
 | `agent/historian*.ts`, `agent/recomp.ts`, `agent/dreamer.ts` | drive core historian/recomp/wrapup/dreamer with a DSH LLM client facade (OpenCode-SDK-shaped) and a transcript-backed raw-message provider |
 | `agent/nudge.ts`, `agent/protection.ts` | ctx_reduce nudges and protection window adapted to the data DSH has (see open points) |
 | `agent/tools.ts`, `agent/commands.ts` | register core `ctx_*` tools and `/ctx-*` commands in DSH registries |
