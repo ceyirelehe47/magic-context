@@ -7,19 +7,19 @@
  * recall hint (`buildAutoSearchHint`, core hooks/magic-context/auto-search-hint)
  * and queues it as a Magic-owned injected user message.
  *
- * DSH difference vs Pi/OpenCode: the hint is delivered through `agent.inject()`
- * (a new UserMessage with a `magic-context` plugin source) instead of being
- * appended into the existing user message array — DSH surfaces are append-only
- * for this adapter. Because `agent.inject()` feeds the NEXT pre-step batch, the
- * hint becomes model-visible on the following request of the session (next step
- * of the same turn, or the next turn). The 3s timeout matches OpenCode's
- * auto-search runner so the pre-step path never hangs on embedding providers.
+ * DSH difference vs Pi/OpenCode: the hint is a separate UserMessage with a
+ * `magic-context` plugin source, handed to `deliver()`. The knowledge gate
+ * appends it to the CURRENT pre-step batch (which DSH appends to the surface
+ * for this very request), the same single-delivery path as the knowledge
+ * baseline since 08da8d0. It is NOT queued with `agent.inject()`: that feeds
+ * the next-step inbox, and a non-empty next-step inbox keeps a turn that ended
+ * with plain text from closing (an extra model call on DSH 0.2.1-rc.5). The
+ * 3s timeout matches OpenCode's auto-search runner, bounding the pre-step wait.
  *
  * Per-turn decisions are persisted through the core `auto_search_hint_decisions`
  * session-meta column (appendAutoSearchHintDecision) so a resumed process does
  * not re-evaluate a message that was already decided.
  */
-import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { UserMessage } from "@deepseek-ai/dsh-llm";
 import {
   getVisibleMemoryIds,
@@ -163,21 +163,21 @@ export interface RunAutoSearchHintArgs {
   projectPath: string;
   /** The pre-step message batch (claimed inbox messages). */
   messages: readonly UserMessage[];
-  agent: Pick<Agent, "inject">;
+  /** Delivery sink: the gate appends the hint to the current pre-step batch. */
+  deliver: (message: UserMessage) => void;
   config: AutoSearchConfig;
   log?: (message: string) => void;
 }
 
 /**
  * Evaluate the latest user prompt in the batch and, when the top unified-search
- * hit clears the threshold, queue the `<ctx-search-hint>` block through
- * `agent.inject()`. Failures are retryable (nothing persisted) except the
+ * hit clears the threshold, hand the `<ctx-search-hint>` block to `deliver()`. Failures are retryable (nothing persisted) except the
  * explicit no-hint decisions, matching OpenCode's runner.
  */
 export async function maybeRunAutoSearchHint(
   args: RunAutoSearchHintArgs,
 ): Promise<AutoSearchOutcome> {
-  const { db, sessionId, projectPath, messages, agent, config, log } = args;
+  const { db, sessionId, projectPath, messages, deliver, config, log } = args;
   if (config.enabled === false) return { ok: false, kind: "disabled" };
 
   const found = extractLatestUserPrompt(messages);
@@ -281,7 +281,7 @@ export async function maybeRunAutoSearchHint(
     text: payload,
   });
   if (!outcome.ok) return { ok: true }; // CAS exhausted — do not double-inject
-  agent.inject(magicUserMessage(payload, autoSearchHintSource(userMessageId)));
+  deliver(magicUserMessage(payload, autoSearchHintSource(userMessageId)));
   log?.(
     `[magic-context] auto-search: queued hint for ${userMessageId} (${results.length} fragments, top score ${results[0].score.toFixed(3)})`,
   );

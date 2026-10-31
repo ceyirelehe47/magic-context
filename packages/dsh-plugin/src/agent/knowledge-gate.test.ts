@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,7 @@ import {
 } from "./knowledge-gate";
 import type { PreStepDecision } from "../compat/dsh-0.1/prestep";
 import type { UserMessage } from "../compat/dsh-0.1/session";
+import * as searchModule from "@magic-context/core/features/magic-context/search";
 
 const HOME_HASH = "a1b2c3d4";
 
@@ -236,6 +237,30 @@ describe("agent knowledge gate (m0/m1 first-step injection)", () => {
       expect((payload.messages[2].source as { kind?: string }).kind).toBe("user");
       expect(state.lastInjectedMessages.length).toBe(0);
     } finally {
+      await cleanupDir(dir, db);
+    }
+  });
+
+  it("delivers the auto-search hint in the CURRENT batch, never via agent.inject", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dsh-kg-"));
+    let db: Database | undefined;
+    const spy = spyOn(searchModule, "unifiedSearch").mockImplementation(async () => [
+      { source: "memory", content: "config cache primers live under src/config", score: 0.95, memoryId: 1, category: "PROJECT_RULES", matchType: "fts" },
+    ] as never);
+    try {
+      db = await createTestDb(join(dir, "context.db"));
+      const deps = { ...fakeDeps(db, dir), autoSearch: { enabled: true, scoreThreshold: 0.1, minPromptChars: 5 } };
+      const state = createKnowledgeGateState();
+      const harness = makeFakeAgent(dir);
+      const payload = harness.payload([userMessage("how is the embedding cache configuration structured here?")]);
+      await runKnowledgeGateStep(state, deps, payload, passThroughNext());
+      expect(harness.inboxed.length).toBe(0);
+      const last = payload.messages[payload.messages.length - 1];
+      expect((last.source as { kind?: string; messageId?: string }).kind).toBe("magic-context");
+      const text = last.content[0].type === "text" ? last.content[0].text : "";
+      expect(text).toContain("ctx-search-hint");
+    } finally {
+      spy.mockRestore();
       await cleanupDir(dir, db);
     }
   });

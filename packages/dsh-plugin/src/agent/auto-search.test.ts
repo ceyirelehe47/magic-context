@@ -96,7 +96,7 @@ function mockUnifiedSearch(results: UnifiedSearchResult[] | (() => UnifiedSearch
   return activeSearchSpy;
 }
 
-describe("agent auto-search (<ctx-search-hint> via agent.inject)", () => {
+describe("agent auto-search (<ctx-search-hint> delivered into the current batch)", () => {
   it("queues a hint when the top hit clears the threshold and persists the decision", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dsh-as-"));
     let db: Database | undefined;
@@ -113,7 +113,7 @@ describe("agent auto-search (<ctx-search-hint> via agent.inject)", () => {
         sessionId: SESSION_ID,
         projectPath: "",
         messages: [message],
-        agent,
+        deliver: agent.inject,
         config: makeConfig(),
         log: () => {},
       });
@@ -155,7 +155,7 @@ describe("agent auto-search (<ctx-search-hint> via agent.inject)", () => {
         sessionId: SESSION_ID,
         projectPath: "",
         messages: [message],
-        agent,
+        deliver: agent.inject,
         config: makeConfig(),
         log: () => {},
       });
@@ -186,7 +186,7 @@ describe("agent auto-search (<ctx-search-hint> via agent.inject)", () => {
         sessionId: SESSION_ID,
         projectPath: "",
         messages: [message],
-        agent,
+        deliver: agent.inject,
         config: makeConfig(),
         log: () => {},
       });
@@ -217,7 +217,7 @@ describe("agent auto-search (<ctx-search-hint> via agent.inject)", () => {
         sessionId: SESSION_ID,
         projectPath: "",
         messages: [message],
-        agent,
+        deliver: agent.inject,
         config: makeConfig({ scoreThreshold: 0.5 }),
         log: () => {},
       });
@@ -248,7 +248,7 @@ describe("agent auto-search (<ctx-search-hint> via agent.inject)", () => {
         sessionId: SESSION_ID,
         projectPath: "",
         messages: [message],
-        agent,
+        deliver: agent.inject,
         config: makeConfig(),
         log: () => {},
       });
@@ -260,7 +260,7 @@ describe("agent auto-search (<ctx-search-hint> via agent.inject)", () => {
         sessionId: SESSION_ID,
         projectPath: "",
         messages: [message],
-        agent,
+        deliver: agent.inject,
         config: makeConfig(),
         log: () => {},
       });

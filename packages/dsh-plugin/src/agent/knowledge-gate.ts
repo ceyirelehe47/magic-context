@@ -15,8 +15,8 @@
  *      defer pass, replays the persisted bytes — ONCE per session per surface
  *      generation (in-memory Map<sessionId, generation>) with a content
  *      watermark de-dup against the visible surface (resume safety);
- *   4. fires the auto-search hint evaluation for the incoming user message
- *      (fire-and-forget, see auto-search.ts);
+ *   4. evaluates the auto-search hint for the incoming user message and
+ *      appends it to the current batch (bounded wait, see auto-search.ts);
  *   5. passes the pre-step decision through untouched (`await next()`).
  *
  * Injection timing (DSH 0.2.1-rc.5): the baseline is prepended to the CURRENT
@@ -498,21 +498,29 @@ export async function runKnowledgeGateStep(
         (payload.messages as unknown[]).unshift(...injected);
       }
 
-      // Auto-search hint on the incoming user message — fire-and-forget so the
-      // pre-step chain is never delayed by search latency (3s cap inside).
-      void maybeRunAutoSearchHint({
-        db,
-        sessionId: magicSessionId,
-        projectPath: projectPath ?? "",
-        messages: payload.messages,
-        agent,
-        config: deps.autoSearch,
-        log: deps.log,
-      }).catch((error: unknown) => {
+      // Auto-search hint on the incoming user message, delivered in THIS
+      // batch (same single-delivery path as the baseline above; never
+      // agent.inject — see auto-search.ts). Bounded by the 3s search cap;
+      // batches without a fresh user prompt return immediately.
+      const hints: unknown[] = [];
+      try {
+        await maybeRunAutoSearchHint({
+          db,
+          sessionId: magicSessionId,
+          projectPath: projectPath ?? "",
+          messages: payload.messages,
+          deliver: (message) => {
+            hints.push(message);
+          },
+          config: deps.autoSearch,
+          log: deps.log,
+        });
+      } catch (error) {
         deps.log?.(
           `[magic-context] auto-search crashed (fail-open): ${error instanceof Error ? error.message : String(error)}`,
         );
-      });
+      }
+      if (hints.length > 0) (payload.messages as unknown[]).push(...hints);
     } else {
       deps.log?.(
         `[magic-context] knowledge gate skipped: storage bootstrap ${bootstrap.kind} (${String(bootstrap.detail)})`,
