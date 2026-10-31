@@ -337,6 +337,14 @@ function toolResultParts(
 
   const fragments: string[] = [];
   for (const block of content) {
+    // DSH 0.2 (`createToolResultMessage`): the tool message's content is the
+    // raw result blocks themselves (`{type:"text"}`), not a `tool-result`
+    // wrapper. Without this the transcript saw an EMPTY output for every 0.2
+    // tool result (token_count≈0, nothing reclaimable for drops/nudges).
+    if (isRecord(block) && block.type === "text" && typeof block.text === "string") {
+      fragments.push(block.text);
+      continue;
+    }
     if (!isRecord(block) || block.type !== "tool-result") continue;
     const inner = block.content;
     if (!Array.isArray(inner)) continue;

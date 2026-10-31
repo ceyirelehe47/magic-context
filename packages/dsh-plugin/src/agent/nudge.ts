@@ -11,10 +11,17 @@
  * Pi↔DSH session pair shares cadence.
  *
  * Core ≥0.49 drives the decisions from a tail-hygiene baseline (U = undropped
- * reclaimable tool-output tokens, T = live tail tokens) computed by the
- * OpenCode/Pi transform's tail walk. DSH has no such walk; U/T are approximated
- * from the persisted tag aggregate (U = active tool output below the protection
- * cutoff, T = all active conversation + tool tokens) with zero turn deltas.
+ * reclaimable tokens, T = live tail tokens). DSH now feeds the SAME core walk
+ * (`refreshTailHygieneBaseline` → `measureTailHygiene`) with the DSH transcript
+ * view (OpenCode-shaped `RawMessage` parts), the token-floor protection window
+ * and the queued-drop set, so U/T, the turn deltas, the reclaimable-output
+ * count and the post-reduce grace are real measurements — no tag-aggregate
+ * approximation. A surface rewrite is the DSH cache bust (baseline refreeze);
+ * other passes extend the frozen baseline with turn deltas, exactly as core.
+ *
+ * `hasRecentReduce` (core `reducedSinceRefresh`): true when a `ctx_reduce`
+ * call appeared in the transcript, or a drop was queued in `pending_ops`,
+ * after the baseline was last refrozen.
  */
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import {
@@ -22,11 +29,19 @@ import {
   buildChannel2Reminder,
   decideChannel1,
   evaluateChannel2,
+  currentReclaimableToolOutputCount,
   type ToolReclaimHint,
 } from "@magic-context/core/hooks/magic-context/ctx-reduce-nudge";
-import { getActiveTagTokenAggregate } from "@magic-context/core/features/magic-context/storage-tags";
-import { getTagsBySession } from "@magic-context/core/features/magic-context/storage";
+import { getPendingOps, getTagsBySession } from "@magic-context/core/features/magic-context/storage";
+import { sessionDecisionCalibration } from "@magic-context/core/features/magic-context/session-decision-calibration";
 import {
+  effectiveTailHygiene,
+  refreshTailHygieneBaseline,
+  type TailHygieneBaseline,
+} from "@magic-context/core/hooks/magic-context/tail-hygiene-walk";
+import type { MessageLike } from "@magic-context/core/hooks/magic-context/tag-messages";
+import {
+  captureChannel1PostReduceGraceBaseline,
   casChannel2NudgeState,
   getChannel1NudgeState,
   getChannel2NudgeState,
@@ -44,6 +59,11 @@ import {
   type MagicMessageSource,
 } from "../compat/dsh-0.1/session";
 import { observedProtectionWindow, type DshProtectionOptions } from "./protection";
+import {
+  isKnowledgeBaselineMessage,
+  isSkillCatalogBaselineMessage,
+  readDshTranscript,
+} from "./transcript";
 
 /** Scan the session event log for the live context window + last input usage. */
 export function scanSessionMetrics(agent: Agent): {
@@ -133,14 +153,87 @@ export interface NudgeOptions {
   protectedTags?: number;
   /** Token-floor protection inputs (core protection window). */
   protection?: DshProtectionOptions;
-  /** True on a pass that rewrote the surface (DSH cache bust). */
+  /** True on a pass that rewrote the surface (DSH cache bust → refreeze). */
   cacheBusting?: boolean;
-  /** True when this pass applied queued agent drops. */
+  /** True when this pass applied queued agent drops (core suppression). */
   agentDropsAppliedThisPass?: boolean;
   /** Override context window (default: scan the session events). */
   contextWindow?: number;
+  /** Transcript override (tests); default: read the DSH transcript view. */
+  messages?: readonly MessageLike[];
+  /** Injectable clock (tests). */
+  now?: () => number;
   /** Logger sink (optional). */
   log?: (message: string) => void;
+}
+
+/** Per-session frozen baseline + the reduce evidence seen at the last refreeze. */
+interface DshNudgeBaselineState {
+  baseline: TailHygieneBaseline;
+  reduceCallIdsAtRefresh: ReadonlySet<string>;
+  refreshedAt: number;
+}
+
+const baselineBySession = new Map<string, DshNudgeBaselineState>();
+
+/** Test seam: forget per-session baselines (process-local state). */
+export function resetDshNudgeStateForTest(): void {
+  baselineBySession.clear();
+}
+
+/** Read-only view of the current baseline (diagnostics/tests). */
+export function getDshNudgeBaseline(sessionId: string): TailHygieneBaseline | undefined {
+  return baselineBySession.get(sessionId)?.baseline;
+}
+
+/** Transcript messages the core walk should measure (Magic/skill baselines excluded). */
+export function nudgeMeasurementMessages(agent: Agent, sessionId: string): MessageLike[] {
+  const session = agent.session as unknown as { surface?: { nodes?: number[] } };
+  const view = readDshTranscript({
+    session: {
+      events: sessionEvents(agent.session),
+      surface: session.surface as never,
+      header: {},
+    },
+    canonicalSessionId: sessionId,
+  });
+  return view.messages
+    .filter((message) => !isKnowledgeBaselineMessage(message) && !isSkillCatalogBaselineMessage(message))
+    .map((message) => ({ info: { id: message.id, role: message.role }, parts: message.parts }));
+}
+
+/** ctx_reduce call ids present in the transcript (DSH `{type:"tool", tool, callID}` parts). */
+export function ctxReduceCallIds(messages: readonly MessageLike[]): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part === null || typeof part !== "object") continue;
+      const p = part as { type?: unknown; tool?: unknown; callID?: unknown };
+      if (p.type === "tool" && p.tool === "ctx_reduce" && typeof p.callID === "string") ids.add(p.callID);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Core `reducedSinceRefresh` for DSH: a ctx_reduce call or a queued drop that
+ * the frozen baseline has not yet absorbed.
+ */
+export function computeHasRecentReduce(input: {
+  readonly currentReduceCallIds: ReadonlySet<string>;
+  readonly reduceCallIdsAtRefresh: ReadonlySet<string>;
+  readonly pendingDropQueuedAt: readonly number[];
+  readonly refreshedAt: number;
+}): boolean {
+  for (const id of input.currentReduceCallIds) {
+    if (!input.reduceCallIdsAtRefresh.has(id)) return true;
+  }
+  return input.pendingDropQueuedAt.some((queuedAt) => queuedAt > input.refreshedAt);
+}
+
+/** Oldest active, unprotected tool tags (core getOldestActiveUnprotectedToolTags shape). */
+function reclaimHints(tags: readonly TagEntry[], protectedSet: ReadonlySet<number>): ToolReclaimHint[] {
+  return oldestReclaimableToolTags(tags, protectedSet);
 }
 
 /**
@@ -157,38 +250,71 @@ export function maybeNudgeChannels(
     const tags = getTagsBySession(db, sessionId);
     // No tool output at all → nothing reclaimable; leave session_meta untouched.
     if (!tags.some((t) => t.type === "tool")) return;
+    const now = opts.now?.() ?? Date.now();
     const protection = observedProtectionWindow(db, sessionId, {
       contextWindow: opts.contextWindow ?? scanSessionMetrics(agent).contextWindow,
       ...opts.protection,
     });
-    const agg = getActiveTagTokenAggregate(db, sessionId, protection.protectedCutoff);
-    const reclaimableCount = tags.filter(
-      (t) =>
-        t.type === "tool" &&
-        t.status === "active" &&
-        (protection.protectedCutoff === null || t.tagNumber < protection.protectedCutoff),
-    ).length;
-    // Tag-aggregate approximation of the core tail-hygiene baseline (see header).
-    const baselineU = Math.max(0, agg.toolOutput ?? 0);
-    const baselineT = Math.max(baselineU, (agg.conversation ?? 0) + (agg.toolCall ?? 0));
+    const pendingDrops = getPendingOps(db, sessionId).filter((op) => op.operation === "drop");
+    const pendingDropTagNumbers = new Set(pendingDrops.map((op) => op.tagId));
+    const messages = opts.messages ?? nudgeMeasurementMessages(agent, sessionId);
+    const currentReduceCallIds = ctxReduceCallIds(messages);
+
+    const previous = baselineBySession.get(sessionId);
+    const cacheBusting = opts.cacheBusting === true || previous === undefined;
+    const calibration = sessionDecisionCalibration(db, sessionId);
+    const baseline = refreshTailHygieneBaseline({
+      messages,
+      tags,
+      protectedTagNumbers: protection.protectedTagNumbers,
+      pendingDropTagNumbers,
+      cacheBusting,
+      previous: previous?.baseline,
+      calibration: { toolsRatio: calibration.toolsRatio, proseRatio: calibration.proseRatio },
+      now,
+    });
+    const refreshed = cacheBusting || baseline.baselineGeneration !== previous?.baseline.baselineGeneration;
+    const state: DshNudgeBaselineState = refreshed
+      ? { baseline, reduceCallIdsAtRefresh: currentReduceCallIds, refreshedAt: now }
+      : { ...previous!, baseline };
+    baselineBySession.set(sessionId, state);
+
+    const hasRecentReduce = refreshed
+      ? false
+      : computeHasRecentReduce({
+          currentReduceCallIds,
+          reduceCallIdsAtRefresh: state.reduceCallIdsAtRefresh,
+          pendingDropQueuedAt: pendingDrops.map((op) => op.queuedAt),
+          refreshedAt: state.refreshedAt,
+        });
+
+    // Post-reduce grace starts from the first measured U that already excludes
+    // the queued drops (core captureChannel1PostReduceGraceBaseline).
+    const effective = effectiveTailHygiene(baseline);
+    const c1 =
+      baseline.evaluable && !baseline.generationInvalidated && !hasRecentReduce
+        ? captureChannel1PostReduceGraceBaseline(db, sessionId, effective.u)
+        : getChannel1NudgeState(db, sessionId);
+    const reclaimableCount = currentReclaimableToolOutputCount(baseline);
 
     // ── Channel 1: in-turn gentle/firm/urgent reminder ──
-    const c1 = getChannel1NudgeState(db, sessionId);
     const currentRealUserTurnCount = countRealUserTurns(agent);
     const decision = decideChannel1({
-      baselineU,
-      baselineT,
-      turnDeltaU: 0,
-      turnDeltaT: 0,
+      baselineU: baseline.baselineU,
+      baselineT: baseline.baselineT,
+      turnDeltaU: baseline.turnDeltaU,
+      turnDeltaT: baseline.turnDeltaT,
       lastNudgeUndropped: getLastNudgeUndropped(db, sessionId),
       lastNudgeLevel: c1.level,
       lastFireOrdinal: c1.ordinal,
       currentRealUserTurnCount,
-      hasRecentReduce: false,
+      hasRecentReduce,
+      agentDropsAppliedThisPass: opts.agentDropsAppliedThisPass === true,
       postReduceGracePending: c1.postReduceGracePending,
       postReduceGraceBaselineU: c1.postReduceGraceBaselineU,
       postReduceGracePreLevel: c1.postReduceGracePreLevel,
-      evaluable: true,
+      evaluable: baseline.evaluable,
+      generationInvalidated: baseline.generationInvalidated,
     });
     setLastNudgeUndropped(db, sessionId, decision.nextLastNudge);
     const nextState = {
@@ -203,7 +329,7 @@ export function maybeNudgeChannels(
     }
     setChannel1NudgeState(db, sessionId, nextState);
     if (decision.fire) {
-      const hint = oldestReclaimableToolTags(tags, protection.protectedTagNumbers);
+      const hint = reclaimHints(tags, protection.protectedTagNumbers);
       const reminder = buildChannel1Reminder(
         decision.level,
         decision.undroppedTokens,
@@ -212,30 +338,25 @@ export function maybeNudgeChannels(
         decision.sticky,
       );
       injectNudge(agent, sessionId, "channel1", reminder);
-      opts.log?.(`[magic-context] channel1 nudge fired: level=${decision.level} reclaimable~${Math.round(decision.undroppedTokens / 1000)}k`);
+      opts.log?.(
+        `[magic-context] channel1 nudge fired: level=${decision.level} U=${decision.undroppedTokens} T=${decision.tailTokens} reason=${decision.verdictReason}`,
+      );
     }
 
     // ── Channel 2: ceiling escalation (one-shot per session, CAS lease) ──
-    const c2 = evaluateChannel2({
-      baselineU,
-      baselineT,
-      turnDeltaU: 0,
-      turnDeltaT: 0,
-      evaluable: true,
-      generationInvalidated: false,
-    });
-    if (c2.shouldTrigger && getChannel2NudgeState(db, sessionId) === "") {
+    const c2 = evaluateChannel2(baseline);
+    if (c2.shouldTrigger && !hasRecentReduce && getChannel2NudgeState(db, sessionId) === "") {
       // Cross-process one-shot: only the process that wins "" → delivered injects.
       if (casChannel2NudgeState(db, sessionId, "", "delivered")) {
-        const hint = oldestReclaimableToolTags(tags, protection.protectedTagNumbers);
+        const hint = reclaimHints(tags, protection.protectedTagNumbers);
         const reminder = buildChannel2Reminder(c2.reclaimableTokens, reclaimableCount, hint);
         injectNudge(agent, sessionId, "channel2", reminder);
         opts.log?.(`[magic-context] channel2 nudge delivered: reclaimable~${Math.round(c2.reclaimableTokens / 1000)}k`);
       }
     }
     void opts.threshold;
-    void opts.contextWindow;
-  } catch {
+  } catch (error) {
     // Nudges must never break the pre-step chain (fail-open).
+    opts.log?.(`[magic-context] nudge evaluation failed (fail-open): ${error instanceof Error ? error.message : String(error)}`);
   }
 }

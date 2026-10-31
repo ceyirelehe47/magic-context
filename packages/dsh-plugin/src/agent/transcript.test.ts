@@ -100,6 +100,16 @@ async function cleanupDir(dir: string, db?: Database): Promise<void> {
 }
 
 describe("transcript mapping (DSH events → RawMessage[])", () => {
+  it("reads DSH 0.2 tool-result text blocks as the tool output (regression: empty outputs)", () => {
+    const session = buildSession();
+    const messages = convertDshEventsToRawMessages(session.snapshotEvents());
+    const outputs = messages.flatMap((m) =>
+      m.parts.filter((p) => isRecord(p) && p.type === "tool" && isRecord(p.state) && "output" in p.state),
+    ) as Array<{ callID: string; state: { output: string } }>;
+    expect(outputs.find((p) => p.callID === "call-1")?.state.output).toBe("file contents");
+    expect(outputs.find((p) => p.callID === "call-2")?.state.output).toBe("tail output");
+  });
+
   it("folds tool results AND their tool-call assistant into the following user message", () => {
     const session = buildSession();
     const messages = convertDshEventsToRawMessages(session.snapshotEvents());
