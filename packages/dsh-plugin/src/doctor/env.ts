@@ -6,10 +6,11 @@
  * parsing). Path semantics follow dsh-reference:
  *
  *   - DSH home: `$DSH_HOME` (empty = unset) → `~/.dsh`            (H.3, I.1)
- *   - system standard preset: `<dsh install>/config/agent-presets/standard/
- *     agent.cordis.yml`; the install is found with the profile/install double
- *     anchor from A.1 (install first, then profile dirs), falling back to the
- *     `dsh` executable on PATH.
+ *   - DSH install: the `@deepseek-ai/dsh` launcher package (`--dsh-install`,
+ *     `$DSH_INSTALL_DIR`, the `dsh` executable on PATH, profile dirs, global
+ *     roots). DSH 0.2 ships no `config/agent-presets` tree: bundle patch files
+ *     are resolved from the launcher's dependency tree instead.
+ *   - profile patch layer: `$DSH_HOME/profiles/<name>/cordis.patch.yml`.
  *   - user config: `~/.config/cortexkit/magic-context.jsonc`       (§2.1)
  *   - storage dir: `~/.local/share/cortexkit/magic-context/`       (§2.1)
  */
@@ -37,14 +38,6 @@ export const DSH_COMPAT_EXPECTED_VERSION = "0.2.1-rc.5";
 /** Installed-package identity of the DSH runtime. */
 export const DSH_PACKAGE = "@deepseek-ai/dsh";
 
-/** System preset directory inside a dsh install. */
-export const STOCK_PRESET_REL = join(
-  "config",
-  "agent-presets",
-  "standard",
-  "agent.cordis.yml",
-);
-
 /**
  * Resolve the DSH home directory. Priority: `$DSH_HOME` (empty string counts
  * as unset) → `~/.dsh` (dsh-home-paths semantics).
@@ -55,11 +48,15 @@ export function resolveDshHome(env: NodeJS.ProcessEnv = process.env): string {
   return join(homedir(), ".dsh");
 }
 
+export type DshInstallSource = "flag" | "env" | "launcher" | "profiles" | "global";
+
 export interface DshInstallLocateResult {
   /** Package root of the resolved `@deepseek-ai/dsh` install (if found). */
   readonly dshInstallDir?: string;
-  /** Absolute path of the system standard `agent.cordis.yml` (if found). */
-  readonly stockPresetPath?: string;
+  /** Installed launcher version (package.json `version`). */
+  readonly version?: string;
+  /** How the install was found. */
+  readonly source?: DshInstallSource;
   /** Every candidate probed, for the fail diagnosis. */
   readonly tried: readonly string[];
 }
@@ -68,63 +65,115 @@ export interface DshInstallLocateOptions {
   readonly dshHome: string;
   /** Explicit install dir override (tests / `--dsh-install`). */
   readonly dshInstallDir?: string;
-  /** Explicit stock preset override (tests / `--stock-preset`). */
-  readonly stockPresetPath?: string;
   readonly env?: NodeJS.ProcessEnv;
 }
 
 /**
- * Locate the DSH install and the system standard preset.
- *
- * Anchors (dsh-reference §A.1 "模块解析双锚点"): the install is resolved from
- * the dsh install first, then from profile directories. Concrete candidate
- * order:
- *   1. explicit overrides (`--dsh-install` / `--stock-preset`, env
- *      `DSH_INSTALL_DIR` as an escape hatch);
- *   2. the home-level fallback closure `$DSH_HOME/profiles/node_modules/…`
- *      (healProfilesModuleFallback);
- *   3. every `$DSH_HOME/profiles/<name>/node_modules/…` (profile anchor);
- *   4. the `dsh` executable on PATH, walked up to its package root.
+ * Locate the DSH install the user's `dsh` launcher runs from (DSH 0.2: the
+ * launcher package `@deepseek-ai/dsh` carries every bundle as a dependency;
+ * there is no `config/agent-presets` tree any more). Candidate order:
+ *   1. `--dsh-install <dir>`, then env `DSH_INSTALL_DIR`;
+ *   2. the `dsh` executable on PATH, realpath'd and walked up to its package
+ *      root (the launcher anchor — what `dsh` actually boots);
+ *   3. `$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh` and every
+ *      `$DSH_HOME/profiles/<name>/node_modules/@deepseek-ai/dsh`;
+ *   4. common global roots (bun global, npm prefix dirs).
  */
 export function locateDshInstall(
   opts: DshInstallLocateOptions,
 ): DshInstallLocateResult {
-  if (opts.stockPresetPath !== undefined) {
-    return { stockPresetPath: opts.stockPresetPath, tried: [opts.stockPresetPath] };
-  }
   const env = opts.env ?? process.env;
   const tried: string[] = [];
-
-  const installCandidates: string[] = [];
-  if (opts.dshInstallDir !== undefined) installCandidates.push(opts.dshInstallDir);
+  const candidates: Array<[string, DshInstallSource]> = [];
+  if (opts.dshInstallDir !== undefined) candidates.push([opts.dshInstallDir, "flag"]);
   const envInstall = env.DSH_INSTALL_DIR;
-  if (envInstall !== undefined && envInstall.trim() !== "") {
-    installCandidates.push(envInstall);
-  }
-  installCandidates.push(join(opts.dshHome, "profiles", "node_modules", DSH_PACKAGE));
+  if (envInstall !== undefined && envInstall.trim() !== "") candidates.push([envInstall, "env"]);
+  for (const dir of findDshInstallOnPath(env)) candidates.push([dir, "launcher"]);
+  candidates.push([join(opts.dshHome, "profiles", "node_modules", DSH_PACKAGE), "profiles"]);
   try {
     const profilesRoot = join(opts.dshHome, "profiles");
     if (existsSync(profilesRoot)) {
       for (const entry of readdirSync(profilesRoot, { withFileTypes: true })) {
         if (!entry.isDirectory() || entry.name === "node_modules") continue;
-        installCandidates.push(
-          join(profilesRoot, entry.name, "node_modules", DSH_PACKAGE),
-        );
+        candidates.push([join(profilesRoot, entry.name, "node_modules", DSH_PACKAGE), "profiles"]);
       }
     }
   } catch {
-    // Unreadable profiles dir — PATH fallback still applies.
+    // Unreadable profiles dir — the global fallbacks still apply.
   }
-  installCandidates.push(...findDshInstallOnPath(env));
-
-  for (const candidate of installCandidates) {
+  const home = env.HOME ?? homedir();
+  for (const root of [
+    join(home, ".bun", "install", "global", "node_modules"),
+    join(home, ".npm-global", "lib", "node_modules"),
+    "/usr/local/lib/node_modules",
+    "/usr/lib/node_modules",
+    "/opt/homebrew/lib/node_modules",
+  ]) {
+    candidates.push([join(root, DSH_PACKAGE), "global"]);
+  }
+  for (const [candidate, source] of candidates) {
     tried.push(candidate);
-    const stock = join(candidate, STOCK_PRESET_REL);
-    if (isDshInstallRoot(candidate) && existsSync(stock)) {
-      return { dshInstallDir: candidate, stockPresetPath: stock, tried };
+    if (!isDshInstallRoot(candidate)) continue;
+    let dir = candidate;
+    try {
+      dir = realpathSync(candidate);
+    } catch {
+      // keep the given path
     }
+    return { dshInstallDir: dir, version: readPackageVersion(dir), source, tried };
   }
   return { tried };
+}
+
+/** `version` of the package.json in `dir` (undefined when unreadable). */
+export function readPackageVersion(dir: string): string | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Resolve the package dir of one `@deepseek-ai/*` bundle as the launcher
+ * sees it: nested under the install, or hoisted next to it.
+ */
+export function resolveDshPackageDir(dshInstallDir: string, packageName: string): string | undefined {
+  const scoped = packageName.split("/");
+  const candidates = [
+    join(dshInstallDir, "node_modules", ...scoped),
+    // hoisted: <root>/node_modules/@deepseek-ai/dsh → <root>/node_modules/@deepseek-ai/<x>
+    join(dirname(dirname(dshInstallDir)), ...scoped),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(join(candidate, "package.json"))) return candidate;
+  }
+  return undefined;
+}
+
+/** Bundle patch files of one package (`package.json` `dsh.bundle.patch`). */
+export function bundlePatchFiles(packageDir: string): string[] {
+  try {
+    const parsed = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as {
+      dsh?: { bundle?: { patch?: unknown } };
+    };
+    const raw = parsed.dsh?.bundle?.patch;
+    const list = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw.map(String) : [];
+    return list.map((rel) => join(packageDir, rel));
+  } catch {
+    return [];
+  }
+}
+
+/** `$DSH_HOME/profiles/<name>` */
+export function profileDir(dshHome: string, profile: string): string {
+  return join(dshHome, "profiles", profile);
+}
+
+/** `$DSH_HOME/profiles/<name>/cordis.patch.yml` (the user patch layer). */
+export function profilePatchPath(dshHome: string, profile: string): string {
+  return join(profileDir(dshHome, profile), "cordis.patch.yml");
 }
 
 /** Whether a directory is the `@deepseek-ai/dsh` package root. */
@@ -139,23 +188,23 @@ export function isDshInstallRoot(dir: string): boolean {
   }
 }
 
-/** PATH lookup for the `dsh` executable, resolved to its package root. */
+/** PATH lookup for the `dsh` launcher, resolved to its package root. */
 function findDshInstallOnPath(env: NodeJS.ProcessEnv): string[] {
   const pathVar = env.PATH ?? "";
-  const exts = process.platform === "win32"
-    ? ["", ".exe", ".cmd", ".bat", ".ps1"]
-    : [""];
-  for (const segment of pathVar.split(";").concat(process.platform === "win32" ? [] : pathVar.split(":"))) {
+  const sep = process.platform === "win32" ? ";" : ":";
+  const exts = process.platform === "win32" ? ["", ".exe", ".cmd", ".bat", ".ps1"] : [""];
+  const found: string[] = [];
+  for (const segment of pathVar.split(sep)) {
     const dir = segment.trim();
     if (dir === "") continue;
     for (const ext of exts) {
       const bin = join(dir, `dsh${ext}`);
       if (!existsSync(bin)) continue;
       const resolved = resolvePackageRoot(bin);
-      if (resolved !== undefined) return [resolved];
+      if (resolved !== undefined && !found.includes(resolved)) found.push(resolved);
     }
   }
-  return [];
+  return found;
 }
 
 /** Walk up from an executable to the nearest `@deepseek-ai/dsh` package root. */
