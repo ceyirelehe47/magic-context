@@ -1,0 +1,13 @@
+# Reference only: the hand-written overlay used before `setup` learned the 0.2
+# layout. `dsh-magic-context setup --profile <p>` now writes the equivalent
+# rows into the profile's cordis.patch.yml (managed block), so this is not
+# needed any more. Kept for diffing against setup output.
+- id: compaction-basic
+  disabled: true
+- insert:
+    - id: magic-compaction
+      name: 'dsh-magic-context/compaction'
+      config:
+        auto: true
+    - id: magic-agent
+      name: 'dsh-magic-context/agent'
