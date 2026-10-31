@@ -62,7 +62,7 @@ export function trackSessionProjectOnce(
 }
 
 /**
- * Register session→project tracking on `agent/session-start`. The listener
+ * Register session→project tracking on `agent/created` (DSH 0.1: `agent/session-start`). The listener
  * awaits the host bootstrap (fire-and-forget) and records the binding once per
  * session. `clear`/`compact` re-fires are no-ops via the per-session Set.
  */
@@ -72,10 +72,12 @@ export function registerSessionProjectTracking(
 ): void {
   if (deps.config?.enabled === false) return;
   const trackedSessions = new Set<string>();
-  ctx.on(
-    "agent/session-start",
-    async (payload: { agent: Agent }) => {
-      const { agent } = payload;
+  // DSH 0.2: `agent/session-start` was folded into `agent/created` (serial,
+  // awaited before creation resolves). Keep the listener non-blocking so the
+  // bootstrap wait never delays agent creation.
+  ctx.on("agent/created", (payload: { agent: Agent }) => {
+    const { agent } = payload;
+    void (async () => {
       try {
         // Recursion isolation (PLAN §9): child sessions are not attributed to
         // projects (the parent owns the workspace row).
@@ -90,8 +92,9 @@ export function registerSessionProjectTracking(
           `[magic-context] session-project tracking failed (fail-open): ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-    },
-  );
+    })();
+    return undefined;
+  });
 }
 
 /** Resolve the per-session workspace directory (header cwd wins). */

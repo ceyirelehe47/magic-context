@@ -17,7 +17,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { LlmRuntime } from "@deepseek-ai/dsh-llm";
-import { createUserMessage } from "../compat/dsh-0.1/session";
+import { createUserMessage, promptTokensOf, sessionEvents } from "../compat/dsh-0.1/session";
 import type { SummarizeHook } from "../compat/dsh-0.1/compaction";
 import type { MagicContextHostService, MagicSummarizeHook } from "../index";
 import type { RawMessageProvider } from "@magic-context/core/hooks/magic-context/read-session-chunk";
@@ -59,7 +59,7 @@ export function currentModel(ctx: Context): string {
  * Fallback (DSH 0.1.0-rc.6 environments where the token-meter projection
  * units never register — observed on the headless profile AND the live web:
  * `snapshot().values` comes back empty): scan the session event log for the
- * last `request/context` window and the accumulated `assistant/message`
+ * last `request/context` window and the LAST `assistant/message` call's
  * usage, mirroring the token-meter's `pressureFrom` semantics
  * (input + cacheRead + cacheWrite). This restores the historian pressure
  * trigger where the projection path yields nothing.
@@ -75,7 +75,7 @@ export function readContextPressure(ctx: Context): (agent: Agent) => { projected
     if (pressure !== undefined) return pressure;
     // Fallback: derive the pressure from the session's own event log.
     try {
-      const events = (agent.session as { events?: readonly unknown[] }).events ?? [];
+      const events = sessionEvents(agent.session);
       let contextWindow: number | undefined;
       let projectedTokens = 0;
       for (const event of events) {
@@ -87,12 +87,10 @@ export function readContextPressure(ctx: Context): (agent: Agent) => { projected
           continue;
         }
         if (e.type === "assistant/message") {
-          const usage = (e.data as { usage?: unknown } | undefined)?.usage as
-            | { inputTokens?: unknown; cacheReadTokens?: unknown; cacheWriteTokens?: unknown }
-            | undefined;
-          if (usage === undefined || typeof usage !== "object") continue;
-          const add = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
-          projectedTokens += add(usage.inputTokens) + add(usage.cacheReadTokens) + add(usage.cacheWriteTokens);
+          // Pressure is the LAST call's prompt (input + cacheRead + cacheWrite);
+          // summing across calls over-counts (each call re-sends the prompt).
+          const prompt = promptTokensOf((e.data as { usage?: unknown } | undefined)?.usage);
+          if (prompt !== undefined) projectedTokens = prompt;
         }
       }
       if (typeof contextWindow !== "number" || contextWindow <= 0) return undefined;
@@ -144,7 +142,7 @@ export function createLlmSummarizeCall(
     });
     const user = createUserMessage({
       content: [{ type: "text", text: prompt }],
-      source: { kind: "plugin", plugin: "magic-context" },
+      source: { kind: "magic-context", plugin: "magic-context" },
     });
     let text = "";
     let failed: string | undefined;
@@ -183,7 +181,7 @@ export function transcriptRawMessageProvider(
 ): RawMessageProvider {
   const view = readDshTranscript({
     session: {
-      events: agent.session.events,
+      events: sessionEvents(agent.session),
       surface: agent.session.surface,
       header: { cwd: agent.session.header.cwd },
     },

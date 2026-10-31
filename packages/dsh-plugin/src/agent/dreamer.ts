@@ -89,7 +89,15 @@ const TOOL_REQUIRING_DREAM_AGENTS = new Set([
 ]);
 
 /** Magic-owned message source marker for dreamer LLM turns. */
-const DREAM_SOURCE = { kind: "plugin", plugin: "magic-context" } as const;
+/**
+ * Core ≥0.49 resolves dreamer task models per harness block
+ * (`dreamer.opencode` / `dreamer.pi` / `dreamer.omp`). DSH model refs are
+ * `provider/model` strings like OpenCode's, so the DSH adapter reads the
+ * standard `opencode` block (and its `variant` qualifier).
+ */
+const DSH_DREAMER_MODEL_HARNESS = "opencode" as const;
+
+const DREAM_SOURCE = { kind: "magic-context", plugin: "magic-context" } as const;
 
 /** Wiring deps for {@link registerDshDreamer}. */
 export interface DreamerWiringDeps {
@@ -445,7 +453,7 @@ async function runDreamTick(
       projectIdentity,
       // Full canonical set (disabled tasks get their rows reconciled to
       // next_due_at NULL by the scheduler, so config stays authoritative).
-      tasks: buildDreamTaskRuntimeConfigs(state.coreConfig),
+      tasks: buildDreamTaskRuntimeConfigs(state.coreConfig, DSH_DREAMER_MODEL_HARNESS),
       executor,
     });
     if (ran > 0) log(`[dreamer] timer tick ${projectIdentity} — ran ${ran} task(s)`);
@@ -582,7 +590,7 @@ export function dshDreamSeams(
   const state = dreamerRuntime.get(ctx) ?? defaultState();
   const facade = (state.facade ??= createDshDreamClient(ctx, deps));
   const executor = buildDreamExecutor(facade, state);
-  const tasks = buildDreamTaskRuntimeConfigs(state.coreConfig).filter(
+  const tasks = buildDreamTaskRuntimeConfigs(state.coreConfig, DSH_DREAMER_MODEL_HARNESS).filter(
     (task) => task.schedule.trim() !== "",
   );
   const runnable = state.enabled && !readDreamerCompactionOff(deps);

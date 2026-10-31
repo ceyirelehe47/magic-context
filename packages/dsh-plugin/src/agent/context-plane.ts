@@ -13,6 +13,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { DshStorageBootstrap } from "../host/bootstrap";
+import { isMagicSource, sessionEvents } from "../compat/dsh-0.1/session";
 import {
   registerPreStepGate,
   type PreStepDecision,
@@ -130,7 +131,7 @@ function sessionLogView(
   agent: Agent,
   canonicalSessionId: string,
 ): { hasSeq(seq: number): boolean; generation: number } {
-  const events = agent.session.events;
+  const events = sessionEvents(agent.session);
   const seqSet = new Set<number>();
   for (const event of events) {
     if (event !== null && typeof event === "object") {
@@ -154,13 +155,15 @@ function sessionLogView(
 const COMMIT_MENTION_RE = /(?:^|[\s(`])[0-9a-f]{7,40}(?:$|[\s`)])/i;
 export function recentCommitClusterCount(agent: Agent): number {
   try {
-    const events = (agent.session as { events?: readonly unknown[] }).events ?? [];
+    const events = sessionEvents(agent.session);
     const texts: string[] = [];
     for (const event of events) {
       if (event === null || typeof event !== "object") continue;
-      const e = event as { type?: unknown; data?: { content?: unknown } };
+      // DSH 0.2: assistant/message data is `{ turn, step, message, stream, usage }`
+      // — the content lives on `data.message.content` (0.1 had `data.content`).
+      const e = event as { type?: unknown; data?: { content?: unknown; message?: { content?: unknown } } };
       if (e.type !== "assistant/message") continue;
-      const content = e.data?.content;
+      const content = e.data?.message?.content ?? e.data?.content;
       if (Array.isArray(content)) {
         for (const part of content) {
           if (part !== null && typeof part === "object" && (part as { type?: unknown }).type === "text") {
@@ -300,7 +303,7 @@ function previewTagPayloadMessages(
         source?: { kind?: unknown };
       };
       const sourceKind = msg.source?.kind;
-      if (sourceKind === "plugin" || sourceKind === "skill-catalog") {
+      if (isMagicSource(msg.source) || sourceKind === "skill-catalog") {
         out.push(raw);
         continue;
       }
@@ -369,7 +372,7 @@ export async function runContextPlaneStep(
       previewTagPayloadMessages(db, canonicalSessionId, payload.messages, deps.log);
       const view = readDshTranscript({
         session: {
-          events: agent.session.events,
+          events: sessionEvents(agent.session),
           surface: agent.session.surface,
           header: {},
         },
@@ -411,7 +414,7 @@ export async function runContextPlaneStep(
       );
       if (noteText !== null) {
         const noteMarker = `mc-nudge:note`;
-        const events = (agent.session as { events?: readonly unknown[] }).events ?? [];
+        const events = sessionEvents(agent.session);
         const alreadyInjected = events.some((event) => {
           if (event === null || typeof event !== "object") return false;
           const e = event as { data?: { source?: { plugin?: unknown; messageId?: unknown } } };
@@ -422,7 +425,7 @@ export async function runContextPlaneStep(
           const { magicUserMessage } = await import("../compat/dsh-0.1/session");
           const noteMessage = magicUserMessage(
             noteText,
-            { kind: "plugin", plugin: "magic-context", messageId: noteMarker } as never,
+            { kind: "magic-context", plugin: "magic-context", messageId: noteMarker } as never,
             [],
           );
           (agent as unknown as { inject?: (m: unknown) => void }).inject?.(noteMessage);

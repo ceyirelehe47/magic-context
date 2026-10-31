@@ -6,7 +6,7 @@
  * can never spawn further), an explicit tool allowlist, delegated approval
  * pinned to 'never' (captureDelegatedPolicyOverrides), and no default shell /
  * network / credential inheritance beyond what the allowlist grants. It is
- * used for the tool-requiring Dreamer/Sidekick paths.
+ * used for tool-requiring maintenance paths (none wired in production yet).
  *
  * RECURSION ISOLATION: the agent-plane Magic listeners (context plane,
  * knowledge gate, session tracking) must NOT process child sessions — a child
@@ -23,9 +23,10 @@ import { textBlock } from "../compat/dsh-0.1/session";
 import {
   appendDelegatedPolicyOverrides,
   captureDelegatedPolicyOverrides,
-  magicWorkerRequest,
+  MAGIC_WORKER_READONLY_TOOLS,
+  magicWorkerActivation,
+  restrictChildTools,
   subagentsOf,
-  type SubagentStartRequest,
 } from "../compat/dsh-0.1/subagent";
 
 /** Whether a session is a CHILD session (subagent origin or delegation depth). */
@@ -79,23 +80,44 @@ export async function runMagicWorker(
       return null;
     }
     const started = Date.now();
-    const request: SubagentStartRequest = magicWorkerRequest(deps.parent, {
+    const allow = deps.allow ?? MAGIC_WORKER_READONLY_TOOLS;
+    const spec = magicWorkerActivation(deps.parent, {
       label: deps.label,
       prompt: [textBlock(deps.prompt)],
-      allow: deps.allow ?? ["read", "grep", "glob", "fs_search"],
       maxDepth: 0, // workers can never spawn further (recursion cap)
       signal: deps.signal,
-      persona: deps.systemPrompt,
+      systemPrompt: deps.systemPrompt,
     });
 
-    const run = await subagents.start("spawn", request);
-    // Approval pinning + sandbox inheritance BEFORE the run proceeds. The
-    // overrides attach to the child SESSION; the local agent (when exposed)
-    // carries it.
-    const childSession = (run as unknown as { localAgent?: { session?: unknown } }).localAgent
-      ?.session;
-    if (childSession !== undefined) {
-      appendDelegatedPolicyOverrides(childSession as never, captureDelegatedPolicyOverrides(deps.parent));
+    // Tool allowlist + approval pinning + sandbox inheritance are applied to
+    // the CHILD as it is created (`agent/created` is awaited before the
+    // activation resolves, so this runs before its first step). Fail closed:
+    // a child whose tools could not be restricted is disposed unused.
+    let restricted = false;
+    const parentSessionId = String(deps.parent.session?.id ?? deps.parent.id);
+    const off = (ctx as unknown as {
+      on?: (name: string, fn: (payload: { agent: Agent }) => undefined) => () => void;
+    }).on?.("agent/created", ({ agent: child }) => {
+      const header = child.session?.header as
+        | { origin?: string; parentSession?: string }
+        | undefined;
+      if (header?.origin !== "subagent" || String(header.parentSession ?? "") !== parentSessionId) {
+        return undefined;
+      }
+      restricted = restrictChildTools(child, allow);
+      appendDelegatedPolicyOverrides(child.session as never, captureDelegatedPolicyOverrides(deps.parent));
+      return undefined;
+    });
+    let run: Awaited<ReturnType<typeof subagents.startActivation>>;
+    try {
+      run = await subagents.startActivation(spec);
+    } finally {
+      off?.();
+    }
+    if (!restricted) {
+      log("[magic-context] worker aborted: could not restrict child tools (fail-closed)");
+      await run.dispose().catch(() => {});
+      return null;
     }
 
     const timeout = deps.timeoutMs ?? 120_000;
@@ -103,14 +125,14 @@ export async function runMagicWorker(
       run.result,
       new Promise<null>((resolve) => {
         const timer = setTimeout(() => {
-          run.dispose();
+          void run.dispose().catch(() => {});
           resolve(null);
         }, timeout);
         deps.signal.addEventListener(
           "abort",
           () => {
             clearTimeout(timer);
-            run.dispose();
+            void run.dispose().catch(() => {});
             resolve(null);
           },
           { once: true },
@@ -123,7 +145,7 @@ export async function runMagicWorker(
       return null;
     }
     const text = result.output
-      .map((block) => (block.type === "text" ? block.text : ""))
+      .map((block: { type: string; text?: string }) => (block.type === "text" ? (block.text ?? "") : ""))
       .join("\n")
       .trim();
     if (text.length === 0) return null;

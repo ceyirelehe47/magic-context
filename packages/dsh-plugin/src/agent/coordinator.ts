@@ -31,6 +31,9 @@ import type { Session } from "@deepseek-ai/dsh-session";
 import {
   deriveEventMessage,
   magicUserMessage,
+  replaceSurfaceRange,
+  sessionEventAt,
+  sessionEvents,
 } from "../compat/dsh-0.1/session";
 import { readDshTranscript, type MutationPlan } from "./transcript";
 import {
@@ -74,7 +77,7 @@ export function createCoordinatorState(): CoordinatorState {
 function liveFacts(session: Session, canonicalSessionId: string): { digest: string; generation: number } {
   const view = readDshTranscript({
     session: {
-      events: session.events,
+      events: sessionEvents(session),
       surface: session.surface,
       header: {},
     },
@@ -127,17 +130,13 @@ export function applyPlanOps(
       );
     }
     const message = magicUserMessage(op.replacement, {
-      kind: "plugin",
+      kind: "magic-context",
       plugin: "magic-context",
       messageId: `mc-op:${plan.opId}`,
       revision: String(plan.generation),
       digest: plan.inputDigest,
     });
-    const event = session.append("user/message", message, {
-      surfaceOp: { op: "replace", start: startSeq, end: endSeq },
-      sourceEventSeqs: [...op.shadowedSeqs],
-    });
-    ackSeq = event.seq;
+    ackSeq = replaceSurfaceRange(session, startSeq, endSeq, message, op.shadowedSeqs);
     void db;
   }
   return { ackSeq };
@@ -155,24 +154,23 @@ function applyInsertionMerge(
   if (nodeSeq === undefined) {
     throw new Error(`magic-context: insertion op at ${op.start} outside the live surface`);
   }
-  const event = session.events[nodeSeq];
+  const event = sessionEventAt(session, nodeSeq);
+  if (event === undefined) {
+    throw new Error(`magic-context: insertion op at ${op.start} references missing event seq ${nodeSeq}`);
+  }
   const existing = deriveEventMessage(event);
   const originalText = existing?.content
     ?.map((block) => (block.type === "text" ? block.text : ""))
     .join("\n") ?? "";
   const merged = `${op.replacement}\n${originalText}`;
   const message = magicUserMessage(merged, {
-    kind: "plugin",
+    kind: "magic-context",
     plugin: "magic-context",
     messageId: `mc-op:${plan.opId}:temporal`,
     revision: String(plan.generation),
     digest: plan.inputDigest,
   });
-  const appended = session.append("user/message", message, {
-    surfaceOp: { op: "replace", start: nodeSeq, end: nodeSeq },
-    sourceEventSeqs: [nodeSeq],
-  });
-  return appended.seq;
+  return replaceSurfaceRange(session, nodeSeq, nodeSeq, message, [nodeSeq]);
 }
 
 /**

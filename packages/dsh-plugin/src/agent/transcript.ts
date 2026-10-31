@@ -73,6 +73,8 @@ import type {
   TranscriptPartKind,
 } from "@magic-context/core/shared/transcript";
 import type { KnowledgeSessionView } from "./knowledge-gate";
+import { isMagicSource, sessionEvents } from "../compat/dsh-0.1/session";
+import { countProtectionWindow } from "./protection";
 import {
   deriveEventMessage,
   type SessionEvent,
@@ -219,7 +221,7 @@ function isSyntheticUserMessage(message: RawMessage): boolean {
 /** True for Magic-injected knowledge messages (source.plugin === 'magic-context'). */
 function isKnowledgeMessage(message: Record<string, unknown>): boolean {
   const source = isRecord(message.source) ? message.source : null;
-  return source !== null && source.kind === "plugin" && source.plugin === "magic-context";
+  return source !== null && isMagicSource(source);
 }
 
 /**
@@ -682,7 +684,7 @@ export function findKnowledgeBaselineNodeIndices(
 
 /** Build the read-only transcript view (design §3). */
 export function readDshTranscript(input: DshTranscriptInput): DshTranscriptView {
-  const events = Array.isArray(input.session.events) ? input.session.events : [];
+  const events = sessionEvents(input.session);
   const nodes = Array.isArray(input.session.surface?.nodes)
     ? [...input.session.surface.nodes]
     : [];
@@ -1273,11 +1275,12 @@ export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): M
     // stages (the transaction body reads them otherwise).
     const preloadedTags = getTagsBySession(db, sessionId);
     const preloadedPendingOps = getPendingOps(db, sessionId);
+    const protection = countProtectionWindow(preloadedTags, protectedTags);
     applyPendingOperations(
       sessionId,
       db,
       recordingTargets,
-      protectedTags,
+      protection.protectedTagNumbers,
       preloadedTags,
       preloadedPendingOps,
     );
@@ -1300,7 +1303,8 @@ export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): M
           recordingTargets,
           messageTagNumbers,
           {
-            protectedTags,
+            protectedTagNumbers: protection.protectedTagNumbers,
+            protectedCutoff: protection.protectedCutoff,
             caveman: cleanupCfg.caveman,
           },
           preloadedTags,

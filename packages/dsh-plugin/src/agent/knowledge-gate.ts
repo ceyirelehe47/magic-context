@@ -51,7 +51,9 @@ import { parseCacheTtl } from "@magic-context/core/features/magic-context/schedu
 import { resolveProjectIdentityForSession } from "@magic-context/core/features/magic-context/memory/project-identity";
 import type { Database } from "@magic-context/core/shared/sqlite";
 import {
+  isMagicSource,
   magicUserMessage,
+  sessionEventAt,
   type MagicMessageSource,
 } from "../compat/dsh-0.1/session";
 import {
@@ -124,7 +126,11 @@ export function createKnowledgeGateState(): KnowledgeGateState {
 /** The session surface slice the gate reads (test-friendly structural view). */
 export interface KnowledgeSessionView {
   readonly surface: { readonly nodes: readonly number[]; readonly replaceGeneration: number };
-  readonly events: readonly unknown[];
+  /** DSH 0.2 event-log readers (Session.events was removed in 0.2). */
+  eventAt?(seq: never): unknown;
+  snapshotEvents?(): readonly unknown[];
+  /** Legacy / test-double log array; read via sessionEventAt(). */
+  readonly events?: readonly unknown[];
   readonly header: { readonly cwd?: string };
 }
 
@@ -304,18 +310,15 @@ export function isMagicWatermarkOnSurface(
   session: KnowledgeSessionView,
   watermark: string,
 ): boolean {
-  const events = session.events;
   for (const seq of session.surface.nodes) {
-    const event = events[seq] as
+    const event = sessionEventAt(session, seq) as
       | { type?: string; data?: { source?: MagicMessageSource | { kind?: string } } }
       | undefined;
     if (!event || event.type !== "user/message") continue;
     const source = event.data?.source;
     if (
-      source &&
-      source.kind === "plugin" &&
-      (source as MagicMessageSource).plugin === "magic-context" &&
-      (source as MagicMessageSource).messageId === watermark
+      isMagicSource(source) &&
+      source.messageId === watermark
     ) {
       return true;
     }
@@ -356,7 +359,7 @@ export async function maybeInjectKnowledge(
   }
 
   const source: MagicMessageSource = {
-    kind: "plugin",
+    kind: "magic-context",
     plugin: "magic-context",
     messageId: blocks.watermark,
     revision: blocks.revision,
@@ -420,7 +423,7 @@ export async function maybeInjectKnowledge(
             `[tool: todowrite #${callId}]\ninput: ${inputText}\n\n` +
             `[tool result: todowrite #${callId}]\noutput: ${part.state.output}`;
           const todoSource: MagicMessageSource = {
-            kind: "plugin",
+            kind: "magic-context",
             plugin: "magic-context",
             messageId: todoWatermark,
           };

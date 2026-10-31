@@ -10,14 +10,17 @@ import type { InvocationDescriptor } from "@deepseek-ai/dsh-typert-protocol";
 import type TypertRegistry from "@deepseek-ai/dsh-typert-registry";
 import type {
   TypertContribution,
-  TypertSchema,
+  TypertSchemaFactory,
 } from "@deepseek-ai/dsh-typert-registry/types";
+
+/** DSH 0.1 name kept as an alias: 0.2 contributions carry schema FACTORIES. */
+export type TypertSchema = TypertSchemaFactory;
 
 export type {
   InvocationDescriptor,
   TypertContribution,
   TypertRegistry,
-  TypertSchema,
+  TypertSchemaFactory,
 };
 
 /** Wire namespace of every MagicContext Remote endpoint (compatibility.json). */

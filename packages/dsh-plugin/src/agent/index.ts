@@ -45,7 +45,6 @@ import {
 } from "./historian";
 import { dshDreamSeams, registerDshDreamer } from "./dreamer";
 import { createRecompSeams } from "./recomp";
-import { createSidekickSeam } from "./sidekick";
 import { createEmbedSeam } from "./embed";
 import { dshModelRefToCanonical } from "dsh-magic-context-adapter";
 import { modelSupportsVision } from "@magic-context/core/shared/models-dev-cache";
@@ -195,11 +194,7 @@ export function bridgeMagicConfig(
     historian: {
       ...config.historian,
       executeThresholdPercentage: config.historian?.executeThresholdPercentage ?? threshold,
-      model:
-        config.historian?.model ??
-        (typeof (cfg.historian as { model?: unknown } | undefined)?.model === "string"
-          ? (cfg.historian as { model: string }).model
-          : undefined),
+      model: config.historian?.model ?? coreHistorianModel(cfg.historian),
       commitClusterTrigger:
         config.historian?.commitClusterTrigger ??
         (commitCluster !== undefined
@@ -357,7 +352,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   };
   registerCtxTools(ctx, { ...runtime, ...(config.tools ?? {}) });
 
-  // Phase 4 seams: dreamer / sidekick / recomp. The seam factories need the
+  // Phase 4 seams: dreamer / recomp. The seam factories need the
   // shared DB, which the host bootstrap resolves asynchronously; fill the
   // seams lazily once `host.ready` settles (the commands read them at
   // invocation time and answer "not wired" until then).
@@ -386,14 +381,6 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
     get runWrapup() {
       return (seams.get("recomp") as ReturnType<typeof createRecompSeams> | undefined)?.runWrapup;
     },
-    get runUpgrade() {
-      return (seams.get("recomp") as ReturnType<typeof createRecompSeams> | undefined)?.runUpgrade;
-    },
-    // The sidekick seam resolves the DB itself at call time (host fallback).
-    runSidekick: createSidekickSeam(ctx, {
-      canonicalKey: (dshSessionId: string) => host.canonicalKey(dshSessionId),
-      log,
-    }),
     // The embed seam receives the DB at call time (no host dependency).
     runEmbedDrain: createEmbedSeam({ log }),
   });
@@ -403,4 +390,21 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
       `guidance=${config.guidance?.enabled !== false} autoSearch=${config.autoSearch?.enabled !== false} ` +
       `sessionTracking=${config.sessionTracking?.enabled !== false} directory=${directory}`,
   );
+}
+
+/**
+ * Historian model from the core config. Core ≥0.49 moved it into per-harness
+ * blocks (`historian.opencode.model`, entry string or `{ model }` object); the
+ * legacy flat `historian.model` string is still honoured. DSH model refs are
+ * `provider/model` strings, so the `opencode` block is the one that applies.
+ */
+function coreHistorianModel(historian: unknown): string | undefined {
+  const h = historian as { model?: unknown; opencode?: { model?: unknown } } | undefined;
+  if (typeof h?.model === "string") return h.model;
+  const entry = h?.opencode?.model;
+  if (typeof entry === "string") return entry;
+  if (entry && typeof entry === "object" && typeof (entry as { model?: unknown }).model === "string") {
+    return (entry as { model: string }).model;
+  }
+  return undefined;
 }
