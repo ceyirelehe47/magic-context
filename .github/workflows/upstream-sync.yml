@@ -1,0 +1,195 @@
+# DSH fork maintenance: keep the `dsh-integration` branch (DeepSeek Harness
+# adapter: packages/adapter-api + packages/dsh-plugin) current with upstream
+# cortexkit/magic-context releases.
+#
+# What it does (see docs/DSH-MAINTENANCE.md):
+#   1. fetch upstream tags, pick the newest release tag vX.Y.Z;
+#   2. if dsh-integration already contains it → nothing to do;
+#   3. replay dsh-integration onto that tag (rebase by default, merge on
+#      request) on a throwaway branch `dsh-sync/<tag>`;
+#   4. install the DSH lane (filtered bun install), run typecheck:dsh,
+#      test:dsh and contracts:dsh;
+#   5. green → push `dsh-sync/<tag>` to THIS fork for a human to fast-forward
+#      dsh-integration; red/conflict → open (or update) an issue IN THIS FORK.
+#
+# It never pushes master or dsh-integration, never opens PRs, and never touches
+# the upstream repository. Triggers are schedule + manual only (no push/PR).
+name: upstream-sync (DSH)
+
+on:
+  schedule:
+    - cron: "17 3 * * 1" # Mondays 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      strategy:
+        description: "How to replay dsh-integration onto the upstream tag"
+        type: choice
+        options: [rebase, merge]
+        default: rebase
+      tag:
+        description: "Upstream tag to sync to (default: newest vX.Y.Z)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: upstream-sync-dsh
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Only ever runs in the fork (forks of the fork / upstream are no-ops).
+    if: github.repository == 'ceyirelehe47/magic-context'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      UPSTREAM_URL: https://github.com/cortexkit/magic-context.git
+      BASE_BRANCH: dsh-integration
+      STRATEGY: ${{ github.event.inputs.strategy || 'rebase' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dsh-integration
+          fetch-depth: 0
+
+      - name: Fetch upstream and pick the target tag
+        id: target
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --quiet --tags upstream
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor "$TAG" "origin/$BASE_BRANCH"; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+            echo "dsh-integration already contains $TAG"
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Replay dsh-integration onto the tag
+        id: replay
+        if: steps.target.outputs.up_to_date == 'false'
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.target.outputs.tag }}"
+          git config user.name "dsh-sync-bot"
+          git config user.email "dsh-sync-bot@users.noreply.github.com"
+          # The DSH layer is the commits on dsh-integration that are not in
+          # any upstream release it was based on.
+          BASE="$(git merge-base "origin/$BASE_BRANCH" "$TAG")"
+          git checkout -B "dsh-sync/$TAG" "origin/$BASE_BRANCH"
+          if [ "$STRATEGY" = "merge" ]; then
+            if ! git merge --no-edit "$TAG"; then
+              git diff --name-only --diff-filter=U > /tmp/conflicts.txt || true
+              git merge --abort || true
+              echo "conflict=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          else
+            if ! git rebase --onto "$TAG" "$BASE"; then
+              git diff --name-only --diff-filter=U > /tmp/conflicts.txt || true
+              git rebase --abort || true
+              echo "conflict=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          fi
+          echo "conflict=false" >> "$GITHUB_OUTPUT"
+
+      - uses: oven-sh/setup-bun@v2
+        if: steps.replay.outputs.conflict == 'false'
+        with:
+          bun-version: 1.4.2
+
+      - name: Install the DSH lane (filtered, no lifecycle scripts)
+        if: steps.replay.outputs.conflict == 'false'
+        run: |
+          bun install \
+            --filter '@cortexkit/opencode-magic-context' \
+            --filter '@cortexkit/retina-local-fs' \
+            --filter 'dsh-magic-context-adapter' \
+            --filter 'dsh-magic-context' \
+            --ignore-scripts 2>&1 | tee /tmp/install.log
+
+      - name: Typecheck (adapter-api + dsh-plugin, incl. compile-time DSH API contract)
+        id: typecheck
+        if: steps.replay.outputs.conflict == 'false'
+        continue-on-error: true
+        run: bun run typecheck:dsh 2>&1 | tee /tmp/typecheck.log; exit ${PIPESTATUS[0]}
+
+      - name: Unit tests (adapter-api + dsh-plugin)
+        id: tests
+        if: steps.replay.outputs.conflict == 'false'
+        continue-on-error: true
+        run: bun run test:dsh 2>&1 | tee /tmp/tests.log; exit ${PIPESTATUS[0]}
+
+      - name: Contract tests (DSH vocabulary + core import surface)
+        id: contracts
+        if: steps.replay.outputs.conflict == 'false'
+        continue-on-error: true
+        run: bun run contracts:dsh 2>&1 | tee /tmp/contracts.log; exit ${PIPESTATUS[0]}
+
+      - name: Push the green sync branch to the fork
+        if: >-
+          steps.replay.outputs.conflict == 'false' &&
+          steps.typecheck.outcome == 'success' &&
+          steps.tests.outcome == 'success' &&
+          steps.contracts.outcome == 'success'
+        run: |
+          git push --force-with-lease origin "HEAD:refs/heads/dsh-sync/${{ steps.target.outputs.tag }}"
+          {
+            echo "### dsh-sync/${{ steps.target.outputs.tag }} is green"
+            echo "Fast-forward when ready:"
+            echo '```'
+            echo "git fetch origin && git checkout dsh-integration && git reset --hard origin/dsh-sync/${{ steps.target.outputs.tag }} && git push --force-with-lease origin dsh-integration"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or update a sync-failure issue in this fork
+        if: >-
+          steps.target.outputs.up_to_date == 'false' && (
+          steps.replay.outputs.conflict == 'true' ||
+          steps.typecheck.outcome == 'failure' ||
+          steps.tests.outcome == 'failure' ||
+          steps.contracts.outcome == 'failure')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          TAG="${{ steps.target.outputs.tag }}"
+          TITLE="dsh upstream sync failed: $TAG"
+          {
+            echo "Automated DSH upstream sync to \`$TAG\` (strategy: $STRATEGY) failed."
+            echo
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo "| step | outcome |"
+            echo "|---|---|"
+            echo "| replay conflict | ${{ steps.replay.outputs.conflict }} |"
+            echo "| typecheck:dsh | ${{ steps.typecheck.outcome }} |"
+            echo "| test:dsh | ${{ steps.tests.outcome }} |"
+            echo "| contracts:dsh | ${{ steps.contracts.outcome }} |"
+            if [ -s /tmp/conflicts.txt ]; then
+              echo; echo "Conflicting files:"; echo '```'; cat /tmp/conflicts.txt; echo '```'
+            fi
+            for f in typecheck tests contracts; do
+              if [ -s "/tmp/$f.log" ]; then
+                echo; echo "<details><summary>$f (tail)</summary>"; echo; echo '```'
+                grep -E "error|fail|\(fail\)" "/tmp/$f.log" | tail -n 60
+                echo '```'; echo "</details>"
+              fi
+            done
+            echo; echo "See docs/DSH-MAINTENANCE.md for the manual sync procedure."
+          } > /tmp/body.md
+          gh label create dsh-sync --color B60205 --description "DSH upstream sync" 2>/dev/null || true
+          EXISTING="$(gh issue list --state open --label dsh-sync --search "in:title \"$TITLE\"" --json number --jq '.[0].number' || true)"
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body-file /tmp/body.md
+          else
+            gh issue create --title "$TITLE" --label dsh-sync --body-file /tmp/body.md
+          fi

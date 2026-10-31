@@ -31,6 +31,8 @@ const CONTRACTS: readonly PackageContract[] = [
     name: "@deepseek-ai/dsh-session",
     required: [
       "surfaceOp",
+      "snapshotEvents",
+      "eventAt",
       "replaceGeneration",
       "sourceEventSeqs",
       "append-only",
@@ -52,7 +54,12 @@ const CONTRACTS: readonly PackageContract[] = [
   },
   {
     name: "@deepseek-ai/dsh-llm",
-    required: ["createUserMessage", "createAssistantMessage", "createToolResultMessage"],
+    required: [
+      "createUserMessage",
+      "createAssistantMessage",
+      "createToolResultMessage",
+      "interface MessageSourceMap",
+    ],
   },
   {
     name: "@deepseek-ai/dsh-subagent",
@@ -60,7 +67,8 @@ const CONTRACTS: readonly PackageContract[] = [
       "captureDelegatedPolicyOverrides",
       "resolveChildDepth",
       "SubagentDepthError",
-      "toolFilter",
+      "startActivation",
+      "delivery",
     ],
   },
   {
@@ -129,9 +137,13 @@ describe("compat contract gate (dsh-0.1 upgrade matrix)", () => {
   it("the pinned surface contract matches the session package", () => {
     const root = packageRoot("@deepseek-ai/dsh-session");
     const declarations = readTypeDeclarations(root);
-    // SurfaceOp = 'append' | { op: 'replace', start, end } — the CAS primitive.
+    // SurfaceOp = 'append' | { op: 'replace', startSeq, endSeq } (DSH 0.2,
+    // branded SessionSeq) — the CAS primitive. Shapes are pinned at compile
+    // time in src/contracts/dsh-api.contract.ts; this is the string backstop.
     expect(declarations).toMatch(/SurfaceOp/);
     expect(declarations).toMatch(/op:\s*'replace'/);
+    expect(declarations).toMatch(/startSeq:\s*SessionSeq/);
+    expect(declarations).toMatch(/endSeq:\s*SessionSeq/);
     expect(declarations).toMatch(/sourceEventSeqs/);
   });
 });

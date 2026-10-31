@@ -32,7 +32,7 @@ import { randomBytes } from "node:crypto";
 export const MAGIC_CONTEXT_PACKAGE = "dsh-magic-context";
 
 /** The exact DSH release this adapter's compat layer (compat/dsh-0.1) pins. */
-export const DSH_COMPAT_EXPECTED_VERSION = "0.1.0-rc.6";
+export const DSH_COMPAT_EXPECTED_VERSION = "0.2.1-rc.5";
 
 /** Installed-package identity of the DSH runtime. */
 export const DSH_PACKAGE = "@deepseek-ai/dsh";

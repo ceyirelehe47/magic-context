@@ -13,6 +13,7 @@
     "typecheck:dsh": "bun run --cwd packages/adapter-api typecheck && bun run --cwd packages/dsh-plugin typecheck",
     "test": "bun scripts/check-bun.mjs && bun run --cwd packages/plugin test && bun run --cwd packages/pi-plugin test && bun run --cwd packages/cli test && bun run --cwd packages/retina-local-fs test",
     "test:dsh": "bun run --cwd packages/adapter-api test && bun run --cwd packages/dsh-plugin test",
+    "contracts:dsh": "bun run --cwd packages/dsh-plugin test src/contracts src/compat/dsh-0.1/compat-upgrade.test.ts",
     "test:e2e": "bun run --cwd packages/e2e-tests test",
     "test:e2e-opencode2": "bun run --cwd packages/e2e-tests test:opencode2",
     "test:rust-e2e": "bun run --cwd packages/e2e-tests test:rust-e2e",

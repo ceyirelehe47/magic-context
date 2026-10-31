@@ -16,7 +16,7 @@ import { runDshSetup, type SetupReport } from "./setup";
 import { runDshDoctor, type DoctorReport } from "./doctor";
 import { MAGIC_CONTEXT_PACKAGE } from "./env";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 export function printSetupReport(report: SetupReport): void {
   for (const step of report.steps) {

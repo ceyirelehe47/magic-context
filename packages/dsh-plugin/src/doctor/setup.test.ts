@@ -51,7 +51,7 @@ function writeStockPreset(installDir: string, overrides: (rows: Record<string, u
   mkdirSync(installDir, { recursive: true });
   writeFileSync(
     join(installDir, "package.json"),
-    JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.1.0-rc.6" }),
+    JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.2.1-rc.5" }),
   );
   const file = join(installDir, "config", "agent-presets", "standard", "agent.cordis.yml");
   mkdirSync(dirname(file), { recursive: true });

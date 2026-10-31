@@ -2,7 +2,7 @@
  * doctor/doctor — `dsh-magic-context doctor` (Phase 2 slice C).
  *
  * Checklist (each item reports ok/warn/fail + a fix hint):
- *   1. DSH version vs the compatibility expectation (exact rc 0.1.0-rc.6);
+ *   1. DSH version vs the compatibility expectation (exact rc 0.2.1-rc.5);
  *   2. bundle install state (profile package.json `dsh.profile.bundles`);
  *   3. magic-standard preset generated + stock layout still contract-valid
  *      (re-runs scanStockPresetLayout against the stock file the include row
