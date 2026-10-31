@@ -135,7 +135,7 @@ describe("agent knowledge gate (m0/m1 first-step injection)", () => {
         projectPath: identity as string,
         category: "PROJECT_RULES",
         content: "unique knowledge content alpha",
-        sourceType: "user",
+        sourceType: "agent",
       });
 
       const deps = fakeDeps(db, dir);
@@ -166,7 +166,7 @@ describe("agent knowledge gate (m0/m1 first-step injection)", () => {
         revision?: string;
         digest?: string;
       };
-      expect(source.kind).toBe("plugin");
+      expect(source.kind).toBe("magic-context");
       expect(source.plugin).toBe("magic-context");
       expect(source.messageId).toMatch(/^mc-kb:\d+:[0-9a-f]{16}$/);
       expect(source.revision).toBeDefined();
@@ -217,7 +217,7 @@ describe("agent knowledge gate (m0/m1 first-step injection)", () => {
         projectPath: identity as string,
         category: "PROJECT_RULES",
         content: "stable project fact for generation reuse",
-        sourceType: "user",
+        sourceType: "agent",
       });
       const deps = fakeDeps(db, dir);
       const state = createKnowledgeGateState();

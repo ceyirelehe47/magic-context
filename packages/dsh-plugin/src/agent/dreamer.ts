@@ -145,6 +145,13 @@ export interface DreamFacadePromptArgs {
  * OpenCode SDK client; DSH casts at the boundary exactly like the Pi facade.
  */
 export interface DshDreamSessionFacade {
+  /**
+   * Core ≥0.49 skips every non-host-only dream task when the client would
+   * create VISIBLE background roots and no parent session exists. DSH dream
+   * sessions are process-local direct-LLM facades that never reach any UI, so
+   * they are declared hidden (Pi parity).
+   */
+  readonly backgroundSessionsAreHidden: true;
   session: {
     create(args: {
       body?: { parentID?: string; title?: string };
@@ -372,7 +379,7 @@ export function createDshDreamClient(ctx: Context, deps: DshDreamClientDeps): Ds
     abort: async () => ({}),
   };
 
-  return { session };
+  return { backgroundSessionsAreHidden: true, session };
 }
 
 /* ─────────────────────────── scheduler wiring ─────────────────────────── */

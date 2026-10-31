@@ -93,7 +93,7 @@ function buildSession(): Session {
 function providerOf(session: Session): RawMessageProvider {
   const view = readDshTranscript({
     session: {
-      events: session.events,
+      events: session.snapshotEvents(),
       surface: session.surface,
       header: {},
     },
@@ -407,7 +407,7 @@ describe("runDshHistorian", () => {
       initializeDshAdapterTables(db);
       const session = buildSession();
       const view = readDshTranscript({
-        session: { events: session.events, surface: session.surface, header: {} },
+        session: { events: session.snapshotEvents(), surface: session.surface, header: {} },
         canonicalSessionId: SESSION_ID,
       });
       // Call 1 serves readSessionChunk; call 2 (inside queueDropsForCompartmentalizedMessages,

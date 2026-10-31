@@ -75,7 +75,7 @@ function buildSession() {
 function viewOf(session: Session): DshTranscriptView {
   return readDshTranscript({
     session: {
-      events: session.events,
+      events: session.snapshotEvents(),
       surface: session.surface,
       header: { cwd: "C:/work" },
     },
@@ -102,7 +102,7 @@ async function cleanupDir(dir: string, db?: Database): Promise<void> {
 describe("transcript mapping (DSH events → RawMessage[])", () => {
   it("folds tool results AND their tool-call assistant into the following user message", () => {
     const session = buildSession();
-    const messages = convertDshEventsToRawMessages(session.events);
+    const messages = convertDshEventsToRawMessages(session.snapshotEvents());
     // user1, user2(+assistant1 tool-call + tool1), assistant2, synth-user(tool2)
     // The tool-call assistant is folded with its results so the surface never
     // keeps an assistant `tool_calls` block without a following tool message
@@ -125,7 +125,7 @@ describe("transcript mapping (DSH events → RawMessage[])", () => {
 
   it("builds a reversible seq ↔ ordinal map", () => {
     const session = buildSession();
-    const events = session.events;
+    const events = session.snapshotEvents();
     const map = buildDshOrdinalMap(events);
     // user1's seq → ordinal 1; tool1's seq and assistant1's seq → ordinal 2
     // (both folded into user2).
@@ -143,7 +143,7 @@ describe("transcript mapping (DSH events → RawMessage[])", () => {
     const view = viewOf(session);
     expect(view.sessionId).toBe("dsh:a1b2c3d4:sess-transcript");
     expect(view.generation).toBe(0);
-    expect(view.sourceWatermark).toBe(session.events[session.events.length - 1]!.seq);
+    expect(view.sourceWatermark).toBe(session.snapshotEvents()[session.snapshotEvents().length - 1]!.seq);
     expect(view.inputDigest.length).toBe(16);
     expect(view.surfaceNodes).toEqual([...session.surface.nodes]);
     // Same input → same digest.
@@ -168,7 +168,7 @@ describe("transcript mapping (DSH events → RawMessage[])", () => {
     );
     const view = viewOf(session);
     expect(view.messages.some((m) => isKnowledgeBaselineMessage(m))).toBe(true);
-    const indices = findKnowledgeBaselineNodeIndices(session.events, view.surfaceNodes);
+    const indices = findKnowledgeBaselineNodeIndices(session.snapshotEvents(), view.surfaceNodes);
     expect(indices).toEqual([0]);
   });
 });
@@ -248,11 +248,11 @@ describe("deriveMutationPlan (recording pipeline)", () => {
     try {
       const db = await createTestDb(join(dir, "context.db"));
       const session = buildSession();
-      const eventsBefore = JSON.stringify(session.events);
+      const eventsBefore = JSON.stringify(session.snapshotEvents());
       const nodesBefore = [...session.surface.nodes];
       const view = viewOf(session);
       deriveMutationPlan(view, { db, protectedTags: 0 });
-      expect(JSON.stringify(session.events)).toBe(eventsBefore);
+      expect(JSON.stringify(session.snapshotEvents())).toBe(eventsBefore);
       expect([...session.surface.nodes]).toEqual(nodesBefore);
       db.close();
     } finally {
@@ -286,8 +286,8 @@ describe("deriveMutationPlan (recording pipeline)", () => {
       // bug cannot reproduce through this path — assert non-null to know.)
       expect(plan).not.toBeNull();
       if (plan === null) return;
-      const assistantSeq = session.events[1]!.seq; // assistant1 (tool-call)
-      const tool1Seq = session.events[2]!.seq; // tool/result call-1
+      const assistantSeq = session.snapshotEvents()[1]!.seq; // assistant1 (tool-call)
+      const tool1Seq = session.snapshotEvents()[2]!.seq; // tool/result call-1
       const assistantIndex = view.surfaceNodes.indexOf(assistantSeq);
       const tool1Index = view.surfaceNodes.indexOf(tool1Seq);
       expect(assistantIndex).toBeGreaterThanOrEqual(0);

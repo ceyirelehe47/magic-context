@@ -157,6 +157,8 @@ export function maybeNudgeChannels(
   try {
     const protectedTags = Math.max(0, opts.protectedTags ?? 20);
     const tags = getTagsBySession(db, sessionId);
+    // No tool output at all → nothing reclaimable; leave session_meta untouched.
+    if (!tags.some((t) => t.type === "tool")) return;
     const protection = countProtectionWindow(tags, protectedTags);
     const agg = getActiveTagTokenAggregate(db, sessionId, protection.protectedCutoff);
     const reclaimableCount = tags.filter(

@@ -566,7 +566,7 @@ export function createRecompSeams(
         if (parsed.kind === "upgrade") {
           // The /ctx-recomp command handler intercepts --upgrade before this
           // seam; kept for defense-in-depth.
-          return "## Magic Recomp — Skipped\n\n`--upgrade` is deprecated — run `/ctx-session-upgrade` instead.";
+          return "## Magic Recomp — Skipped\n\n`--upgrade` is deprecated — run `/ctx-recomp` to rebuild in the current format.";
         }
 
         const directory = args.cwd ?? deps.directory ?? process.cwd();

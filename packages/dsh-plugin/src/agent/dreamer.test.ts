@@ -343,7 +343,7 @@ describe("dshDreamSeams (/ctx-dream seam)", () => {
     }
   });
 
-  it("executor completes a no-LLM path (compress-cues without mural) and records dream telemetry", async () => {
+  it("executor runs a no-LLM path (compress-cues without mural → core skip) and records dream telemetry", async () => {
     const { db, cleanup } = await openDb();
     try {
       const { ctx } = makeFakeCtx({ llm: stubLlm() });
@@ -352,7 +352,11 @@ describe("dshDreamSeams (/ctx-dream seam)", () => {
         { task: "compress-cues", schedule: "", timeoutMinutes: 20 },
         { db, projectIdentity: PROJECT_A, holderId: "test-holder", leaseKey: `memory:${PROJECT_A}` },
       );
-      expect(outcome.status).toBe("completed");
+      // Core ≥0.49: compress-cues without mural is a recorded skip (it was a
+      // no-op "completed" in 0.36). The skip must come from the mural gate,
+      // NOT from the "no ordinary parent session" visible-root guard.
+      expect(outcome.status).toBe("skipped");
+      expect((outcome as { detail?: string }).detail).toBe("mural is not enabled");
       const runs = getDreamRuns(db, PROJECT_A);
       expect(runs.some((run) => run.tasks_json.includes("compress-cues"))).toBe(true);
     } finally {
@@ -387,12 +391,19 @@ describe("registerDshDreamer (schedule timer)", () => {
       expect(captured.set.map((interval) => interval.ms)).toEqual([1000, 1000]);
       expect(logs.some((m) => m.includes(`registered schedule timer for ${PROJECT_A}`))).toBe(true);
 
-      // The immediate initial pass already ran the core scheduler: every
-      // canonical task has a seeded row — scheduled tasks with a future
-      // next_due_at and no run, maintain-docs (default-disabled) with NULL.
+      // The immediate initial pass already ran the core scheduler. Core ≥0.49
+      // seeds a task's row only once the project has input for it
+      // (taskHasSchedulableInput) — a fresh project with no memories seeds
+      // only the transcript-driven tasks. Every seeded row is canonical, has
+      // a future next_due_at and no run yet.
+      const seededCount = new Map<string, number>();
       for (const project of [PROJECT_A, PROJECT_B]) {
         const states = getTaskScheduleStatesForProject(db, project);
-        expect(states.map((state) => state.task).sort()).toEqual([...CANONICAL_DREAM_TASKS].sort());
+        seededCount.set(project, states.length);
+        expect(states.length).toBeGreaterThan(0);
+        for (const state of states) {
+          expect((CANONICAL_DREAM_TASKS as readonly string[]).includes(state.task)).toBe(true);
+        }
         for (const state of states) {
           if (state.task === "maintain-docs") {
             expect(state.nextDueAt).toBeNull();
@@ -407,7 +418,7 @@ describe("registerDshDreamer (schedule timer)", () => {
       // state stable.
       captured.set[0]!.fn();
       await flush();
-      expect(getTaskScheduleStatesForProject(db, PROJECT_A)).toHaveLength(CANONICAL_DREAM_TASKS.length);
+      expect(getTaskScheduleStatesForProject(db, PROJECT_A)).toHaveLength(seededCount.get(PROJECT_A)!);
 
       // Fiber disposal stops every interval.
       for (const dispose of disposers) dispose();

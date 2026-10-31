@@ -94,6 +94,9 @@ export async function runMagicWorker(
     // activation resolves, so this runs before its first step). Fail closed:
     // a child whose tools could not be restricted is disposed unused.
     let restricted = false;
+    // Captured up front: a throw inside an `agent/created` listener would fail
+    // the child's creation rather than this worker call.
+    const overrides = captureDelegatedPolicyOverrides(deps.parent);
     const parentSessionId = String(deps.parent.session?.id ?? deps.parent.id);
     const off = (ctx as unknown as {
       on?: (name: string, fn: (payload: { agent: Agent }) => undefined) => () => void;
@@ -104,8 +107,13 @@ export async function runMagicWorker(
       if (header?.origin !== "subagent" || String(header.parentSession ?? "") !== parentSessionId) {
         return undefined;
       }
-      restricted = restrictChildTools(child, allow);
-      appendDelegatedPolicyOverrides(child.session as never, captureDelegatedPolicyOverrides(deps.parent));
+      try {
+        appendDelegatedPolicyOverrides(child.session as never, overrides);
+        restricted = restrictChildTools(child, allow);
+      } catch (error) {
+        restricted = false;
+        log(`[magic-context] worker child policy setup failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
       return undefined;
     });
     let run: Awaited<ReturnType<typeof subagents.startActivation>>;

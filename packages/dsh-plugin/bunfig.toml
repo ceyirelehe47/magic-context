@@ -1,0 +1,4 @@
+[test]
+# Same isolation preload as the core plugin: redirects XDG homes so no test
+# can touch the real shared Magic Context DB.
+preload = ["../plugin/test-preload.ts"]

@@ -68,7 +68,7 @@ describe("Phase 5 hardening", () => {
       const session = buildSession(3);
       const host = { db, canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}`, log: () => {} };
       const view = readDshTranscript({
-        session: { events: session.events, surface: session.surface, header: {} },
+        session: { events: session.snapshotEvents(), surface: session.surface, header: {} },
         canonicalSessionId: CANONICAL,
       });
       const plan = deriveMutationPlan(view, { db, protectedTags: 0 })!;
@@ -99,7 +99,7 @@ describe("Phase 5 hardening", () => {
       // duplicate of the already-applied drops (the drop state is durable and
       // the flushed replay is idempotent).
       const view2 = readDshTranscript({
-        session: { events: session.events, surface: session.surface, header: {} },
+        session: { events: session.snapshotEvents(), surface: session.surface, header: {} },
         canonicalSessionId: CANONICAL,
       });
       const plan2 = deriveMutationPlan(view2, { db, protectedTags: 0 });
@@ -122,14 +122,14 @@ describe("Phase 5 hardening", () => {
       const db = await createTestDb(join(dir, "context.db"));
       const session = buildSession(200); // 400 messages
       const startedMap = performance.now();
-      const mapped = convertDshEventsToRawMessages(session.events);
+      const mapped = convertDshEventsToRawMessages(session.snapshotEvents());
       const mapMs = performance.now() - startedMap;
       expect(mapped.length).toBe(400);
       expect(mapMs).toBeLessThan(2000);
 
       const startedView = performance.now();
       const view = readDshTranscript({
-        session: { events: session.events, surface: session.surface, header: {} },
+        session: { events: session.snapshotEvents(), surface: session.surface, header: {} },
         canonicalSessionId: CANONICAL,
       });
       const viewMs = performance.now() - startedView;
@@ -154,7 +154,7 @@ describe("Phase 5 hardening", () => {
       const session = buildSession(2);
       const host = { db, canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}`, log: () => {} };
       const view = readDshTranscript({
-        session: { events: session.events, surface: session.surface, header: {} },
+        session: { events: session.snapshotEvents(), surface: session.surface, header: {} },
         canonicalSessionId: CANONICAL,
       });
       const plan = deriveMutationPlan(view, { db, protectedTags: 0 })!;

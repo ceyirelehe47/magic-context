@@ -26,6 +26,20 @@ describe("nudge (ctx_reduce Channel-1 parity)", () => {
     expect(metrics.lastInputTokens).toBe(5000);
   });
 
+  it("counts cached prompt tokens and keeps only the LAST call (DSH 0.2 exclusive TokenUsage)", () => {
+    const metrics = scanSessionMetrics(
+      fakeAgent([
+        { type: "request/context", data: { contextWindow: 200000 } },
+        { type: "assistant/message", data: { usage: { inputTokens: 9000, cacheReadTokens: 1000, outputTokens: 5 } } },
+        {
+          type: "assistant/message",
+          data: { usage: { inputTokens: 300, cacheReadTokens: 12000, cacheWriteTokens: 700, outputTokens: 5 } },
+        },
+      ]),
+    );
+    expect(metrics.lastInputTokens).toBe(13000);
+  });
+
   it("persists nudge cadence state and stays silent below the floor", async () => {
     const { db, dir, sessionId } = await openDb();
     try {
