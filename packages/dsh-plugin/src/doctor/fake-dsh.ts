@@ -72,7 +72,11 @@ export function fakeDshInstall(root: string, options: FakeInstallOptions = {}): 
     join(scope, "dsh-web-app"),
     {
       name: "@deepseek-ai/dsh-web-app",
-      dsh: { bundle: { patch: ["./cordis.patch.yml", "./presets/standard.patch.yml"] } },
+      dsh: {
+        bundle: {
+          patch: ["./cordis.patch.yml", "./presets/standard.patch.yml", "./presets/minimal.patch.yml", "./presets/ptc.patch.yml"],
+        },
+      },
     },
     {
       "cordis.patch.yml": [{ id: "compaction-basic", disabled: true }],
@@ -83,6 +87,45 @@ export function fakeDshInstall(root: string, options: FakeInstallOptions = {}): 
               id: "preset-standard",
               name: "@deepseek-ai/dsh-agent-preset",
               config: { id: "standard", order: 1, plugins: (options.presetPlugins ?? ((r) => r))(plugins) },
+            },
+          ],
+        },
+      ],
+      // minimal isolates only the compaction realm (no tool-result-pruner).
+      "presets/minimal.patch.yml": [
+        {
+          insert: [
+            {
+              id: "preset-minimal",
+              name: "@deepseek-ai/dsh-agent-preset",
+              config: {
+                id: "minimal",
+                order: 3,
+                plugins: [
+                  { id: "persona", name: "@deepseek-ai/dsh-persona", config: { complete: true } },
+                  {
+                    id: "compaction",
+                    name: "cordis:group",
+                    group: true,
+                    isolate: { compaction: true },
+                    config: [
+                      { id: "compaction-basic", name: "@deepseek-ai/dsh-compaction-basic" },
+                      { id: "command-compact", name: "@deepseek-ai/dsh-command-compact" },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+      "presets/ptc.patch.yml": [
+        {
+          insert: [
+            {
+              id: "preset-ptc",
+              name: "@deepseek-ai/dsh-agent-preset",
+              config: { id: "ptc", order: 2, plugins: [{ id: "persona", name: "@deepseek-ai/dsh-persona" }, stockCompactionGroup()] },
             },
           ],
         },

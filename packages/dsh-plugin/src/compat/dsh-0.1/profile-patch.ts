@@ -41,6 +41,15 @@ export const MAGIC_ROWS = {
   agent: { id: "magic-agent", name: "dsh-magic-context/agent" },
 } as const;
 
+/** Host-plane replacement of the stock token-meter row (entries/meter.ts). */
+export const MAGIC_METER_ROW = { id: "magic-meter", name: "dsh-magic-context/meter" } as const;
+/** Stock dsh-base root row the MC meter replaces (native composer meter). */
+export const STOCK_TOKEN_METER_ROW_ID = "token-meter";
+/** The single pseudo-preset of the flat (headless/tui) layout. */
+export const FLAT_PRESET_NAME = "root";
+/** Selection marker line written at the top of the managed block. */
+export const SELECTION_MARKER = "# magic-presets:";
+
 export const MANAGED_BEGIN = "# >>> dsh-magic-context (managed by `dsh-magic-context setup`; do not edit inside) >>>";
 export const MANAGED_END = "# <<< dsh-magic-context <<<";
 
@@ -77,8 +86,148 @@ export function scanFlatBaseLayout(basePatches: readonly Row[]): string | undefi
 export function buildFlatProfileEntries(): PatchEntry[] {
   return [
     { id: STOCK_COMPACTION_BASIC_ROW.id, disabled: true },
-    { insert: [{ ...MAGIC_ROWS.compaction, config: { ...MAGIC_ROWS.compaction.config } }, { ...MAGIC_ROWS.agent }] },
+    { id: STOCK_TOKEN_METER_ROW_ID, disabled: true },
+    {
+      insert: [
+        { ...MAGIC_ROWS.compaction, config: { ...MAGIC_ROWS.compaction.config } },
+        { ...MAGIC_ROWS.agent },
+        { ...MAGIC_METER_ROW, config: { flat: true } },
+      ],
+    },
   ];
+}
+
+/** Every `@deepseek-ai/dsh-agent-preset` row the given patch lists insert, by preset id. */
+export function presetRowsOf(patchLists: readonly (readonly Row[])[]): Map<string, Row> {
+  const out = new Map<string, Row>();
+  for (const patches of patchLists) {
+    for (const row of insertedRows(patches)) {
+      if (row.name !== AGENT_PRESET_PLUGIN) continue;
+      const presetId = (row.config as { id?: unknown } | undefined)?.id;
+      if (typeof presetId === "string" && typeof row.id === "string") out.set(presetId, row);
+    }
+  }
+  return out;
+}
+
+/**
+ * Relaxed per-preset contract scan (any stock preset, not just `standard`):
+ * an isolated `compaction` group whose isolate carries `compaction` and whose
+ * children hold the stock `compaction-basic` row. (`minimal` isolates only
+ * `compaction`; `standard`/`ptc`/`cordis` add `toolResultPruner`.)
+ */
+export function scanPresetRow(row: Row): string | undefined {
+  const plugins = (row.config as { plugins?: unknown } | undefined)?.plugins;
+  if (!Array.isArray(plugins)) return `${String(row.id)}: config.plugins missing`;
+  const group = (plugins as Row[]).find((entry) => entry.id === "compaction");
+  if (group === undefined) return `${String(row.id)}: compaction group row missing`;
+  if (group.name !== "cordis:group" || !group.group) return `${String(row.id)}: compaction row is not a cordis:group`;
+  if ((group.isolate as { compaction?: unknown } | undefined)?.compaction !== true) {
+    return `${String(row.id)}: compaction group does not isolate the compaction realm`;
+  }
+  const children = (group.config as Row[] | undefined) ?? [];
+  const basic = children.find((entry) => entry.id === STOCK_COMPACTION_BASIC_ROW.id);
+  if (basic === undefined) return `${String(row.id)}: compaction-basic row missing`;
+  if (basic.name !== STOCK_COMPACTION_BASIC_ROW.name) return `${String(row.id)}: compaction-basic name mismatch`;
+  return undefined;
+}
+
+/** The guarded compaction patch + the magic-agent row, applied to one preset's plugins. */
+export function magicPresetPlugins(plugins: readonly Row[]): Row[] {
+  return applyEntryPatches(
+    structuredClone(plugins) as unknown as Parameters<typeof applyEntryPatches>[0],
+    [
+      { id: STOCK_COMPACTION_BASIC_ROW.id, name: STOCK_COMPACTION_BASIC_ROW.name, disabled: true },
+      { id: "compaction", insert: [{ ...MAGIC_ROWS.compaction, config: { ...MAGIC_ROWS.compaction.config } }] },
+      { insert: [{ ...MAGIC_ROWS.agent }] },
+    ] as unknown as Parameters<typeof applyEntryPatches>[1],
+    () => {},
+  ) as unknown as Row[];
+}
+
+/** Normalise a preset selection (dedupe, stable order). */
+export function normaliseSelection(selection: readonly string[]): string[] {
+  return [...new Set(selection.map((name) => name.trim()).filter((name) => name.length > 0))].sort();
+}
+
+/** Selection marker line for the block body. */
+export function selectionLine(selection: readonly string[]): string {
+  return `${SELECTION_MARKER} ${normaliseSelection(selection).join(",")}`;
+}
+
+/**
+ * The preset selection recorded in a managed block body. A pre-selection
+ * block (setup ≤ round 5) carried no marker: it wired exactly the default
+ * (web: the `magic-standard` clone; flat: the root tree).
+ */
+export function selectionOfBlock(body: string | undefined, layout: ProfileLayout): string[] | undefined {
+  if (body === undefined) return undefined;
+  const line = body.split("\n").find((candidate) => candidate.startsWith(SELECTION_MARKER));
+  if (line === undefined) return [layout === "flat" ? FLAT_PRESET_NAME : MAGIC_PRESET_ID];
+  return normaliseSelection(line.slice(SELECTION_MARKER.length).split(","));
+}
+
+/**
+ * Managed entries for a preset selection.
+ *
+ *  - flat: `root` selected → disable compaction-basic + token-meter, insert
+ *    magic-compaction / magic-agent / magic-meter at the root.
+ *  - web: each selected STOCK preset row is patched in place (`{ id:
+ *    preset-<id>, config }` restating the stock config with the guarded
+ *    compaction patch + magic-agent); `magic-standard` inserts the generated
+ *    clone of `standard`; the root token-meter row is disabled and
+ *    magic-meter inserted (configured with the managed preset ids).
+ *
+ * Returns [] for an empty selection (setup then removes the block).
+ */
+export function buildMagicEntries(input: {
+  readonly layout: ProfileLayout;
+  readonly selection: readonly string[];
+  /** web: stock preset rows by preset id (presetRowsOf). */
+  readonly presets?: ReadonlyMap<string, Row>;
+}): PatchEntry[] {
+  const selection = normaliseSelection(input.selection);
+  if (selection.length === 0) return [];
+  if (input.layout === "flat") {
+    const unknown = selection.filter((name) => name !== FLAT_PRESET_NAME);
+    if (unknown.length > 0) {
+      throw new Error(
+        `flat (headless/tui) profiles have one root tree, no agent presets; unknown preset(s): ${unknown.join(", ")} (use \`${FLAT_PRESET_NAME}\`)`,
+      );
+    }
+    return buildFlatProfileEntries();
+  }
+  const presets = input.presets ?? new Map<string, Row>();
+  const entries: PatchEntry[] = [{ id: STOCK_TOKEN_METER_ROW_ID, disabled: true }];
+  const inserts: Record<string, unknown>[] = [];
+  for (const presetId of selection) {
+    if (presetId === MAGIC_PRESET_ID) {
+      const standard = presets.get("standard");
+      if (standard === undefined) throw new Error("magic-standard: the stock `standard` preset row is missing");
+      const issue = scanPresetRow(standard);
+      if (issue !== undefined) throw new Error(`magic-standard: ${issue}`);
+      const stockConfig = standard.config as { plugins: Row[] };
+      inserts.push({
+        id: MAGIC_PRESET_ROW_ID,
+        name: AGENT_PRESET_PLUGIN,
+        config: { ...stockConfig, id: MAGIC_PRESET_ID, order: 10, plugins: magicPresetPlugins(stockConfig.plugins) },
+      });
+      continue;
+    }
+    const row = presets.get(presetId);
+    if (row === undefined) {
+      throw new Error(
+        `unknown agent preset \`${presetId}\` (known: ${[...presets.keys(), MAGIC_PRESET_ID].sort().join(", ")})`,
+      );
+    }
+    const issue = scanPresetRow(row);
+    if (issue !== undefined) throw new Error(issue);
+    const stockConfig = row.config as { plugins: Row[] };
+    entries.push({ id: String(row.id), config: { ...stockConfig, plugins: magicPresetPlugins(stockConfig.plugins) } });
+  }
+  inserts.push({ ...MAGIC_METER_ROW, config: { magicPresets: selection } });
+  entries.push({ insert: inserts });
+  return entries;
 }
 
 /** Find the stock `preset-standard` row in the web preset patch list. */
@@ -155,6 +304,19 @@ export function mergeManagedBlock(existing: string | undefined, blockBody: strin
   throw new Error(
     "profile cordis.patch.yml is not a block-style YAML list; add the managed block by hand",
   );
+}
+
+/**
+ * Remove the managed block (selection emptied). A file left with no YAML
+ * gets the shipped empty list back so the loader still reads a list.
+ */
+export function removeManagedBlock(existing: string): string {
+  const begin = existing.indexOf(MANAGED_BEGIN);
+  const end = existing.indexOf(MANAGED_END);
+  if (begin < 0 || end <= begin) return existing;
+  const rest = (existing.slice(0, begin) + existing.slice(end + MANAGED_END.length).replace(/^\n/, "")).replace(/\n*$/, "\n");
+  const yamlLines = rest.split("\n").filter((line) => line.trim() !== "" && !line.trimStart().startsWith("#"));
+  return yamlLines.length === 0 ? `${rest.replace(/\n*$/, "\n")}[]\n` : rest;
 }
 
 /** Extract the managed block body (undefined when absent). */

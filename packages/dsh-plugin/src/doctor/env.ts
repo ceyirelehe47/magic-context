@@ -303,6 +303,29 @@ export function parseFlags(
   return { flags, positionals };
 }
 
+/**
+ * Every value of a repeatable flag (`--preset a --preset b,c` → [a, b, c]).
+ * parseFlags keeps only the last occurrence, so list flags read argv directly.
+ */
+export function listFlag(argv: readonly string[], name: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i]!;
+    let value: string | undefined;
+    if (token === `--${name}`) {
+      const next = argv[i + 1];
+      if (next !== undefined && !next.startsWith("-")) {
+        value = next;
+        i += 1;
+      }
+    } else if (token.startsWith(`--${name}=`)) {
+      value = token.slice(name.length + 3);
+    }
+    if (value !== undefined) out.push(...value.split(",").map((part) => part.trim()).filter((part) => part.length > 0));
+  }
+  return out;
+}
+
 /** Stable human-readable error text for a thrown value. */
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;

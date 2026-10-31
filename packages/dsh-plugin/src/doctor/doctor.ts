@@ -40,7 +40,12 @@ import {
   stringFlag,
 } from "./env";
 import { parseEntryListYaml, planProfileWiring } from "./profile-wiring";
-import { readManagedBlock } from "../compat/dsh-0.1/profile-patch";
+import {
+  MAGIC_METER_ROW,
+  STOCK_TOKEN_METER_ROW_ID,
+  readManagedBlock,
+} from "../compat/dsh-0.1/profile-patch";
+import { selectionChangeOf } from "./setup";
 
 function safeParse(text: string): Record<string, unknown>[] {
   try {
@@ -360,15 +365,16 @@ export async function runDshDoctor(
         fix: "Run `dsh-magic-context setup --profile <name>`.",
       });
     }
+    const expect = selectionChangeOf(argv);
     for (const name of wired) {
       const plan = planProfileWiring({ dshHome, dshInstallDir: located.dshInstallDir, profile: name });
       const text = existsSync(plan.patchPath) ? readFileSync(plan.patchPath, "utf8") : "";
       const block = readManagedBlock(text);
       let status: CheckStatus = "ok";
       let detail: string;
-      if (plan.issue !== undefined || plan.blockBody === undefined) {
+      if (plan.issue !== undefined) {
         status = "fail";
-        detail = `${plan.scannedFile ?? plan.profileDir}: stock layout changed (${plan.issue ?? "no wiring"}).`;
+        detail = `${plan.scannedFile ?? plan.profileDir}: stock layout changed (${plan.issue}).`;
       } else if (block === undefined) {
         // A hand-written layer is acceptable when it carries the same rows.
         const rows = safeParse(text);
@@ -379,10 +385,10 @@ export async function runDshDoctor(
         status = hand ? "warn" : "fail";
         detail = hand
           ? `${plan.patchPath}: Magic rows present but not in the setup-managed block (hand-written layer).`
-          : `${plan.patchPath}: no Magic rows — compaction-basic still active, the Magic agent plane is not mounted.`;
+          : `${plan.patchPath}: no Magic rows — compaction-basic still active, the Magic agent plane is not mounted in any preset.`;
       } else if (block !== plan.blockBody) {
         status = "fail";
-        detail = `${plan.patchPath}: managed block is stale (differs from the rows derived from ${plan.scannedFile}).`;
+        detail = `${plan.patchPath}: managed block is stale (differs from the rows derived from ${plan.scannedFile} for presets ${plan.selection.join(", ")}).`;
       } else {
         detail =
           `${plan.patchPath}: managed block up to date; layout ${plan.layout}; stock ${plan.scannedFile} re-scanned OK.`;
@@ -394,6 +400,48 @@ export async function runDshDoctor(
         detail,
         fix: status === "ok" ? undefined : `Run \`dsh-magic-context setup --profile ${name}\` (fails closed on a layout mismatch).`,
       });
+
+      // Per-preset enablement (+ the meter swap), checked against any
+      // --preset / --all-presets / --disable-preset expectations.
+      if (plan.issue === undefined) {
+        const enabled = new Set(block === undefined ? [] : plan.currentSelection ?? []);
+        const lines = plan.availablePresets.map((id) => `  - ${id}: ${enabled.has(id) ? "enabled" : "disabled"}`);
+        for (const [id, why] of Object.entries(plan.unsupportedPresets ?? {})) lines.push(`  - ${id}: unsupported (${why})`);
+        const rows = safeParse(block ?? "");
+        const flatRows = rows.flatMap((row) => [row, ...(Array.isArray(row.insert) ? (row.insert as Record<string, unknown>[]) : [])]);
+        const meterSwapped =
+          flatRows.some((row) => row.id === STOCK_TOKEN_METER_ROW_ID && row.disabled === true) &&
+          flatRows.some((row) => row.id === MAGIC_METER_ROW.id);
+        if (enabled.size > 0) {
+          lines.push(
+            meterSwapped
+              ? "  - composer indicator: Magic Context meter (stock token-meter row disabled → magic-meter)"
+              : "  - composer indicator: NATIVE (token-meter not swapped; re-run setup to get the MC indicator)",
+          );
+        }
+        const wantOn = expect.all === true ? plan.availablePresets.filter((id) => id !== "magic-standard") : [...(expect.add ?? [])];
+        const wantOff = [...(expect.remove ?? [])];
+        const missing = wantOn.filter((id) => !enabled.has(id));
+        const extra = wantOff.filter((id) => enabled.has(id));
+        const unknown = [...wantOn, ...wantOff].filter((id) => !plan.availablePresets.includes(id));
+        const presetStatus: CheckStatus =
+          unknown.length > 0 || missing.length > 0 || extra.length > 0 ? "fail" : enabled.size > 0 && !meterSwapped ? "warn" : "ok";
+        const problems = [
+          ...(unknown.length > 0 ? [`unknown preset(s): ${unknown.join(", ")}`] : []),
+          ...(missing.length > 0 ? [`expected enabled but disabled: ${missing.join(", ")}`] : []),
+          ...(extra.length > 0 ? [`expected disabled but enabled: ${extra.join(", ")}`] : []),
+        ];
+        checks.push({
+          id: `preset-state.${name}`,
+          title: `Magic per preset — profile ${name}`,
+          status: presetStatus,
+          detail: `${plan.layout === "flat" ? "flat root tree" : "web agent presets"}:\n${lines.join("\n")}${problems.length > 0 ? `\n${problems.join("; ")}` : ""}`,
+          fix:
+            presetStatus === "ok"
+              ? undefined
+              : `dsh-magic-context setup --profile ${name} [--preset <id>] [--all-presets] [--disable-preset <id>]`,
+        });
+      }
     }
   }
 

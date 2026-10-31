@@ -86,13 +86,16 @@ describe("dsh-magic-context setup (DSH 0.2 profile layer)", () => {
       const rows = parseEntryListYaml(patchText);
       expect(rows).toEqual([
         { id: "compaction-basic", disabled: true },
+        { id: "token-meter", disabled: true },
         {
           insert: [
             { id: "magic-compaction", name: "dsh-magic-context/compaction", config: { auto: true } },
             { id: "magic-agent", name: "dsh-magic-context/agent" },
+            { id: "magic-meter", name: "dsh-magic-context/meter", config: { flat: true } },
           ],
         },
       ]);
+      expect(readManagedBlock(patchText)?.startsWith("# magic-presets: root\n")).toBe(true);
 
       // Idempotent second run.
       const again = await runDshSetup(["--profile", "test"], {
@@ -120,8 +123,11 @@ describe("dsh-magic-context setup (DSH 0.2 profile layer)", () => {
       });
       expect(report.exitCode).toBe(0);
       const rows = parseEntryListYaml(readFileSync(join(dir, "cordis.patch.yml"), "utf8"));
-      expect(rows).toHaveLength(1);
-      const preset = (rows[0].insert as Row[])[0];
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toEqual({ id: "token-meter", disabled: true });
+      const inserted = rows[1].insert as Row[];
+      expect(inserted[1]).toEqual({ id: "magic-meter", name: "dsh-magic-context/meter", config: { magicPresets: ["magic-standard"] } });
+      const preset = inserted[0];
       expect(preset.id).toBe("preset-magic-standard");
       expect(preset.name).toBe("@deepseek-ai/dsh-agent-preset");
       const config = preset.config as { id: string; plugins: Row[] };

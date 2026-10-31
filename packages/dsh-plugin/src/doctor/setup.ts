@@ -23,11 +23,17 @@ import {
   parseJsonc,
   readJsoncFile,
 } from "@magic-context/core/shared/jsonc-parser";
-import { mergeManagedBlock, readManagedBlock, MAGIC_PRESET_ID } from "../compat/dsh-0.1/profile-patch";
+import {
+  mergeManagedBlock,
+  readManagedBlock,
+  removeManagedBlock,
+  MAGIC_PRESET_ID,
+} from "../compat/dsh-0.1/profile-patch";
 import {
   DSH_COMPAT_EXPECTED_VERSION,
   MAGIC_CONTEXT_PACKAGE,
   errorMessage,
+  listFlag,
   locateDshInstall,
   parseFlags,
   resolveDshHome,
@@ -39,6 +45,7 @@ import {
   dumpEntryListYaml,
   parseEntryListYaml,
   planProfileWiring,
+  type PresetSelectionChange,
 } from "./profile-wiring";
 
 export { dumpEntryListYaml, parseEntryListYaml };
@@ -88,6 +95,16 @@ export interface DshSetupOptions {
   readonly dryRun?: boolean;
   /** Profile to wire (`--profile`). */
   readonly profile?: string;
+}
+
+/** Selection flags of a setup run (`--preset`, `--all-presets`, `--disable-preset`). */
+export function selectionChangeOf(argv: readonly string[]): PresetSelectionChange {
+  const { flags } = parseFlags(argv);
+  return {
+    add: listFlag(argv, "preset"),
+    remove: listFlag(argv, "disable-preset"),
+    all: flags["all-presets"] === true,
+  };
 }
 
 /** Minimal, schema-valid user config (JSONC with a comment header). */
@@ -179,9 +196,9 @@ export async function runDshSetup(
   // 4. Contract scan + wiring plan (fail closed).
   let plan: ReturnType<typeof planProfileWiring> | undefined;
   if (!failed && located.dshInstallDir !== undefined && profile !== undefined) {
-    plan = planProfileWiring({ dshHome, dshInstallDir: located.dshInstallDir, profile });
+    plan = planProfileWiring({ dshHome, dshInstallDir: located.dshInstallDir, profile, change: selectionChangeOf(argv) });
     layoutLabel = plan.layout === "flat" ? "flat (headless/tui root tree)" : "preset (web agent presets)";
-    if (plan.issue !== undefined || plan.blockBody === undefined) {
+    if (plan.issue !== undefined || (plan.blockBody === undefined && plan.selection.length > 0)) {
       steps.push({
         status: "fail",
         title: "Stock layout contract scan",
@@ -195,6 +212,17 @@ export async function runDshSetup(
         status: "ok",
         title: "Stock layout contract scan",
         detail: `profile ${profile}: layout ${layoutLabel}; ${plan.scannedFile} matches the expected rows.`,
+      });
+      const before = plan.currentSelection === undefined ? "(not wired)" : plan.currentSelection.join(", ") || "(none)";
+      steps.push({
+        status: "ok",
+        title: "Preset selection",
+        detail:
+          `Magic enabled in: ${plan.selection.length === 0 ? "(none — Magic rows will be removed)" : plan.selection.join(", ")} ` +
+          `(was: ${before}); available: ${plan.availablePresets.join(", ")}` +
+          (plan.unsupportedPresets !== undefined
+            ? `; unsupported: ${Object.entries(plan.unsupportedPresets).map(([id, why]) => `${id} (${why})`).join("; ")}`
+            : ""),
       });
     }
   }
@@ -244,6 +272,34 @@ export async function runDshSetup(
     }
   }
 
+  // 6a. Empty selection: Magic disabled in every preset → remove the block
+  //     (stock compaction-basic + token-meter come back; host rows stay).
+  if (!failed && plan !== undefined && plan.blockBody === undefined && plan.selection.length === 0) {
+    try {
+      const existing = existsSync(plan.patchPath) ? readFileSync(plan.patchPath, "utf8") : undefined;
+      if (existing === undefined || readManagedBlock(existing) === undefined) {
+        steps.push({ status: "ok", title: "Profile patch layer", detail: `${plan.patchPath}: no managed block; nothing to remove.` });
+      } else {
+        const stripped = removeManagedBlock(existing);
+        parseEntryListYaml(stripped);
+        if (dryRun) {
+          steps.push({ status: "ok", title: "Profile patch layer (dry run)", detail: `would remove the managed block from ${plan.patchPath}.` });
+        } else {
+          writeFileAtomic(plan.patchPath, stripped, 0o644);
+          generatedFiles.push(plan.patchPath);
+          steps.push({
+            status: "ok",
+            title: "Profile patch layer",
+            detail: `removed the managed block from ${plan.patchPath} (stock compaction + token-meter restored in every preset).`,
+          });
+        }
+      }
+    } catch (error) {
+      steps.push({ status: "fail", title: "Profile patch layer", detail: `${plan.patchPath}: ${errorMessage(error)}` });
+      failed = true;
+    }
+  }
+
   // 6. Profile patch layer (managed block).
   if (!failed && plan !== undefined && plan.blockBody !== undefined) {
     try {
@@ -265,8 +321,8 @@ export async function runDshSetup(
             detail:
               `wrote the managed block into ${plan.patchPath} (` +
               (plan.layout === "flat"
-                ? "compaction-basic disabled; magic-compaction + magic-agent inserted"
-                : `agent preset ${MAGIC_PRESET_ID} inserted`) +
+                ? "compaction-basic + token-meter disabled; magic-compaction, magic-agent, magic-meter inserted"
+                : `Magic enabled in agent preset(s) ${plan.selection.join(", ")}; token-meter → magic-meter`) +
               ").",
           });
         }
@@ -349,10 +405,13 @@ export async function runDshSetup(
     nextSteps.push("Fix the failing steps above, then re-run `dsh-magic-context setup`.");
   } else if (plan !== undefined) {
     nextSteps.push(`Check the composed tree: dsh --profile ${plan.profile} --dump-config | grep magic-`);
-    if (plan.layout === "preset") {
+    if (plan.layout === "preset" && plan.selection.includes(MAGIC_PRESET_ID)) {
       nextSteps.push(
         `Select the \`${MAGIC_PRESET_ID}\` agent preset for new sessions (Settings → Agent preset).`,
       );
+    }
+    if (plan.layout === "preset" && plan.selection.some((id) => id !== MAGIC_PRESET_ID)) {
+      nextSteps.push("New sessions of the patched stock presets run Magic Context; existing sessions keep their composition until restarted.");
     }
     nextSteps.push(`Verify with: dsh-magic-context doctor --profile ${plan.profile}`);
   }
