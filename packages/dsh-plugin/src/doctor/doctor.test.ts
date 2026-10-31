@@ -9,8 +9,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { dump as yamlDump, load as yamlLoad } from "js-yaml";
-import { entryListSchema } from "@deepseek-ai/cordis-plugin-include";
 import { Database } from "@magic-context/core/shared/sqlite";
 import {
   LATEST_SUPPORTED_VERSION,
@@ -24,53 +22,17 @@ import {
   scanLivenessMarkers,
 } from "./doctor";
 import { runDshSetup } from "./setup";
-import {
-  DSH_COMPAT_EXPECTED_VERSION,
-  MAGIC_CONTEXT_PACKAGE,
-  magicEntryPath,
-  magicStandardAgentCordisPath,
-  magicStandardDir,
-} from "./env";
+import { DSH_COMPAT_EXPECTED_VERSION, MAGIC_CONTEXT_PACKAGE } from "./env";
+import { fakeDshInstall, fakeDshProfile } from "./fake-dsh";
+import { MANAGED_BEGIN } from "../compat/dsh-0.1/profile-patch";
 
-/** Minimal stand-in for the stock standard preset layout (same as setup.test). */
-function stockLayout(): Record<string, unknown>[] {
-  return [
-    { id: "persona", name: "@deepseek-ai/dsh-persona", config: { text: "x" } },
-    {
-      id: "compaction",
-      name: "cordis:group",
-      group: true,
-      isolate: { compaction: true, toolResultPruner: true },
-      config: [
-        { id: "compaction-basic", name: "@deepseek-ai/dsh-compaction-basic" },
-        { id: "command-compact", name: "@deepseek-ai/dsh-command-compact" },
-        { id: "tool-result-pruner", name: "@deepseek-ai/dsh-compaction-tool-result-pruner" },
-      ],
-    },
-    { id: "tool-ask-user", name: "@deepseek-ai/dsh-tool-ask-user" },
-  ];
-}
-
-/** Fake dsh install: package.json + the system standard preset. */
-function fakeInstall(installDir: string, version = DSH_COMPAT_EXPECTED_VERSION): string {
-  mkdirSync(installDir, { recursive: true });
-  writeFileSync(
-    join(installDir, "package.json"),
-    JSON.stringify({ name: "@deepseek-ai/dsh", version }),
-  );
-  const stock = join(installDir, "config", "agent-presets", "standard", "agent.cordis.yml");
-  mkdirSync(dirname(stock), { recursive: true });
-  writeFileSync(stock, yamlDump(stockLayout(), { schema: entryListSchema }));
-  return stock;
+/** Fake 0.2 dsh install (hoisted @deepseek-ai tree); returns the dsh package dir. */
+function fakeInstall(root: string, version = DSH_COMPAT_EXPECTED_VERSION): string {
+  return fakeDshInstall(root, { version });
 }
 
 function fakeProfile(dshHome: string, name: string, bundles: string[]): void {
-  const dir = join(dshHome, "profiles", name);
-  mkdirSync(join(dir, "node_modules", MAGIC_CONTEXT_PACKAGE), { recursive: true });
-  writeFileSync(
-    join(dir, "package.json"),
-    JSON.stringify({ name, dsh: { profile: { bundles } } }),
-  );
+  fakeDshProfile(dshHome, name, bundles);
 }
 
 interface TestEnv {
@@ -183,24 +145,14 @@ describe("dsh-magic-context doctor (Phase 2 slice C)", () => {
     const env = makeEnv();
     process.env.XDG_CONFIG_HOME = env.configHome;
     try {
-      fakeInstall(env.installDir);
+      env.installDir = fakeInstall(join(env.root, "install"));
       fakeProfile(env.dshHome, "web", [MAGIC_CONTEXT_PACKAGE]);
-      const setup = await runDshSetup([], {
+      const setup = await runDshSetup(["--profile", "web"], {
         dshHome: env.dshHome,
         dshInstallDir: env.installDir,
       });
       expect(setup.exitCode).toBe(0);
-      // The doctor's preset check verifies the include row names this
-      // package's no-write entry (dist/entries/preset-include.js). Ensure the
-      // built file exists for the test run (dist is not git-tracked). Save any
-      // existing content and RESTORE it afterwards — deleting the file outright
-      // destroys a real build done before the test run, breaking later E2E.
-      const includeEntryPath = magicEntryPath("preset-include");
-      mkdirSync(dirname(includeEntryPath), { recursive: true });
-      const originalEntry =
-        existsSync(includeEntryPath) ? readFileSync(includeEntryPath, "utf8") : null;
-      writeFileSync(includeEntryPath, "export default class {}\n");
-      try {
+      {
         // Pre-create the shared DB so the shared-db check classifies ok. The
         // core caches handles by path: keep this handle open (do NOT close it)
         // or the doctor's reopen would see a closed cached handle; the doctor
@@ -220,16 +172,10 @@ describe("dsh-magic-context doctor (Phase 2 slice C)", () => {
         const checks = byId(report);
         expect(checks.get("dsh-version")?.status).toBe("ok");
         expect(checks.get("bundle-install.web")?.status).toBe("ok");
-        expect(checks.get("preset-generated")?.status).toBe("ok");
+        expect(checks.get("profile-wiring.web")?.status).toBe("ok");
         expect(checks.get("shared-db")?.status).toBe("ok");
         expect(checks.get("liveness-markers")?.status).toBe("ok");
         expect(checks.get("config-load")?.status).toBe("ok");
-      } finally {
-        if (originalEntry !== null) {
-          writeFileSync(includeEntryPath, originalEntry);
-        } else {
-          rmSync(includeEntryPath, { force: true });
-        }
       }
     } finally {
       delete process.env.XDG_CONFIG_HOME;
@@ -241,7 +187,7 @@ describe("dsh-magic-context doctor (Phase 2 slice C)", () => {
     const env = makeEnv();
     process.env.XDG_CONFIG_HOME = env.configHome;
     try {
-      fakeInstall(env.installDir, "0.1.0-rc.5");
+      env.installDir = fakeInstall(join(env.root, "install"), "0.1.0-rc.5");
       const report = await runDshDoctor([], {
         dshHome: env.dshHome,
         dshInstallDir: env.installDir,
@@ -261,7 +207,7 @@ describe("dsh-magic-context doctor (Phase 2 slice C)", () => {
     const env = makeEnv();
     process.env.XDG_CONFIG_HOME = env.configHome;
     try {
-      fakeInstall(env.installDir);
+      env.installDir = fakeInstall(join(env.root, "install"));
       fakeProfile(env.dshHome, "web", ["@deepseek-ai/dsh-base"]);
       const report = await runDshDoctor([], {
         dshHome: env.dshHome,
@@ -279,57 +225,51 @@ describe("dsh-magic-context doctor (Phase 2 slice C)", () => {
     }
   });
 
-  it("fails the preset check when magic-standard was never generated", async () => {
+  it("fails the profile-wiring check when setup never wrote the Magic rows", async () => {
     const env = makeEnv();
     process.env.XDG_CONFIG_HOME = env.configHome;
     try {
-      fakeInstall(env.installDir);
-      fakeProfile(env.dshHome, "web", [MAGIC_CONTEXT_PACKAGE]);
+      env.installDir = fakeInstall(join(env.root, "install"));
+      fakeProfile(env.dshHome, "test", ["@deepseek-ai/dsh-base", MAGIC_CONTEXT_PACKAGE]);
       const report = await runDshDoctor([], {
         dshHome: env.dshHome,
         dshInstallDir: env.installDir,
         directory: env.work,
-        profile: "web",
+        profile: "test",
       });
-      const preset = byId(report).get("preset-generated");
-      expect(preset?.status).toBe("fail");
-      expect(existsSync(magicStandardDir(env.dshHome))).toBe(false);
+      const wiring = byId(report).get("profile-wiring.test");
+      expect(wiring?.status).toBe("fail");
+      expect(wiring?.detail).toContain("compaction-basic still active");
+      expect(report.exitCode).toBe(1);
     } finally {
       delete process.env.XDG_CONFIG_HOME;
       await cleanup(env.root);
     }
   });
 
-  it("fails the preset check when the include row uses the raw include (write-back regression)", async () => {
+  it("fails the profile-wiring check on a stale managed block", async () => {
     const env = makeEnv();
     process.env.XDG_CONFIG_HOME = env.configHome;
     try {
-      fakeInstall(env.installDir);
-      fakeProfile(env.dshHome, "web", [MAGIC_CONTEXT_PACKAGE]);
-      const setup = await runDshSetup([], {
+      env.installDir = fakeInstall(join(env.root, "install"));
+      fakeProfile(env.dshHome, "test", ["@deepseek-ai/dsh-base"]);
+      const setup = await runDshSetup(["--profile", "test"], {
         dshHome: env.dshHome,
         dshInstallDir: env.installDir,
       });
       expect(setup.exitCode).toBe(0);
-      // Simulate a preset generated by an old setup (or manually edited): the
-      // include row names the raw include plugin again.
-      const agentCordisPath = magicStandardAgentCordisPath(env.dshHome);
-      const entries = yamlLoad(readFileSync(agentCordisPath, "utf8"), {
-        schema: entryListSchema,
-      }) as Record<string, unknown>[];
-      const includeRow = entries.find((row) => row.id === "magic-include-standard");
-      expect(includeRow).toBeDefined();
-      includeRow!.name = "@deepseek-ai/cordis-plugin-include";
-      writeFileSync(agentCordisPath, yamlDump(entries, { schema: entryListSchema }));
+      const patchPath = join(env.dshHome, "profiles", "test", "cordis.patch.yml");
+      const text = readFileSync(patchPath, "utf8");
+      expect(text).toContain(MANAGED_BEGIN);
+      writeFileSync(patchPath, text.replace("dsh-magic-context/agent", "dsh-magic-context/agent-old"));
       const report = await runDshDoctor([], {
         dshHome: env.dshHome,
         dshInstallDir: env.installDir,
         directory: env.work,
-        profile: "web",
+        profile: "test",
       });
-      const preset = byId(report).get("preset-generated");
-      expect(preset?.status).toBe("fail");
-      expect(preset?.detail).toContain("truncates the shipped stock preset");
+      expect(byId(report).get("profile-wiring.test")?.status).toBe("fail");
+      expect(byId(report).get("profile-wiring.test")?.detail).toContain("stale");
     } finally {
       delete process.env.XDG_CONFIG_HOME;
       await cleanup(env.root);
@@ -340,7 +280,7 @@ describe("dsh-magic-context doctor (Phase 2 slice C)", () => {
     const env = makeEnv();
     process.env.XDG_CONFIG_HOME = env.configHome;
     try {
-      fakeInstall(env.installDir);
+      env.installDir = fakeInstall(join(env.root, "install"));
       fakeProfile(env.dshHome, "web", [MAGIC_CONTEXT_PACKAGE]);
       const dbPath = join(env.root, "storage", "context.db");
       mkdirSync(dirname(dbPath), { recursive: true });
