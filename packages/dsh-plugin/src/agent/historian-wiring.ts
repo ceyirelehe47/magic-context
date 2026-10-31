@@ -54,53 +54,99 @@ export function currentModel(ctx: Context): string {
 }
 
 /**
+ * The token-meter projection key and its wire view, verified against
+ * `@deepseek-ai/dsh-token-meter@0.2.1-rc.5`: `contextPressureProjectionDefinition`
+ * registers `key: "contextPressure"` and its `wire.view` publishes
+ * `{ contextWindow?, pressureTokens?, projectedTokens? }` (all optional; absent
+ * until a provider reports usage / an adapter advertises a window). Pinned by
+ * `src/contracts/token-meter-projection.contract.test.ts`.
+ */
+export const CONTEXT_PRESSURE_PROJECTION_KEY = "contextPressure" as const;
+
+/** Wire view of the token-meter `contextPressure` projection (0.2.1-rc.5). */
+export interface DshContextPressureView {
+  readonly pressureTokens?: number;
+  readonly projectedTokens?: number;
+  readonly contextWindow?: number;
+}
+
+/** Normalise the projection view to the trigger sample (projected → pressure). */
+export function pressureSampleFromView(
+  view: DshContextPressureView,
+): { projectedTokens?: number; contextWindow?: number } | undefined {
+  const contextWindow =
+    typeof view.contextWindow === "number" && view.contextWindow > 0 ? view.contextWindow : undefined;
+  // `projectedTokens` is present whenever `pressureTokens` is (token-meter
+  // wire.view); it already folds post-sample surface movement (compactions).
+  const projectedTokens =
+    typeof view.projectedTokens === "number"
+      ? view.projectedTokens
+      : typeof view.pressureTokens === "number"
+        ? view.pressureTokens
+        : undefined;
+  if (contextWindow === undefined) return undefined;
+  return { projectedTokens, contextWindow };
+}
+
+/**
  * Read the current context pressure for the historian trigger (Phase 4):
- * `ctx.sessionProjections.snapshot(session).values.contextPressure` — the
- * tokenMeter fold units the host composes (last-wins per commit).
+ * `ctx.sessionProjections.snapshot(session, ["contextPressure"]).values.contextPressure`.
  *
- * Fallback (DSH 0.1.0-rc.6 environments where the token-meter projection
- * units never register — observed on the headless profile AND the live web:
- * `snapshot().values` comes back empty): scan the session event log for the
- * last `request/context` window and the LAST `assistant/message` call's
- * usage, mirroring the token-meter's `pressureFrom` semantics
- * (input + cacheRead + cacheWrite). This restores the historian pressure
- * trigger where the projection path yields nothing.
+ * Capability rule (dsh-session-projection): an absent key means the
+ * token-meter unit is not mounted in this preset. Only then do we derive the
+ * same figure from the session log (last `request/context` window + LAST
+ * call's prompt usage, token-meter `pressureFrom` semantics). A PRESENT key is
+ * authoritative — no secondary fallback when its fields are not yet available.
  */
 export function readContextPressure(ctx: Context): (agent: Agent) => { projectedTokens?: number; contextWindow?: number } | undefined {
   return (agent: Agent) => {
     const projections = ctx.get("sessionProjections") as
-      | { snapshot?: (session: unknown) => { values?: Record<string, unknown> } }
-      | undefined;
-    const pressure = projections?.snapshot?.(agent.session)?.values?.contextPressure as
-      | { projectedTokens?: number; contextWindow?: number }
-      | undefined;
-    if (pressure !== undefined) return pressure;
-    // Fallback: derive the pressure from the session's own event log.
-    try {
-      const events = sessionEvents(agent.session);
-      let contextWindow: number | undefined;
-      let projectedTokens = 0;
-      for (const event of events) {
-        if (event === null || typeof event !== "object") continue;
-        const e = event as { type?: unknown; data?: unknown };
-        if (e.type === "request/context") {
-          const cw = (e.data as { contextWindow?: unknown } | undefined)?.contextWindow;
-          if (typeof cw === "number" && cw > 0) contextWindow = cw;
-          continue;
+      | {
+          snapshot?: (
+            session: unknown,
+            keys?: readonly string[],
+          ) => { values?: Record<string, unknown> };
         }
-        if (e.type === "assistant/message") {
-          // Pressure is the LAST call's prompt (input + cacheRead + cacheWrite);
-          // summing across calls over-counts (each call re-sends the prompt).
-          const prompt = promptTokensOf((e.data as { usage?: unknown } | undefined)?.usage);
-          if (prompt !== undefined) projectedTokens = prompt;
-        }
-      }
-      if (typeof contextWindow !== "number" || contextWindow <= 0) return undefined;
-      return { projectedTokens, contextWindow };
-    } catch {
-      return undefined;
+      | undefined;
+    const values = projections?.snapshot?.(agent.session, [CONTEXT_PRESSURE_PROJECTION_KEY])?.values;
+    if (values !== undefined && Object.hasOwn(values, CONTEXT_PRESSURE_PROJECTION_KEY)) {
+      const view = values[CONTEXT_PRESSURE_PROJECTION_KEY];
+      return view !== null && typeof view === "object"
+        ? pressureSampleFromView(view as DshContextPressureView)
+        : undefined;
     }
+    return pressureFromSessionLog(agent);
   };
+}
+
+/** Token-meter-less presets: derive pressure from the session event log. */
+export function pressureFromSessionLog(
+  agent: Agent,
+): { projectedTokens?: number; contextWindow?: number } | undefined {
+  try {
+    const events = sessionEvents(agent.session);
+    let contextWindow: number | undefined;
+    let projectedTokens = 0;
+    for (const event of events) {
+      if (event === null || typeof event !== "object") continue;
+      const e = event as { type?: unknown; data?: unknown };
+      if (e.type === "request/context") {
+        const cw = (e.data as { contextWindow?: unknown } | undefined)?.contextWindow;
+        if (typeof cw === "number" && cw > 0) contextWindow = cw;
+        continue;
+      }
+      if (e.type === "assistant/message") {
+        // Pressure is the LAST call's prompt (input + cacheRead + cacheWrite);
+        // summing across calls over-counts (each call re-sends the prompt).
+        const prompt = promptTokensOf((e.data as { usage?: unknown } | undefined)?.usage);
+        if (prompt !== undefined) projectedTokens = prompt;
+      }
+    }
+    if (typeof contextWindow !== "number" || contextWindow <= 0) return undefined;
+    return { projectedTokens, contextWindow };
+  } catch {
+    return undefined;
+  }
 }
 
 /** Resolve the current provider/model route (fresh per call). */
