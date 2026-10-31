@@ -1,0 +1,46 @@
+# --patch overlay: real model routes through OpenCode Go (pi-ai adapter).
+#
+#   opencode-go      deepseek-v4.1-flash with a deliberately SMALL 24k window
+#                    (drives real context pressure -> historian trigger)
+#   opencode-go-big  same model, 200k window: the historian route
+#                    (the ~18k compartment prompt does not fit the 24k route:
+#                    finish=max-tokens after 1 output token)
+#
+# The key comes from OPENCODE_API_KEY (never written here); the session header
+# comes from OPENCODE_SESSION (run-e2e.sh sets a random one).
+- id: llm-pi-ai
+  config:
+    providers:
+      opencode-go:
+        displayName: OpenCode Go (24k)
+        apiKeyEnv: OPENCODE_API_KEY
+        api: openai-completions
+        baseURL: https://opencode.ai/zen/go/v1
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: deepseek-v4.1-flash
+            contextWindow: 24000
+            maxTokens: 4096
+      opencode-go-big:
+        displayName: OpenCode Go (200k, historian)
+        apiKeyEnv: OPENCODE_API_KEY
+        api: openai-completions
+        baseURL: https://opencode.ai/zen/go/v1
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: deepseek-v4.1-flash
+            contextWindow: 200000
+            maxTokens: 16384
+
+- id: agent-default-model
+  config:
+    provider: opencode-go
+    model: deepseek-v4.1-flash
+
+- id: magic-agent
+  config:
+    historian:
+      model: opencode-go-big/deepseek-v4.1-flash
+      executeThresholdPercentage: !!js Number(process.env.MC_HISTORIAN_THRESHOLD ?? 40)
