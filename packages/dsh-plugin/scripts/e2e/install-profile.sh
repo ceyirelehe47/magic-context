@@ -31,4 +31,9 @@ mkdir -p "$PDIR/node_modules/dsh-magic-context"
 tar -xzf "$TGZ" -C "$PDIR/node_modules/dsh-magic-context" --strip-components=1
 rm -f "$TGZ"
 ln -sfn "$E2E_ROOT/dsh/node_modules/@deepseek-ai" "$PDIR/node_modules/@deepseek-ai"
+# Runtime dependencies of the package (what `dsh plugin add` / pnpm would
+# hoist): ai-tokenizer supplies the real Claude encoding for token counts.
+TOK="$(ls -d "$REPO"/node_modules/.bun/ai-tokenizer@*/node_modules/ai-tokenizer | head -1)"
+rm -rf "$PDIR/node_modules/ai-tokenizer"
+cp -r "$TOK" "$PDIR/node_modules/ai-tokenizer"
 echo "installed dsh-magic-context into $PDIR"

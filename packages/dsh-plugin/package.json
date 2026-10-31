@@ -2,7 +2,7 @@
   "name": "dsh-magic-context",
   "version": "0.2.0",
   "type": "module",
-  "description": "Magic Context \u2014 DeepSeek Harness adapter (Host / Agent / Client + profile bundle). Loads the shared Magic SQLite store and registers ctx_* tools, /ctx-* commands, knowledge injection, historian/dreamer scheduling, compaction policy, and the Typert Remote surface for the DSH client.",
+  "description": "Magic Context — DeepSeek Harness adapter (Host / Agent / Client + profile bundle). Loads the shared Magic SQLite store and registers ctx_* tools, /ctx-* commands, knowledge injection, historian/dreamer scheduling, compaction policy, and the Typert Remote surface for the DSH client.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -32,6 +32,9 @@
     "test": "bun test",
     "clean": "rm -rf dist",
     "build:workers": "bun build ../plugin/src/features/magic-context/migration-worker.ts ../plugin/src/features/magic-context/memory/embedding-worker.ts ../plugin/src/features/magic-context/memory/embedding-worker-process.ts ../plugin/src/hooks/magic-context/auto-search-worker.ts ../plugin/src/hooks/magic-context/raw-ordinal-warmup-worker.ts ../plugin/src/features/magic-context/compaction-marker-candidates-worker.ts ../plugin/src/features/magic-context/chunk-embedding-write-worker.ts --outdir dist --entry-naming '[name].[ext]' --target node --format esm --splitting --external onnxruntime-node --external onnxruntime-web --external sharp --external bun:ffi --external bun:sqlite --external node:sqlite && bun build ../plugin/src/features/magic-context/migration-worker.ts ../plugin/src/features/magic-context/memory/embedding-worker.ts ../plugin/src/features/magic-context/memory/embedding-worker-process.ts ../plugin/src/hooks/magic-context/auto-search-worker.ts ../plugin/src/hooks/magic-context/raw-ordinal-warmup-worker.ts ../plugin/src/features/magic-context/compaction-marker-candidates-worker.ts ../plugin/src/features/magic-context/chunk-embedding-write-worker.ts --outdir dist/entries --entry-naming '[name].[ext]' --target node --format esm --splitting --external onnxruntime-node --external onnxruntime-web --external sharp --external bun:ffi --external bun:sqlite --external node:sqlite"
+  },
+  "dependencies": {
+    "ai-tokenizer": "^1.0.6"
   },
   "devDependencies": {
     "dsh-magic-context-adapter": "workspace:*",

@@ -72,6 +72,9 @@
       "bin": {
         "dsh-magic-context": "dist/cli.js",
       },
+      "dependencies": {
+        "ai-tokenizer": "^1.0.6",
+      },
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.0.5",
         "@deepseek-ai/cordis-plugin-include": "~1.0.10",
