@@ -20,6 +20,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import { setDshHarness } from "dsh-magic-context-adapter";
 import { loadPluginConfig, type MagicContextPluginConfig } from "@magic-context/core/config";
+import { getProtectedTokensTierOverrides } from "@magic-context/core/config/project-security";
 import { isCompactionEnabled, isDreamerRunnable, isHistorianRunnable } from "@magic-context/core/config/agent-disable";
 import type { MagicContextHostService } from "../index";
 import { registerKnowledgeGate } from "./knowledge-gate";
@@ -175,6 +176,9 @@ export function bridgeMagicConfig(
     context: {
       ...config.context,
       protectedTags: config.context?.protectedTags ?? cfg.protected_tags,
+      protectedTokens: config.context?.protectedTokens ?? cfg.protected_tokens,
+      protectedTokenTierOverrides:
+        config.context?.protectedTokenTierOverrides ?? getProtectedTokensTierOverrides(cfg),
       heuristicCleanup:
         config.context?.heuristicCleanup ??
         (() => {
@@ -212,6 +216,9 @@ export function bridgeMagicConfig(
       dreamerEnabled: config.tools?.dreamerEnabled ?? isDreamerRunnable(cfg),
       compactionOff: config.tools?.compactionOff ?? !isCompactionEnabled(cfg),
       protectedTags: config.tools?.protectedTags ?? cfg.protected_tags,
+      protectedTokens: config.tools?.protectedTokens ?? cfg.protected_tokens,
+      protectedTokenTierOverrides:
+        config.tools?.protectedTokenTierOverrides ?? getProtectedTokensTierOverrides(cfg),
     },
     guidance: {
       ...config.guidance,

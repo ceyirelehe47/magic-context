@@ -36,7 +36,7 @@ import {
 } from "./transcript";
 import { updateSessionMeta } from "@magic-context/core/features/magic-context/storage";
 import { checkDshCompartmentTrigger } from "./historian";
-import { maybeNudgeChannels } from "./nudge";
+import { maybeNudgeChannels, scanSessionMetrics } from "./nudge";
 import { createTagger } from "@magic-context/core/features/magic-context/tagger";
 import { markNoteNudgeDelivered, onNoteTrigger, peekNoteNudgeText } from "@magic-context/core/hooks/magic-context/note-nudger";
 import { transcriptRawMessageProvider } from "./historian-wiring";
@@ -45,6 +45,8 @@ import { isMagicChildSession } from "./worker";
 import { deriveTriggerBudget } from "@magic-context/core/hooks/magic-context/derive-budgets";
 import type { RawMessageProvider } from "@magic-context/core/hooks/magic-context/read-session-chunk";
 import type { Database } from "@magic-context/core/shared/sqlite";
+import type { ProtectedTokensTierOverrides } from "@magic-context/core/config/project-security";
+import { resolveDshProtectionFloor, type DshProtectionOptions } from "./protection";
 
 /** The host-service slice the context plane needs (structural view). */
 export interface ContextPlaneHostView {
@@ -56,8 +58,15 @@ export interface ContextPlaneHostView {
 
 export interface ContextPlaneConfig {
   enabled?: boolean;
-  /** Protected-tag tail for drop selection (default 20). */
+  /**
+   * @deprecated Legacy newest-N count. Ignored for behaviour (core ≥0.49
+   * parity); use `protectedTokens`.
+   */
   protectedTags?: number;
+  /** Absolute token floor (`protected_tokens`); unset = core derived default. */
+  protectedTokens?: number;
+  /** Trusted-user / project `protected_tokens` tiers (core loadPluginConfig). */
+  protectedTokenTierOverrides?: ProtectedTokensTierOverrides;
   /** Heuristic cleanup options (routed from the shared config). */
   heuristicCleanup?: { readonly caveman?: { readonly enabled: boolean; readonly minChars: number } };
 }
@@ -345,6 +354,33 @@ function previewTagPayloadMessages(
   }
 }
 
+/** Protection-window inputs for one pass (config + live DSH context window). */
+export function protectionOptionsFor(deps: ContextPlaneDeps, agent: Agent): DshProtectionOptions {
+  let contextWindow: number | undefined;
+  try {
+    contextWindow = deps.historian?.readPressure?.(agent)?.contextWindow;
+  } catch {
+    contextWindow = undefined;
+  }
+  if (!(typeof contextWindow === "number" && contextWindow > 0)) {
+    try {
+      contextWindow = scanSessionMetrics(agent).contextWindow;
+    } catch {
+      contextWindow = undefined;
+    }
+  }
+  if (!(typeof contextWindow === "number" && contextWindow > 0)) {
+    const configured = deps.historian?.config?.contextLimit;
+    contextWindow = typeof configured === "number" && configured > 0 ? configured : undefined;
+  }
+  return {
+    protectedTokens: deps.config?.protectedTokens,
+    tierOverrides: deps.config?.protectedTokenTierOverrides,
+    contextWindow,
+    log: deps.log,
+  };
+}
+
 /** The full pre-step body: reconcile → derive → apply → next. */
 export async function runContextPlaneStep(
   state: ContextPlaneState,
@@ -377,6 +413,12 @@ export async function runContextPlaneStep(
 
     // Plan derivation + application (gated by enabled; the historian trigger
     // below is independent of the plan gate).
+    // Token-floor protection inputs (core parity): usable window from the
+    // DSH pressure read (token-meter projection or request/context fallback).
+    const protection = protectionOptionsFor(deps, agent);
+    let surfaceRewritten = false;
+    let agentDropsApplied = false;
+
     if (deps.config?.enabled !== false) {
       // 首轮 §N§ 预览：本次调用即可见（Pi transform 语义）；幂等。
       previewTagPayloadMessages(db, canonicalSessionId, payload.messages, deps.log);
@@ -390,10 +432,12 @@ export async function runContextPlaneStep(
       });
       const plan = deriveMutationPlan(view, {
         db,
-        protectedTags: deps.config?.protectedTags ?? 20,
+        protection,
         heuristicCleanup: deps.heuristicCleanup,
       } satisfies PlanContext);
       if (plan !== null) {
+        surfaceRewritten = true;
+        agentDropsApplied = plan.ops.some((op) => op.kind === "drops");
         const hostView: CoordinatorHostView = {
           db,
           canonicalKey: (id: string) => deps.host.canonicalKey(id),
@@ -407,9 +451,22 @@ export async function runContextPlaneStep(
     // 决策/正文/状态持久化复用共享核心；fail-open。
     maybeNudgeChannels(db, canonicalSessionId, agent, {
       threshold: deps.historian?.config?.executeThresholdPercentage ?? 65,
-      protectedTags: deps.config?.protectedTags ?? 20,
+      protection,
+      cacheBusting: surfaceRewritten,
+      agentDropsAppliedThisPass: agentDropsApplied,
       log: deps.log,
     });
+
+    // A surface rewrite is the DSH cache bust: start the next protection-floor
+    // epoch (core lifecycle (a): re-resolve the live override/geometry and
+    // persist the snapshot). Defer passes keep reading the snapshot verbatim.
+    if (surfaceRewritten) {
+      try {
+        resolveDshProtectionFloor(db, canonicalSessionId, { ...protection, cacheBusting: true });
+      } catch {
+        // Floor persistence is best-effort (fail-open); the next bust retries.
+      }
+    }
 
     // Magic note-nudger delivery: peek + inject (DSH inject semantics; no
     // anchor message id, so delivery clears the trigger + cooldown).

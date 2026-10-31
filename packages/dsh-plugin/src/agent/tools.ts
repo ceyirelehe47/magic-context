@@ -106,6 +106,10 @@ import { unwrapImitatedReducedArgs } from "@magic-context/core/tools/unwrap-imit
 import { registerTool } from "../compat/dsh-0.1/tools";
 import { sessionEvents, textBlock } from "../compat/dsh-0.1/session";
 import { convertDshEventsToRawMessages } from "./transcript";
+import { observedProtectionWindow } from "./protection";
+import { scanSessionMetrics } from "./nudge";
+import type { ProtectedTokensTierOverrides } from "@magic-context/core/config/project-security";
+import { markChannel1PostReduceGracePending } from "@magic-context/core/features/magic-context/storage-meta-persisted";
 
 export type { ToolDefinition };
 
@@ -144,8 +148,15 @@ export interface CtxToolsOptions extends CtxRuntimeOptions {
   sessionScopedToolsDisabled?: boolean;
   /** When true, omit ctx_reduce (compaction-off mode). */
   compactionOff?: boolean;
-  /** Number of recent tags ctx_reduce treats as protected (deferred drops). */
+  /**
+   * @deprecated Legacy newest-N count; ignored (core ≥0.49 parity). ctx_reduce
+   * defers drops inside the core token-floor protection window instead.
+   */
   protectedTags?: number;
+  /** Absolute `protected_tokens` floor; unset = core derived default. */
+  protectedTokens?: number;
+  /** Trusted-user / project `protected_tokens` tiers. */
+  protectedTokenTierOverrides?: ProtectedTokensTierOverrides;
   /** When true, ctx_note accepts smart notes (dreamer will evaluate them). */
   dreamerEnabled?: boolean;
   /** When true, ctx_memory exposes the dreamer-only `list` action. */
@@ -1373,7 +1384,6 @@ export function createCtxReduceTool(ctx: Context, opts: CtxToolsOptions): ToolDe
       const runtime = resolveAgentContext(ctx, opts, agent);
       if (!runtime.sessionId) throw toolError("Could not resolve the canonical session id for this agent.");
       const sessionId = runtime.sessionId;
-      const protectedTags = Math.max(0, Math.floor(opts.protectedTags ?? 20));
 
       if (!params.drop) throw toolError("'drop' must be provided.");
 
@@ -1395,12 +1405,20 @@ export function createCtxReduceTool(ctx: Context, opts: CtxToolsOptions): ToolDe
         );
       }
 
-      const activeTags = allTags.filter((tag) => tag.status === "active");
-      const protectedTagIds = activeTags
-        .map((tag) => tag.tagNumber)
-        .sort((left, right) => right - left)
-        .slice(0, protectedTags);
-      const protectedSet = new Set(protectedTagIds);
+      // Core parity (tool-registry → getProtectionWindowForSession with the
+      // observed epoch floor): only tool tags inside the token-floor window
+      // are deferred; everything else drops on the next pass.
+      let contextWindow: number | undefined;
+      try {
+        contextWindow = scanSessionMetrics(agent).contextWindow;
+      } catch {
+        contextWindow = undefined;
+      }
+      const protectedSet = observedProtectionWindow(db, sessionId, {
+        protectedTokens: opts.protectedTokens,
+        tierOverrides: opts.protectedTokenTierOverrides,
+        contextWindow,
+      }).protectedTagNumbers;
 
       const tagStatusMap = new Map(allTags.map((tag) => [tag.tagNumber, tag.status]));
       const pendingOps = getPendingOps(db, sessionId);
@@ -1437,6 +1455,14 @@ export function createCtxReduceTool(ctx: Context, opts: CtxToolsOptions): ToolDe
         })();
       } catch (error) {
         throw toolError(`Failed to queue ctx_reduce operations. ${getErrorMessage(error)}`);
+      }
+
+      // Channel-1 compliance (core/Pi parity: markPiChannel1Reduced): open the
+      // post-reduce grace; the next post-drop measurement supplies its U.
+      try {
+        markChannel1PostReduceGracePending(db, sessionId);
+      } catch {
+        // Nudge bookkeeping must never fail the tool call.
       }
 
       const currentInputTokens =

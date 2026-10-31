@@ -72,7 +72,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
           ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }),
           canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}`,
         },
-        config: { protectedTags: 0 },
+        config: {},
         log: () => {},
       };
 

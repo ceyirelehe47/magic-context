@@ -85,8 +85,8 @@ function baseOpts(db: Database): CtxToolsOptions {
     embeddingEnabled: false,
     memoryEnabled: true,
     dreamerEnabled: true,
-    // No protected tail in tests → ctx_reduce drops are immediate.
-    protectedTags: 0,
+    // Message tags are never inside the (tool-only) token-floor window, so
+    // ctx_reduce drops of message tags are immediate in these tests.
   };
 }
 
@@ -321,6 +321,32 @@ describe("ctx_reduce drop path", () => {
       expect(pending.length).toBe(1);
       expect(pending[0]?.tag_id).toBe(1);
       expect(pending[0]?.operation).toBe("drop");
+    } finally {
+      db.close();
+      await removeTestDir(dir);
+    }
+  });
+
+  it("defers drops inside the core token-floor window and opens the post-reduce grace", async () => {
+    const { db, dir } = await openDb();
+    try {
+      const { ctx, registered } = makeFakeCtx();
+      registerCtxTools(ctx, { ...baseOpts(db), protectedTokens: 10_000 });
+      const tool = findTool(registered, "ctx_reduce");
+      const agent = makeFakeAgent(SESSION_ID, "/tmp/dsh-proj");
+      for (let n = 1; n <= 5; n++) {
+        db.prepare(
+          "INSERT INTO tags (session_id, message_id, type, status, byte_size, tag_number, token_count) VALUES (?, ?, 'tool', 'active', 100, ?, 5000)",
+        ).run(CANONICAL, `call-${n}`, n);
+      }
+      // Floor 10k reaches at tag 4, but the structural minimum keeps the newest
+      // three tool tags (3,4,5) protected → §4§ defers, §1§ drops.
+      const value = await tool.execute({ drop: "1,4" }, toolExec(agent));
+      expect(textOf(value)).toBe("Queued: drop §1§, deferred drop §4§.");
+      const meta = db
+        .prepare("SELECT last_nudge_level FROM session_meta WHERE session_id = ?")
+        .get(CANONICAL) as { last_nudge_level: string } | null;
+      expect(meta?.last_nudge_level ?? "").toContain("postReduceGracePending");
     } finally {
       db.close();
       await removeTestDir(dir);

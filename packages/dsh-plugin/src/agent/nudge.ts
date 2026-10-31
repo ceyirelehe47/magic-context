@@ -43,7 +43,7 @@ import {
   sessionEvents,
   type MagicMessageSource,
 } from "../compat/dsh-0.1/session";
-import { countProtectionWindow } from "./protection";
+import { observedProtectionWindow, type DshProtectionOptions } from "./protection";
 
 /** Scan the session event log for the live context window + last input usage. */
 export function scanSessionMetrics(agent: Agent): {
@@ -87,20 +87,13 @@ function countRealUserTurns(agent: Agent): number {
 }
 
 /** Oldest reclaimable tool tags, as reclaim hints (max 4, oldest first). */
-function oldestReclaimableToolTags(tags: readonly TagEntry[], protectedTags: number): ToolReclaimHint[] {
+function oldestReclaimableToolTags(
+  tags: readonly TagEntry[],
+  protectedSet: ReadonlySet<number>,
+): ToolReclaimHint[] {
   const active = [...tags]
     .filter((t) => t.type === "tool" && t.status === "active")
     .sort((a, b) => a.tagNumber - b.tagNumber);
-  const protectedSet =
-    protectedTags > 0
-      ? new Set(
-          [...tags]
-            .filter((t) => t.type === "tool" && t.status === "active")
-            .map((t) => t.tagNumber)
-            .sort((a, b) => b - a)
-            .slice(0, protectedTags),
-        )
-      : new Set<number>();
   return active.filter((t) => !protectedSet.has(t.tagNumber)).slice(0, 4)
     .map((t) => ({ tagNumber: t.tagNumber, toolName: t.toolName }));
 }
@@ -136,8 +129,14 @@ function injectNudge(
 export interface NudgeOptions {
   /** execute-threshold percentage (default 65). */
   threshold?: number;
-  /** Protected-tag tail (default 20). */
+  /** @deprecated Legacy newest-N count; ignored (token-floor window). */
   protectedTags?: number;
+  /** Token-floor protection inputs (core protection window). */
+  protection?: DshProtectionOptions;
+  /** True on a pass that rewrote the surface (DSH cache bust). */
+  cacheBusting?: boolean;
+  /** True when this pass applied queued agent drops. */
+  agentDropsAppliedThisPass?: boolean;
   /** Override context window (default: scan the session events). */
   contextWindow?: number;
   /** Logger sink (optional). */
@@ -155,11 +154,13 @@ export function maybeNudgeChannels(
   opts: NudgeOptions = {},
 ): void {
   try {
-    const protectedTags = Math.max(0, opts.protectedTags ?? 20);
     const tags = getTagsBySession(db, sessionId);
     // No tool output at all → nothing reclaimable; leave session_meta untouched.
     if (!tags.some((t) => t.type === "tool")) return;
-    const protection = countProtectionWindow(tags, protectedTags);
+    const protection = observedProtectionWindow(db, sessionId, {
+      contextWindow: opts.contextWindow ?? scanSessionMetrics(agent).contextWindow,
+      ...opts.protection,
+    });
     const agg = getActiveTagTokenAggregate(db, sessionId, protection.protectedCutoff);
     const reclaimableCount = tags.filter(
       (t) =>
@@ -202,7 +203,7 @@ export function maybeNudgeChannels(
     }
     setChannel1NudgeState(db, sessionId, nextState);
     if (decision.fire) {
-      const hint = oldestReclaimableToolTags(tags, protectedTags);
+      const hint = oldestReclaimableToolTags(tags, protection.protectedTagNumbers);
       const reminder = buildChannel1Reminder(
         decision.level,
         decision.undroppedTokens,
@@ -226,7 +227,7 @@ export function maybeNudgeChannels(
     if (c2.shouldTrigger && getChannel2NudgeState(db, sessionId) === "") {
       // Cross-process one-shot: only the process that wins "" → delivered injects.
       if (casChannel2NudgeState(db, sessionId, "", "delivered")) {
-        const hint = oldestReclaimableToolTags(tags, protectedTags);
+        const hint = oldestReclaimableToolTags(tags, protection.protectedTagNumbers);
         const reminder = buildChannel2Reminder(c2.reclaimableTokens, reclaimableCount, hint);
         injectNudge(agent, sessionId, "channel2", reminder);
         opts.log?.(`[magic-context] channel2 nudge delivered: reclaimable~${Math.round(c2.reclaimableTokens / 1000)}k`);

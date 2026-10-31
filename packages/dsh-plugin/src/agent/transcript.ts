@@ -74,7 +74,7 @@ import type {
 } from "@magic-context/core/shared/transcript";
 import type { KnowledgeSessionView } from "./knowledge-gate";
 import { isMagicSource, sessionEvents } from "../compat/dsh-0.1/session";
-import { countProtectionWindow } from "./protection";
+import { tokenProtectionWindow, type DshProtectionOptions } from "./protection";
 import {
   deriveEventMessage,
   type SessionEvent,
@@ -164,8 +164,12 @@ export interface DshOrdinalMap {
 /** Plan-derivation context (design §3). */
 export interface PlanContext {
   readonly db: Database;
-  /** Newest-N active tags exempt from pending drops (applyPendingOperations). */
-  readonly protectedTags?: number;
+  /**
+   * Token-floor protection inputs (core `computeProtectionWindow` membership
+   * gates pending drops + heuristic cleanup). Replaces the legacy newest-N
+   * `protectedTags` count, which core ignores since ≥0.49.
+   */
+  readonly protection?: DshProtectionOptions;
   /** Injectable clock; reserved for later stages (decay/nudge). Unused by this slice. */
   readonly now?: () => number;
   /** Heuristic cleanup config (Pi/OpenCode parity): routine dedup + optional
@@ -1254,7 +1258,6 @@ function planReasoningReplay(
 export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): MutationPlan | null {
   const db = ctx.db;
   const sessionId = view.sessionId;
-  const protectedTags = Math.max(0, Math.floor(ctx.protectedTags ?? 0));
 
   const ops: MutationOp[] = [...planTemporalMarkers(view)];
 
@@ -1275,7 +1278,8 @@ export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): M
     // stages (the transaction body reads them otherwise).
     const preloadedTags = getTagsBySession(db, sessionId);
     const preloadedPendingOps = getPendingOps(db, sessionId);
-    const protection = countProtectionWindow(preloadedTags, protectedTags);
+    // Core token-floor window (persisted tool-row mass vs the epoch floor).
+    const protection = tokenProtectionWindow(db, sessionId, ctx.protection ?? {});
     applyPendingOperations(
       sessionId,
       db,

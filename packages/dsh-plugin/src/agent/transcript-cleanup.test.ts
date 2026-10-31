@@ -29,7 +29,6 @@ describe("heuristic cleanup integration (Pi/OpenCode parity)", () => {
       });
       const plan = deriveMutationPlan(view, {
         db,
-        protectedTags: 20,
         heuristicCleanup: { caveman: { enabled: false, minChars: 500 } },
       });
       expect(plan).not.toBeNull();
