@@ -2,7 +2,7 @@
   "name": "dsh-magic-context",
   "version": "0.2.0",
   "type": "module",
-  "description": "Magic Context — DeepSeek Harness adapter (Host / Agent / Client + profile bundle). Loads the shared Magic SQLite store and registers ctx_* tools, /ctx-* commands, knowledge injection, historian/dreamer scheduling, compaction policy, and the Typert Remote surface for the DSH client.",
+  "description": "Magic Context \u2014 DeepSeek Harness adapter (Host / Agent / Client + profile bundle). Loads the shared Magic SQLite store and registers ctx_* tools, /ctx-* commands, knowledge injection, historian/dreamer scheduling, compaction policy, and the Typert Remote surface for the DSH client.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -27,15 +27,14 @@
     "NOTICE"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target node --format esm --splitting --external @deepseek-ai/dsh-session --external @deepseek-ai/dsh-compaction --external @deepseek-ai/dsh-compaction-basic --external @deepseek-ai/dsh-token-meter --external @deepseek-ai/dsh-llm --external @deepseek-ai/cordis && bun build src/doctor/cli.ts --outdir dist --target node --format esm --external @deepseek-ai/cordis && bun build src/entries/agent.ts src/entries/compaction.ts src/entries/commands.ts src/entries/tools.ts src/entries/remote.ts src/entries/preset-include.ts --outdir dist/entries --target node --format esm --splitting --external @deepseek-ai/cordis --external @deepseek-ai/dsh-session --external @deepseek-ai/dsh-llm --external @deepseek-ai/dsh-tools --external @deepseek-ai/dsh-subagent --external @deepseek-ai/dsh-compaction --external @deepseek-ai/dsh-compaction-basic --external @deepseek-ai/dsh-token-meter --external @deepseek-ai/cordis-plugin-include && tsc --emitDeclarationOnly",
+    "build": "bun build src/index.ts --outdir dist --target node --format esm --splitting --external @deepseek-ai/dsh-session --external @deepseek-ai/dsh-compaction --external @deepseek-ai/dsh-compaction-basic --external @deepseek-ai/dsh-token-meter --external @deepseek-ai/dsh-llm --external @deepseek-ai/cordis && bun build src/doctor/cli.ts --outdir dist --target node --format esm && bun build src/entries/agent.ts src/entries/compaction.ts src/entries/commands.ts src/entries/tools.ts src/entries/remote.ts src/entries/preset-include.ts --outdir dist/entries --target node --format esm --splitting --external @deepseek-ai/cordis --external @deepseek-ai/dsh-session --external @deepseek-ai/dsh-llm --external @deepseek-ai/dsh-tools --external @deepseek-ai/dsh-subagent --external @deepseek-ai/dsh-compaction --external @deepseek-ai/dsh-compaction-basic --external @deepseek-ai/dsh-token-meter --external @deepseek-ai/cordis-plugin-include && bun run build:workers && tsc --emitDeclarationOnly",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "clean": "rm -rf dist"
-  },
-  "dependencies": {
-    "dsh-magic-context-adapter": "workspace:*"
+    "clean": "rm -rf dist",
+    "build:workers": "bun build ../plugin/src/features/magic-context/migration-worker.ts ../plugin/src/features/magic-context/memory/embedding-worker.ts ../plugin/src/features/magic-context/memory/embedding-worker-process.ts ../plugin/src/hooks/magic-context/auto-search-worker.ts ../plugin/src/hooks/magic-context/raw-ordinal-warmup-worker.ts ../plugin/src/features/magic-context/compaction-marker-candidates-worker.ts ../plugin/src/features/magic-context/chunk-embedding-write-worker.ts --outdir dist --entry-naming '[name].[ext]' --target node --format esm --splitting --external onnxruntime-node --external onnxruntime-web --external sharp --external bun:ffi --external bun:sqlite --external node:sqlite && bun build ../plugin/src/features/magic-context/migration-worker.ts ../plugin/src/features/magic-context/memory/embedding-worker.ts ../plugin/src/features/magic-context/memory/embedding-worker-process.ts ../plugin/src/hooks/magic-context/auto-search-worker.ts ../plugin/src/hooks/magic-context/raw-ordinal-warmup-worker.ts ../plugin/src/features/magic-context/compaction-marker-candidates-worker.ts ../plugin/src/features/magic-context/chunk-embedding-write-worker.ts --outdir dist/entries --entry-naming '[name].[ext]' --target node --format esm --splitting --external onnxruntime-node --external onnxruntime-web --external sharp --external bun:ffi --external bun:sqlite --external node:sqlite"
   },
   "devDependencies": {
+    "dsh-magic-context-adapter": "workspace:*",
     "@deepseek-ai/cordis": "~4.0.5",
     "@deepseek-ai/cordis-plugin-include": "~1.0.10",
     "@deepseek-ai/dsh-agent": "0.2.1-rc.5",
