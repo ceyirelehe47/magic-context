@@ -1,0 +1,13 @@
+[ok  ] DSH version
+       /home/sandbox/w/e2e/dsh/node_modules/@deepseek-ai/dsh (via launcher) → 0.2.1-rc.5 (matches the compat contract 0.2.1-rc.5).
+[ok  ] Bundle install state — profile e2e2
+       dsh-magic-context is in dsh.profile.bundles and resolvable in node_modules.
+       fix: dsh plugin --profile e2e2 add dsh-magic-context (or edit the profile package.json dsh.profile.bundles manually).
+[ok  ] Profile patch layer — profile e2e2
+       /home/sandbox/w/e2e/home/profiles/e2e2/cordis.patch.yml: managed block up to date; layout flat; stock /home/sandbox/w/e2e/dsh/node_modules/@deepseek-ai/dsh-base/cordis.patch.yml re-scanned OK.
+[ok  ] Shared DB
+       /home/sandbox/w/e2e/xdg/data/cortexkit/magic-context/context.db: opened; schema v95 (adapter supports up to v95).
+[ok  ] Liveness markers
+       4 marker(s) found, all from dead processes (stale, harmless).
+[ok  ] Config loading
+       /home/sandbox/w/e2e/xdg/config/cortexkit/magic-context.jsonc → loadOutcome=ok (user: ok, project: ok)

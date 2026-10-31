@@ -1,0 +1,16 @@
+[ok  ] DSH home
+       /home/sandbox/w/e2e/home
+[ok  ] DSH install
+       /home/sandbox/w/e2e/dsh/node_modules/@deepseek-ai/dsh (0.2.1-rc.5, found via launcher)
+[ok  ] Stock layout contract scan
+       profile e2e2: layout flat (headless/tui root tree); /home/sandbox/w/e2e/dsh/node_modules/@deepseek-ai/dsh-base/cordis.patch.yml matches the expected rows.
+[ok  ] Profile bundle
+       added dsh-magic-context to /home/sandbox/w/e2e/home/profiles/e2e2/package.json.
+[ok  ] Profile patch layer
+       wrote the managed block into /home/sandbox/w/e2e/home/profiles/e2e2/cordis.patch.yml (compaction-basic disabled; magic-compaction + magic-agent inserted).
+[ok  ] Magic Context user config
+       created /home/sandbox/w/e2e/xdg/config/cortexkit/magic-context.jsonc from defaults.
+
+Next steps:
+  - Check the composed tree: dsh --profile e2e2 --dump-config | grep magic-
+  - Verify with: dsh-magic-context doctor --profile e2e2

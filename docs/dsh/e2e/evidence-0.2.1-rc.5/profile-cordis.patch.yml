@@ -1,0 +1,14 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+# >>> dsh-magic-context (managed by `dsh-magic-context setup`; do not edit inside) >>>
+- id: compaction-basic
+  disabled: true
+- insert:
+    - id: magic-compaction
+      name: dsh-magic-context/compaction
+      config:
+        auto: true
+    - id: magic-agent
+      name: dsh-magic-context/agent
+# <<< dsh-magic-context <<<

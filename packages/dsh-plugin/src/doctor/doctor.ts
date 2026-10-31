@@ -330,7 +330,9 @@ export async function runDshDoctor(
             (facts.packageJsonExists
               ? ` (current bundles: ${facts.bundles.join(", ") || "none"}).`
               : ` (${facts.packageJsonPath} missing).`),
-        fix: `dsh plugin --profile ${profileName} add ${MAGIC_CONTEXT_PACKAGE} (or edit the profile package.json dsh.profile.bundles manually).`,
+        fix: status === "ok"
+          ? undefined
+          : `dsh plugin --profile ${profileName} add ${MAGIC_CONTEXT_PACKAGE}, then \`dsh-magic-context setup --profile ${profileName}\`.`,
       });
     }
     if (installedCount === 0 && profiles.length > 0) {
