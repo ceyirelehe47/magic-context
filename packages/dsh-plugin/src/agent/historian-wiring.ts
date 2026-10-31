@@ -37,6 +37,8 @@ export interface MagicHistorianWiringDeps {
   readonly host: MagicContextHostService;
   /** Project working directory (memory promotion scope). */
   readonly directory?: string;
+  /** historian.model override ("provider/model") for the compaction hook too. */
+  readonly model?: string;
   readonly log?: (message: string) => void;
 }
 
@@ -145,7 +147,10 @@ export function createLlmSummarizeCall(
       source: { kind: "magic-context", plugin: "magic-context" },
     });
     let text = "";
+    let reasoningChars = 0;
     let failed: string | undefined;
+    let finishKind = "none";
+    let outputTokens: number | undefined;
     for await (const streamChunk of llm.stream({
       provider,
       model,
@@ -155,7 +160,10 @@ export function createLlmSummarizeCall(
       signal,
     })) {
       if (streamChunk.type === "text-delta") text += streamChunk.text;
+      if (streamChunk.type === "reasoning-delta") reasoningChars += streamChunk.text.length;
+      if (streamChunk.type === "usage") outputTokens = streamChunk.usage.outputTokens;
       if (streamChunk.type === "finish") {
+        finishKind = streamChunk.reason.kind;
         if (streamChunk.reason.kind === "error") {
           const failure = (streamChunk.reason as { failure?: { message?: string } }).failure;
           failed = failure?.message ?? "error finish";
@@ -164,11 +172,21 @@ export function createLlmSummarizeCall(
         }
       }
     }
+    const route = `${provider}/${model}`;
     if (failed !== undefined) {
-      throw new Error(`magic-context: historian LLM stream failed (${failed})`);
+      throw new Error(
+        `magic-context: historian LLM stream failed (${failed}; finish=${finishKind}; route=${route})`,
+      );
     }
     if (text.trim().length === 0) {
-      throw new Error("magic-context: historian LLM stream returned no text");
+      const hint = finishKind === "max-tokens"
+        ? ` — the route ran out of output tokens (prompt ~${Math.round(prompt.length / 4)} tok est.); ` +
+          "point historian.model at a larger-window route"
+        : "";
+      throw new Error(
+        `magic-context: historian LLM stream returned no text (finish=${finishKind}; route=${route}; ` +
+        `outputTokens=${outputTokens ?? "?"}; reasoningChars=${reasoningChars})${hint}`,
+      );
     }
     return text;
   };
@@ -207,7 +225,7 @@ export function registerMagicHistorianPlane(
   deps: MagicHistorianWiringDeps,
 ): void {
   const hooksBySession = new Map<string, SummarizeHook>();
-  const summarize = createLlmSummarizeCall(ctx);
+  const summarize = createLlmSummarizeCall(ctx, deps.model);
   const log = deps.log ?? (() => {});
 
   const wrapper: MagicSummarizeHook = async (input, agent, signal) => {

@@ -40,6 +40,7 @@ import { maybeNudgeChannels } from "./nudge";
 import { createTagger } from "@magic-context/core/features/magic-context/tagger";
 import { markNoteNudgeDelivered, onNoteTrigger, peekNoteNudgeText } from "@magic-context/core/hooks/magic-context/note-nudger";
 import { transcriptRawMessageProvider } from "./historian-wiring";
+import { resolveAwaitAtTurnEndMs, type HistorianDrain } from "./historian-drain";
 import { isMagicChildSession } from "./worker";
 import { deriveTriggerBudget } from "@magic-context/core/hooks/magic-context/derive-budgets";
 import type { RawMessageProvider } from "@magic-context/core/hooks/magic-context/read-session-chunk";
@@ -74,6 +75,13 @@ export interface ContextPlaneHistorianConfig {
   commitClusterTrigger?: { enabled: boolean; min_clusters: number };
   /** Historian model override ("provider/model"); defaults to the session route. */
   model?: string;
+  /**
+   * Await in-flight historian passes at the turn boundary
+   * (`agent/turn-stopping`) for at most this many ms. 0/unset = off; the env
+   * var `MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS` is the fallback. Meant
+   * for one-shot hosts (dsh headless) whose process exits right after the turn.
+   */
+  awaitAtTurnEndMs?: number;
 }
 
 /** Context-pressure read for the trigger (structural; injectable in tests). */
@@ -101,6 +109,8 @@ export interface ContextPlaneDeps {
       /** Resolved model context window (drives the historian chunk budget). */
       readonly contextWindow?: number;
     }) => void;
+    /** In-flight pass tracker (turn-end await + unload drain). */
+    readonly drain?: HistorianDrain;
   };
   /** Workspace directory for the historian fire (project memory scope). */
   readonly directory?: string;
@@ -455,7 +465,62 @@ export async function runContextPlaneStep(
  */
 export function registerContextPlane(ctx: Context, deps: ContextPlaneDeps): () => boolean {
   const state = createContextPlaneState();
-  return registerPreStepGate(ctx, (payload, next) =>
+  const disposeTurnEnd = registerHistorianTurnEndAwait(ctx, deps);
+  const disposeGate = registerPreStepGate(ctx, (payload, next) =>
     runContextPlaneStep(state, deps, payload, next),
+  );
+  return () => {
+    disposeTurnEnd?.();
+    return disposeGate();
+  };
+}
+
+/**
+ * One-shot hosts: at the turn boundary, re-evaluate the historian trigger with
+ * the turn's final pressure (the pre-step sample predates the last model call)
+ * and await in-flight passes for at most `awaitMs`. DSH awaits
+ * `agent/turn-stopping` listeners before committing the turn end, so the pass
+ * publishes before `dsh headless` prints its result and exits.
+ */
+export async function awaitHistorianAtTurnEnd(
+  deps: ContextPlaneDeps,
+  agent: Agent,
+  awaitMs: number,
+): Promise<void> {
+  const historian = deps.historian;
+  if (historian === undefined || historian.config?.enabled === false) return;
+  if (awaitMs <= 0 || historian.drain === undefined) return;
+  if (isMagicChildSession(agent)) return;
+  try {
+    const bootstrap = await deps.host.ready;
+    if (bootstrap.kind !== "ok") return;
+    const sessionId = deps.host.canonicalKey(agent.id);
+    if (historian.drain.pending(sessionId) === 0) {
+      maybeFireHistorian(historian, bootstrap.db, sessionId, agent, deps.directory);
+    }
+    if (historian.drain.pending(sessionId) === 0) return;
+    const result = await historian.drain.drain(awaitMs, sessionId);
+    deps.log?.(
+      `[magic-context] historian turn-end await: settled=${result.settled} pending=${result.pending} waited=${result.waitedMs}ms (budget ${awaitMs}ms)`,
+    );
+  } catch (error) {
+    deps.log?.(
+      `[magic-context] historian turn-end await failed (fail-open): ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function registerHistorianTurnEndAwait(
+  ctx: Context,
+  deps: ContextPlaneDeps,
+): (() => unknown) | undefined {
+  const awaitMs = resolveAwaitAtTurnEndMs(deps.historian?.config?.awaitAtTurnEndMs);
+  if (awaitMs <= 0 || deps.historian?.drain === undefined) return undefined;
+  const on = (ctx as unknown as {
+    on?: (event: string, listener: (payload: { agent: Agent }) => Promise<void>) => () => unknown;
+  }).on;
+  if (typeof on !== "function") return undefined;
+  return on.call(ctx, "agent/turn-stopping", (payload) =>
+    awaitHistorianAtTurnEnd(deps, payload.agent, awaitMs),
   );
 }

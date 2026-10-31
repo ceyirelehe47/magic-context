@@ -43,6 +43,7 @@ import {
   signalDshDeferredHistoryRefresh,
   signalDshDeferredMaterialization,
 } from "./historian";
+import { createHistorianDrain, UNLOAD_DRAIN_MS } from "./historian-drain";
 import { dshDreamSeams, registerDshDreamer } from "./dreamer";
 import { createRecompSeams } from "./recomp";
 import { createEmbedSeam } from "./embed";
@@ -271,6 +272,19 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
 
   registerSystemGuidance(ctx, { config: config.guidance, log });
 
+  // Background historian passes are fire-and-forget; one-shot hosts (dsh
+  // headless) unload right after the turn, so give in-flight passes a bounded
+  // window to publish (DSH grants ~5 s for shutdown; cordis awaits async
+  // disposers). See historian-drain.ts.
+  const historianDrain = createHistorianDrain();
+  ctx.effect(() => async () => {
+    if (historianDrain.pending() === 0) return;
+    const result = await historianDrain.drain(UNLOAD_DRAIN_MS);
+    log(
+      `[magic-context] historian unload drain: settled=${result.settled} pending=${result.pending} waited=${result.waitedMs}ms`,
+    );
+  }, "magic-context:historian-drain");
+
   registerSessionProjectTracking(ctx, {
     host,
     directory,
@@ -292,7 +306,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
       fire: ({ db, sessionId, directory: fireDirectory, provider, contextWindow }) => {
         // Fire-and-forget: the pass publishes atomically and only signals
         // deferred work; it must never block the pre-step chain.
-        void runDshHistorian({
+        const pass = runDshHistorian({
           db,
           sessionId,
           directory: fireDirectory,
@@ -308,7 +322,9 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
         }).catch((error: unknown) => {
           log(`[magic-context] historian pass failed (background): ${error instanceof Error ? error.message : String(error)}`);
         });
+        historianDrain.track(sessionId, pass);
       },
+      drain: historianDrain,
     },
     log,
   });
@@ -319,6 +335,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   registerMagicHistorianPlane(ctx, {
     host,
     directory,
+    model: config.historian?.model,
     log,
   });
 
