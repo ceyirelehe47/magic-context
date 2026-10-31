@@ -8,10 +8,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MAGIC_CONTEXT_REMOTE_NAMESPACE } from "../compat/dsh-0.1/typert";
 import {
+  MAGIC_CONTEXT_METHOD,
   MAGIC_DIAGNOSTICS_METHOD,
+  MAGIC_SETTINGS_METHOD,
   MAGIC_STATUS_METHOD,
+  MAGIC_UPDATE_SETTINGS_METHOD,
   magicDiagnosticsDescriptor,
+  magicMethodDescriptor,
   magicStatusDescriptor,
+  registerMagicContextRemote,
 } from "./remote";
 
 describe("Phase 5 security audit", () => {
@@ -25,6 +30,36 @@ describe("Phase 5 security audit", () => {
     }
     expect(magicStatusDescriptor().method).toBe(MAGIC_STATUS_METHOD);
     expect(magicDiagnosticsDescriptor().method).toBe(MAGIC_DIAGNOSTICS_METHOD);
+  });
+
+  it("settings / updateSettings / context descriptors share the strict single-args shape", () => {
+    for (const method of [MAGIC_SETTINGS_METHOD, MAGIC_UPDATE_SETTINGS_METHOD, MAGIC_CONTEXT_METHOD]) {
+      const descriptor = magicMethodDescriptor(method);
+      expect(descriptor.id).toBe(`magicContext.${method}`);
+      expect(descriptor.namespace).toBe(MAGIC_CONTEXT_REMOTE_NAMESPACE);
+      expect(descriptor.parameters.map((p) => p.wire)).toEqual(["args"]);
+      expect(JSON.stringify(descriptor).toLowerCase()).not.toMatch(/apikey|api_key|secret|password|credential/);
+    }
+  });
+
+  it("registers all five invocations in one host contribution (real cordis Context)", async () => {
+    const { Context } = await import("@deepseek-ai/cordis");
+    const contributions: Array<{ invocations: Array<{ method: string }> }> = [];
+    const root = new Context();
+    root.provide("typert", { register: (c: never) => (contributions.push(c), () => {}) } as never);
+    let disposer: (() => void) | undefined;
+    root.plugin({
+      name: "remote-test",
+      inject: ["typert"],
+      apply(ctx: unknown) {
+        disposer = registerMagicContextRemote(ctx as never, { ready: Promise.resolve({ kind: "refused" }) } as never);
+      },
+    } as never, undefined as never);
+    for (let i = 0; i < 20 && contributions.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(disposer).toBeDefined();
+    expect(contributions[0]!.invocations.map((i) => i.method).sort()).toEqual(
+      [MAGIC_CONTEXT_METHOD, MAGIC_DIAGNOSTICS_METHOD, MAGIC_SETTINGS_METHOD, MAGIC_STATUS_METHOD, MAGIC_UPDATE_SETTINGS_METHOD].sort(),
+    );
   });
 
   it("diagnostics descriptor bounds its input (sessionId length cap)", () => {
