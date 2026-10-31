@@ -37,8 +37,8 @@ export interface MagicHistorianWiringDeps {
   readonly host: MagicContextHostService;
   /** Project working directory (memory promotion scope). */
   readonly directory?: string;
-  /** historian.model override ("provider/model") for the compaction hook too. */
-  readonly model?: string;
+  /** historian.model override ("provider/model") for the compaction hook too (getter = live). */
+  readonly model?: string | (() => string | undefined);
   readonly log?: (message: string) => void;
 }
 
@@ -168,13 +168,16 @@ function currentRoute(ctx: Context): { provider: string; model: string } {
  */
 export function createLlmSummarizeCall(
   ctx: Context,
-  modelOverride?: string,
+  modelOverrideSource?: string | (() => string | undefined),
 ): DshSummarizeCall {
   const llm = readLlm(ctx);
   if (llm === undefined) {
     throw new Error("magic-context: llm service unavailable (historian wiring)");
   }
   return async (chunk, _priorCompartments, signal) => {
+    // Resolved per call: the DSH settings overlay edits historian.model live.
+    const modelOverride =
+      typeof modelOverrideSource === "function" ? modelOverrideSource() : modelOverrideSource;
     // Pi parity: historian.model routes the compartment call to a dedicated
     // model — required when the main session runs a low-context window (the
     // compartment prompt alone is ~60KB, far beyond small windows).

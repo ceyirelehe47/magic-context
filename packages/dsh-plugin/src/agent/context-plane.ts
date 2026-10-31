@@ -120,9 +120,19 @@ export interface ContextPlaneDeps {
     }) => void;
     /** In-flight pass tracker (turn-end await + unload drain). */
     readonly drain?: HistorianDrain;
+    /**
+     * Per-model execute threshold for this agent's route (core resolver over
+     * the effective jsonc + DSH overlay). Absent = `config.executeThresholdPercentage`.
+     */
+    readonly resolveExecuteThreshold?: (agent: Agent) => number | undefined;
   };
   /** Workspace directory for the historian fire (project memory scope). */
   readonly directory?: string;
+  /**
+   * Live master switch (DSH settings overlay `enabled`). `false` pauses every
+   * per-step Magic action (plan, nudges, historian trigger); absent = on.
+   */
+  readonly isEnabled?: () => boolean;
   readonly log?: (message: string) => void;
 }
 
@@ -212,6 +222,19 @@ export function recentCommitClusterCount(agent: Agent): number {
   }
 }
 
+/** Per-model threshold resolver, fail-open to undefined. */
+function safeThreshold(
+  historian: NonNullable<ContextPlaneDeps["historian"]> | undefined,
+  agent: Agent,
+): number | undefined {
+  try {
+    const value = historian?.resolveExecuteThreshold?.(agent);
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Fire the historian pass when the context-pressure trigger fires. */
 function maybeFireHistorian(
   historian: NonNullable<ContextPlaneDeps["historian"]>,
@@ -228,7 +251,8 @@ function maybeFireHistorian(
     if (typeof contextWindow !== "number" || contextWindow <= 0) return;
     const percentage = Math.round(((sample.projectedTokens ?? 0) / contextWindow) * 100);
     const config = historian.config ?? {};
-    const executeThresholdPercentage = config.executeThresholdPercentage ?? 65;
+    const executeThresholdPercentage =
+      safeThreshold(historian, agent) ?? config.executeThresholdPercentage ?? 65;
     // The shared trigger refuses to fire with a zero budget; the DSH adapter
     // derives it exactly like Pi does (deriveTriggerBudget over the context
     // window × threshold), instead of leaving triggerBudgetTokens at 0 (which
@@ -393,6 +417,7 @@ export async function runContextPlaneStep(
     // Recursion isolation (PLAN §9): child sessions (subagents/workers) run
     // with official semantics — the Magic context plane never processes them.
     if (isMagicChildSession(agent)) return await next();
+    if (deps.isEnabled?.() === false) return await next();
     const bootstrap = await deps.host.ready;
     if (bootstrap.kind !== "ok") return await next();
     const db = bootstrap.db;
@@ -450,7 +475,8 @@ export async function runContextPlaneStep(
     // ctx_reduce 双通道 nudge（Pi parity）：inject `<system-reminder>`，
     // 决策/正文/状态持久化复用共享核心；fail-open。
     maybeNudgeChannels(db, canonicalSessionId, agent, {
-      threshold: deps.historian?.config?.executeThresholdPercentage ?? 65,
+      threshold:
+        safeThreshold(deps.historian, agent) ?? deps.historian?.config?.executeThresholdPercentage ?? 65,
       protection,
       cacheBusting: surfaceRewritten,
       agentDropsAppliedThisPass: agentDropsApplied,
@@ -548,6 +574,7 @@ export async function awaitHistorianAtTurnEnd(
   if (historian === undefined || historian.config?.enabled === false) return;
   if (awaitMs <= 0 || historian.drain === undefined) return;
   if (isMagicChildSession(agent)) return;
+  if (deps.isEnabled?.() === false) return;
   try {
     const bootstrap = await deps.host.ready;
     if (bootstrap.kind !== "ok") return;
@@ -571,13 +598,16 @@ function registerHistorianTurnEndAwait(
   ctx: Context,
   deps: ContextPlaneDeps,
 ): (() => unknown) | undefined {
-  const awaitMs = resolveAwaitAtTurnEndMs(deps.historian?.config?.awaitAtTurnEndMs);
-  if (awaitMs <= 0 || deps.historian?.drain === undefined) return undefined;
+  // Resolved per turn (not at registration): the DSH settings overlay edits
+  // historian.awaitAtTurnEndMs live, so a 0 at boot may become >0 later.
+  if (deps.historian?.drain === undefined) return undefined;
   const on = (ctx as unknown as {
     on?: (event: string, listener: (payload: { agent: Agent }) => Promise<void>) => () => unknown;
   }).on;
   if (typeof on !== "function") return undefined;
-  return on.call(ctx, "agent/turn-stopping", (payload) =>
-    awaitHistorianAtTurnEnd(deps, payload.agent, awaitMs),
-  );
+  return on.call(ctx, "agent/turn-stopping", async (payload) => {
+    const awaitMs = resolveAwaitAtTurnEndMs(deps.historian?.config?.awaitAtTurnEndMs);
+    if (awaitMs <= 0) return;
+    await awaitHistorianAtTurnEnd(deps, payload.agent, awaitMs);
+  });
 }

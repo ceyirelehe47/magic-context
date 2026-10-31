@@ -17,9 +17,21 @@ import {
   type DshStorageBootstrap,
 } from "./host/bootstrap";
 import { canonicalSessionKey, parseDshSessionKey } from "dsh-magic-context-adapter";
+import {
+  buildMagicHostConfigSchema,
+  readMagicOverrides,
+  type MagicDshOverrides,
+} from "./settings/magic-settings";
 
 /** Cordis plugin name (loader diagnostics). */
 export const name = "magic-context-dsh";
+
+/**
+ * Host Config (schemastery): ordinary boot fields + the volatile DSH override
+ * layer edited from the settings page (see settings/magic-settings.ts for the
+ * precedence rules). `undefined` when the host's schemastery is unresolvable.
+ */
+export const Config = buildMagicHostConfigSchema();
 
 /** Host plugin configuration. */
 export interface MagicHostConfig {
@@ -29,6 +41,13 @@ export interface MagicHostConfig {
   port?: number;
   /** SHA-256 first-8-hex of the DSH home for canonical session keys. */
   homeHash?: string;
+  /** Volatile DSH overrides (cosmokit refs at runtime; plain values in tests). */
+  enabled?: unknown;
+  historianModel?: unknown;
+  historianAwaitAtTurnEndMs?: unknown;
+  executeThresholdPercentage?: unknown;
+  executeThresholdByModel?: unknown;
+  protectedTokens?: unknown;
 }
 
 /** The host service the adapter's planes consume. */
@@ -48,6 +67,12 @@ export interface MagicContextHostService {
   registerSummarizeHook(hook: MagicSummarizeHook): void;
   /** The registered hook, if any (compaction engine bundle reads this). */
   summarizeHook(): MagicSummarizeHook | undefined;
+  /**
+   * Current DSH override layer (dereferenced on every call, so live
+   * `settings.mutate` edits apply without a remount). Optional for older
+   * host stand-ins.
+   */
+  overrides?(): MagicDshOverrides;
 }
 
 /**
@@ -85,8 +110,28 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
     summarizeHook(): MagicSummarizeHook | undefined {
       return summarizeHook;
     },
+    overrides(): MagicDshOverrides {
+      return readMagicOverrides(config);
+    },
   };
   ctx.provide("magicContextHost", host);
+  // This bundle ships its own settings page (settings.section), so opt out of
+  // schema auto-generation. Optional: the host runs without dsh-settings.
+  const inject = (ctx as unknown as {
+    inject?: (deps: string[], callback: (child: Context) => void) => unknown;
+    fiber?: unknown;
+  });
+  if (typeof inject.inject === "function") {
+    try {
+      inject.inject(["settings"], (child) => {
+        const settings = (child as unknown as { settings?: { configure?: (p: { auto?: boolean }, owner?: unknown) => () => void } }).settings;
+        if (typeof settings?.configure !== "function") return;
+        child.effect(() => settings.configure!({ auto: false }, inject.fiber), "magic-context:settings-page-policy");
+      });
+    } catch {
+      // Settings policy is cosmetic; never block the host boot.
+    }
+  }
   // The `magicContext` Typert Remote is registered by the dedicated
   // `/remote` bundle row (`dsh-magic-context/remote`), NOT here —
   // the loader mounts both rows, so registering in both double-provides

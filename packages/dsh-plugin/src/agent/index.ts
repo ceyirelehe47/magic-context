@@ -51,6 +51,12 @@ import { createEmbedSeam } from "./embed";
 import { dshModelRefToCanonical } from "dsh-magic-context-adapter";
 import { modelSupportsVision } from "@magic-context/core/shared/models-dev-cache";
 import type { KnowledgeAgentView } from "./knowledge-gate";
+import {
+  resolveEffectiveSettings,
+  resolveThresholds,
+  type EffectiveMagicSettings,
+  type MagicDshOverrides,
+} from "../settings/magic-settings";
 
 /**
  * Mural wiring (Phase 4): vision-gated image-block injection on the m0
@@ -262,6 +268,58 @@ export function dreamerCoreConfigOf(config: MagicAgentConfig): unknown {
   return (config as unknown as { _dreamerCore?: unknown })._dreamerCore;
 }
 
+/**
+ * Live view over the DSH settings overlay (host `magic-host` volatile Config).
+ * Each getter re-reads the host overrides, so a `settings.mutate` edit applies
+ * on the next step without remounting the agent plane. Row config set
+ * explicitly to `enabled: false` (preset/tests) always wins.
+ */
+export interface MagicLiveSettings {
+  overrides(): MagicDshOverrides;
+  effective(): EffectiveMagicSettings;
+  enabled(): boolean;
+  thresholdFor(agent: { options?: { provider?: string; model?: string } }, contextWindow?: number): number;
+}
+
+export function createLiveSettings(
+  host: Pick<MagicContextHostService, "overrides">,
+  directory: string,
+): MagicLiveSettings {
+  let jsonc: MagicContextPluginConfig | undefined;
+  try {
+    jsonc = loadPluginConfig(directory);
+  } catch {
+    jsonc = undefined;
+  }
+  const overrides = () => {
+    try {
+      return host.overrides?.() ?? {};
+    } catch {
+      return {};
+    }
+  };
+  const effective = () => resolveEffectiveSettings(jsonc, overrides());
+  return {
+    overrides,
+    effective,
+    enabled: () => effective().enabled.value,
+    thresholdFor: (agent, contextWindow) => {
+      const { provider, model } = agent.options ?? {};
+      const ref = provider && model ? `${provider}/${model}` : undefined;
+      return resolveThresholds(effective(), ref, contextWindow).executePercentage;
+    },
+  };
+}
+
+/** Overlay a getter onto a config section (spreads would freeze the value). */
+function withGetters<T extends object>(base: T | undefined, getters: Record<string, () => unknown>): T {
+  const out = { ...(base ?? {}) } as T;
+  for (const [key, get] of Object.entries(getters)) {
+    Object.defineProperty(out, key, { get, enumerable: true, configurable: true });
+  }
+  return out;
+}
+
 export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   // The AGENT plane is a separate bundle from the host plane: each inlines its
   // own copy of the core's harness module, so the host's setDshHarness() never
@@ -269,6 +327,9 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   // / compartments…). Lock "dsh" HERE too, before any DB write — the core's
   // setHarness is idempotent for the same value and throws only on a mismatch.
   setDshHarness();
+  // Explicit row thresholds (preset/tests) are final; captured before the
+  // jsonc bridge fills the default.
+  const explicitThreshold = config.historian?.executeThresholdPercentage;
   config = bridgeMagicConfig(config, config.directory ?? process.cwd());
   const host = readMagicContextHost(ctx);
   if (!host) {
@@ -276,6 +337,35 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   }
   const log = (message: string) => ctx.logger?.info?.(message);
   const directory = config.directory ?? process.cwd();
+
+  // DSH settings overlay (live). Explicit row `enabled: false` stays final.
+  const live = createLiveSettings(host, directory);
+  const rowContext = config.context;
+  const rowHistorian = config.historian;
+  const rowKnowledge = config.knowledge;
+  const liveEnabled = () => live.enabled();
+  config = {
+    ...config,
+    context: withGetters(rowContext, {
+      enabled: () => (rowContext?.enabled === false ? false : liveEnabled()),
+      protectedTokens: () => live.overrides().protectedTokens ?? rowContext?.protectedTokens,
+    }),
+    historian: withGetters(rowHistorian, {
+      enabled: () => (rowHistorian?.enabled === false ? false : liveEnabled()),
+      executeThresholdPercentage: () => {
+        const o = live.overrides();
+        return o.executeThresholdPercentage !== undefined || o.executeThresholdByModel !== undefined
+          ? resolveThresholds(live.effective(), undefined).executePercentage
+          : rowHistorian?.executeThresholdPercentage;
+      },
+      model: () => live.overrides().historianModel ?? rowHistorian?.model,
+      awaitAtTurnEndMs: () => live.overrides().historianAwaitAtTurnEndMs ?? rowHistorian?.awaitAtTurnEndMs,
+    }),
+    knowledge: withGetters(rowKnowledge, {
+      enabled: () => (rowKnowledge?.enabled === false ? false : liveEnabled()),
+    }),
+  };
+  const historianModel = () => config.historian?.model;
 
   registerSystemGuidance(ctx, { config: config.guidance, log });
 
@@ -307,9 +397,24 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
     host,
     config: config.context,
     directory,
+    isEnabled: liveEnabled,
     historian: {
       config: config.historian,
       readPressure: readContextPressure(ctx),
+      // Explicit row thresholds (tests/presets) win; otherwise the core
+      // resolver over jsonc + DSH overlay picks the per-model value.
+      resolveExecuteThreshold: (agent) => {
+        const o = live.overrides();
+        if (
+          explicitThreshold !== undefined &&
+          o.executeThresholdPercentage === undefined &&
+          o.executeThresholdByModel === undefined
+        ) {
+          return explicitThreshold;
+        }
+        const a = agent as unknown as { options?: { provider?: string; model?: string } };
+        return live.thresholdFor(a);
+      },
       fire: ({ db, sessionId, directory: fireDirectory, provider, contextWindow }) => {
         // Fire-and-forget: the pass publishes atomically and only signals
         // deferred work; it must never block the pre-step chain.
@@ -318,7 +423,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
           sessionId,
           directory: fireDirectory,
           provider,
-          summarize: createLlmSummarizeCall(ctx, config.historian?.model),
+          summarize: createLlmSummarizeCall(ctx, historianModel),
           model: currentModel(ctx),
           currentContextLimit: contextWindow,
           onPublished: () => {
@@ -342,7 +447,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   registerMagicHistorianPlane(ctx, {
     host,
     directory,
-    model: config.historian?.model,
+    model: historianModel,
     log,
   });
 
@@ -359,7 +464,9 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
 
   registerKnowledgeGate(ctx, {
     host,
-    config: { ...(config.knowledge ?? {}), directory },
+    config: withGetters({ ...(config.knowledge ?? {}), directory }, {
+      enabled: () => (rowKnowledge?.enabled === false ? false : liveEnabled()),
+    }),
     autoSearch: config.autoSearch ?? {},
     mural: createMuralWiring(ctx, config.knowledge?.muralEnabled === true),
     now: config.now,
