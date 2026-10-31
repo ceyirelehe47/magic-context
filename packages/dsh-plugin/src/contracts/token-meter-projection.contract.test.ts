@@ -102,7 +102,7 @@ describe("contract: token-meter contextPressure projection (0.2.1-rc.5)", () => 
           : undefined,
     };
     const sample = readContextPressure(ctx as never)({ session: { events: [] } } as never);
-    expect(requestedKeys).toEqual([["contextPressure"]]);
+    expect(requestedKeys).toEqual([["contextPressure", "magicContextPressure"]]);
     expect(sample?.contextWindow).toBe(200_000);
     expect(sample?.projectedTokens).toBe((view as { projectedTokens: number }).projectedTokens);
   });
@@ -121,5 +121,8 @@ describe("contract: token-meter contextPressure projection (0.2.1-rc.5)", () => 
     const absent = { get: () => ({ snapshot: () => ({ values: {} }) }) };
     expect(readContextPressure(absent as never)(logAgent)).toEqual({ projectedTokens: 9_000, contextWindow: 128_000 });
     expect(pressureSampleFromView({ pressureTokens: 5, contextWindow: 10 })).toEqual({ projectedTokens: 5, contextWindow: 10 });
+    // The MC meter key (stock row disabled by setup) is read the same way.
+    const magic = { get: () => ({ snapshot: () => ({ values: { magicContextPressure: { contextWindow: 50, projectedTokens: 7 } } }) }) };
+    expect(readContextPressure(magic as never)(logAgent)).toEqual({ projectedTokens: 7, contextWindow: 50 });
   });
 });

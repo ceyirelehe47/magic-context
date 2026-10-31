@@ -63,6 +63,13 @@ export function currentModel(ctx: Context): string {
  */
 export const CONTEXT_PRESSURE_PROJECTION_KEY = "contextPressure" as const;
 
+/**
+ * The MC meter's key (host/meter.ts): token-meter's contextPressure fold
+ * re-registered under this name once setup disables the stock row. Same
+ * pressure fields, so it is read the same way when the native key is absent.
+ */
+export const MAGIC_CONTEXT_PRESSURE_PROJECTION_KEY = "magicContextPressure" as const;
+
 /** Wire view of the token-meter `contextPressure` projection (0.2.1-rc.5). */
 export interface DshContextPressureView {
   readonly pressureTokens?: number;
@@ -108,12 +115,17 @@ export function readContextPressure(ctx: Context): (agent: Agent) => { projected
           ) => { values?: Record<string, unknown> };
         }
       | undefined;
-    const values = projections?.snapshot?.(agent.session, [CONTEXT_PRESSURE_PROJECTION_KEY])?.values;
-    if (values !== undefined && Object.hasOwn(values, CONTEXT_PRESSURE_PROJECTION_KEY)) {
-      const view = values[CONTEXT_PRESSURE_PROJECTION_KEY];
-      return view !== null && typeof view === "object"
-        ? pressureSampleFromView(view as DshContextPressureView)
-        : undefined;
+    const values = projections?.snapshot?.(agent.session, [
+      CONTEXT_PRESSURE_PROJECTION_KEY,
+      MAGIC_CONTEXT_PRESSURE_PROJECTION_KEY,
+    ])?.values;
+    for (const key of [CONTEXT_PRESSURE_PROJECTION_KEY, MAGIC_CONTEXT_PRESSURE_PROJECTION_KEY]) {
+      if (values !== undefined && Object.hasOwn(values, key)) {
+        const view = values[key];
+        return view !== null && typeof view === "object"
+          ? pressureSampleFromView(view as DshContextPressureView)
+          : undefined;
+      }
     }
     return pressureFromSessionLog(agent);
   };
