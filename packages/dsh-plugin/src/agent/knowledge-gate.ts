@@ -19,10 +19,10 @@
  *      (fire-and-forget, see auto-search.ts);
  *   5. passes the pre-step decision through untouched (`await next()`).
  *
- * Injection timing: DSH `agent.inject()` queues model-facing context for the
- * NEXT pre-step batch (the current batch was already claimed when the waterfall
- * ran), so the knowledge baseline becomes model-visible on the following
- * request of the session. This matches the PLAN §4.1 "inject, do not rewrite"
+ * Injection timing (DSH 0.2.1-rc.5): the baseline is prepended to the CURRENT
+ * pre-step batch, which DSH appends to the surface for this request. It is
+ * not additionally queued with `agent.inject()` (that duplicate kept the
+ * next-step inbox non-empty and forced an extra step after a final reply). This matches the PLAN §4.1 "inject, do not rewrite"
  * contract — the adapter never mutates existing message arrays.
  *
  * Knowledge-mode preview: `compactionOff: true` by default — the zero-
@@ -399,8 +399,14 @@ export async function maybeInjectKnowledge(
     messageId: `${blocks.watermark}:m1`,
   };
   const m1Message = magicUserMessage(blocks.m1Text, m1Source, []);
-  agent.inject(m0Message);
-  agent.inject(m1Message);
+  // DSH 0.2 delivery: the gate prepends these to the CURRENT pre-step batch
+  // (the claimed array the terminal decision returns), which DSH appends to
+  // the surface for this very request. Do NOT also `agent.inject()` them:
+  // that queues a duplicate copy in the next-step inbox, so a step that
+  // finished with plain text no longer ends the turn (DSH 0.2.1-rc.5 loop:
+  // `turnEnds && inbox.nextStep.length === 0`) — an extra model call that
+  // re-sends the baseline, verified on a real headless run.
+  const delivered: unknown[] = [m0Message, m1Message];
   // Synthetic todowrite replay (Magic todo-view parity): this pass IS a
   // cache-bust (HARD materialization) — resurface the last todo snapshot so
   // the model regains its task list after the fold, exactly like OpenCode/Pi
@@ -428,8 +434,7 @@ export async function maybeInjectKnowledge(
             messageId: todoWatermark,
           };
           const todoMessage = magicUserMessage(todoText, todoSource, []);
-          agent.inject(todoMessage);
-          state.lastInjectedMessages.push(todoMessage);
+          delivered.push(todoMessage);
         }
       }
     }
@@ -438,9 +443,7 @@ export async function maybeInjectKnowledge(
   }
   state.injectedGenerations.set(magicSessionId, generation);
   // 首轮 pre-step 前置用：本次 LLM 调用即可见（Pi transform unshift 语义）。
-  if (state.lastInjectedMessages.length === 0) {
-    state.lastInjectedMessages = [m0Message, m1Message];
-  }
+  state.lastInjectedMessages = delivered;
   deps.log?.(
     `[magic-context] injected knowledge baseline ${blocks.watermark} for ${magicSessionId}@gen${generation}`,
   );
@@ -486,8 +489,9 @@ export async function runKnowledgeGateStep(
       // Knowledge baseline (once per surface generation; forced after publish).
       await maybeInjectKnowledge(state, deps, agent, db, magicSessionId, projectPath, directory, deferred.materialization);
       // Pi transform 语义：首轮注入的消息前置到本次调用的消息列表（立即可见）。
-      // agent.inject 排队到下一批 pre-step；前置只影响本次调用，不写 surface，
-      // 因此不会与下一批 surface 中的基线重复（watermark/状态去重）。
+      // DSH 0.2: the claimed batch IS appended to the surface (user/message
+      // events), so the prepend is the single delivery path; the watermark
+      // de-dup reads it back from the surface on resume.
       if (state.lastInjectedMessages.length > 0) {
         const injected = state.lastInjectedMessages;
         state.lastInjectedMessages = [];
