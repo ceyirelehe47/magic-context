@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Database } from "@magic-context/core/shared/sqlite";
-import { readSessionContextDetails } from "./context-details";
+import { nudgeLevelOf, readSessionContextDetails } from "./context-details";
 import { resolveEffectiveSettings, resolveThresholds } from "../settings/magic-settings";
 
 function db() {
@@ -52,6 +52,19 @@ describe("magicContext/context details", () => {
     expect(readSessionContextDetails(input(d)).historian.state).toBe("failed");
     d.exec(`UPDATE session_meta SET compartment_in_progress = 1`);
     expect(readSessionContextDetails(input(d)).historian.state).toBe("running");
+  });
+
+  it("decodes core's JSON Channel 1 nudge state to the band name (seen raw on real 0.2.1-rc.5)", () => {
+    expect(nudgeLevelOf('{"level":"","ordinal":0}')).toBeUndefined();
+    expect(nudgeLevelOf('{"level":"firm","ordinal":4,"postReduceGracePending":true}')).toBe("firm");
+    expect(nudgeLevelOf("gentle")).toBe("gentle");
+    expect(nudgeLevelOf("")).toBeUndefined();
+    expect(nudgeLevelOf("{broken")).toBeUndefined();
+    const d = db();
+    d.prepare(`INSERT INTO session_meta VALUES ('dsh:h:s1', 0, 0, NULL, 0, '', ?, 0, '', 0, 58, 0, NULL, NULL)`).run('{"level":"","ordinal":0}');
+    expect(readSessionContextDetails(input(d)).nudge).toEqual({ notePending: false });
+    d.exec(`UPDATE session_meta SET last_nudge_level = '{"level":"urgent","ordinal":2}'`);
+    expect(readSessionContextDetails(input(d)).nudge.level).toBe("urgent");
   });
 
   it("degrades to empty fields without storage or tables", () => {

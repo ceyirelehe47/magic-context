@@ -180,7 +180,7 @@ export function readSessionContextDetails(input: ContextDetailsInput): MagicSess
     },
     nudge: {
       ...(str(meta.last_nudge_band) !== undefined ? { band: String(meta.last_nudge_band) } : {}),
-      ...(str(meta.last_nudge_level) !== undefined ? { level: String(meta.last_nudge_level) } : {}),
+      ...(nudgeLevelOf(meta.last_nudge_level) !== undefined ? { level: nudgeLevelOf(meta.last_nudge_level) } : {}),
       ...(typeof meta.last_nudge_tokens === "number" && meta.last_nudge_tokens > 0
         ? { lastTokens: meta.last_nudge_tokens }
         : {}),
@@ -191,4 +191,26 @@ export function readSessionContextDetails(input: ContextDetailsInput): MagicSess
       ? { lastContextPercentage: meta.last_context_percentage }
       : {}),
   };
+}
+
+/**
+ * `session_meta.last_nudge_level` holds core's Channel 1 state as JSON
+ * (`{"level":"gentle","ordinal":3,…}`, see core storage-meta-persisted) —
+ * older rows hold the bare band string. Return the band name only, or
+ * undefined when no band is armed (`level: ""`), so the popover never shows
+ * the raw JSON.
+ */
+export function nudgeLevelOf(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const text = raw.trim();
+  if (text.length === 0) return undefined;
+  if (text.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(text) as { level?: unknown };
+      return typeof parsed.level === "string" && parsed.level.length > 0 ? parsed.level : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return text;
 }
