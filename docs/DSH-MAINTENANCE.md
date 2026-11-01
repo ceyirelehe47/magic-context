@@ -145,6 +145,15 @@ turns them into expectations — e.g. `doctor --disable-preset ptc` fails if
 `ptc` is still enabled. `magic-standard: disabled` simply means the generated
 clone is not in use (stock presets are patched instead).
 
+Verified on real rc.5 (round 8, `docs/dsh/e2e/evidence-round8/`):
+`setup --disable-preset ptc` leaves `cordis`/`minimal`/`standard` enabled and
+reports `ptc: disabled`; the composed tree (`dsh --dump-config`) has
+`preset-ptc` back on stock `compaction-basic` with no magic rows while the
+other three keep `compaction-basic: disabled` + `magic-compaction`/
+`magic-agent`, and `magic-meter.magicPresets` drops `ptc`. `doctor
+--all-presets` fails (rc=1) while `ptc` is off; `setup --all-presets`
+restores it and the profile patch comes back byte-identical.
+
 How `setup` works (`src/doctor/setup.ts`, `profile-wiring.ts`, `env.ts`,
 `compat/dsh-0.1/profile-patch.ts`):
 
@@ -259,6 +268,41 @@ writes a `- id: magic-host  config: {…}` row into the **active profile's**
 config in place — readers dereference it on every use, so the next agent
 step uses the new value without a remount. A stale `expectedRevision` returns
 `conflict` with the reloaded view (the page rebases and asks to save again).
+
+**Where the section lives in the rc.5 web UI.** rc.5 has no URL route for
+Settings: it is a body-portaled modal owned by
+`@deepseek-ai/dsh-client-ui-settings-general` (it occupies
+`sidebar.settings` and renders exactly one `settings.section` entry at a time,
+`renderSlot("settings.section", { close }, { only: activeId })`). It opens
+from the sidebar settings launcher (account menu) or the `settings.open`
+shortcut (`Cmd/Ctrl+Alt+,` on web macOS/Windows; rc.5 ships no web-Linux
+default). The nav lists every registered `settings.section` entry by its
+`label`; ours is `id: "magic-context"`, `order: 60`. The same form is also
+mounted as `plugins.bundle.config` on the bundle's page in **Plugins**.
+
+**Why the popover link opens Plugins, not the Settings section.** A plugin
+cannot open the Settings modal at a section in rc.5: the shell's
+`openSection(id)` is only handed to `settings.onboarding` steps, and the only
+navigation service plugins get, `pluginNavigation` (provided by
+`dsh-client-ui-plugin-manager`), has just `openList()` and
+`openBundle(packageName)`. DSH's own voice-input plugin uses
+`openBundle(...)` for its "open settings" action, so the meter popover does
+the same (`openBundle("dsh-magic-context")` → Plugins → our bundle, where
+`plugins.bundle.config` shows the same editable form). When
+`pluginNavigation` is missing the link turns into the text hint
+"Open Settings → Magic Context".
+
+Verified live on rc.5 (round 8, `docs/dsh/e2e/evidence-round8/settings-live.json`):
+`updateSettings set executeThresholdPercentage=50` wrote
+`- id: magic-host / config: { executeThresholdPercentage: 50 }` into the
+profile patch and `settings`/`context` reported 50 (source `dsh`); the ring
+stayed grey at 54 % until the next agent step, then turned yellow
+(`ckmc-warn`) at 56 %; the popover showed `Execute threshold 50 % · 12K`
+and a Nudge line with the band name only (`none · note nudge pending`, no raw
+JSON). A stale revision answered `conflict` (expected 0, actual 1, fresh view
+attached); `5` (out of bounds) and an unknown field answered `invalid` and
+wrote nothing. `unset` removed the row and both endpoints fell back to 65
+(source `jsonc`).
 
 ## Magic Context composer meter (replacing the native context indicator)
 
@@ -406,6 +450,31 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
    `client.test.ts` pins that allowlist. A DSH web release that renames those
    modules or the slot ids (`conversation.composer.dock`, `settings.section`)
    breaks the UI part only — the server side keeps working.
+9. **The popover's settings link opens Plugins, not the Settings modal.**
+   rc.5 gives plugins no way to open Settings at a section (see "Where the
+   section lives" above); the link uses `pluginNavigation.openBundle`, whose
+   bundle page carries the same form. Revisit if a later DSH exposes
+   `openSection` to plugins.
+10. **The ring recolours on the next agent step, not on Save.** A settings
+    change is live for the agent immediately, but the ring reads the
+    `magicContextPressure` projection, which is recomputed per step: after
+    setting 50 % the ring stayed grey at 54 % until the next step (then
+    yellow at 56 %), and after `unset` it stayed yellow until the next step.
+    The popover's threshold rows come from `magicContext/context` and update
+    as soon as it is reopened.
+11. **Duplicate `§N§` prefixes seen twice on real rc.5, not root-caused.**
+    Round 7 showed a repeated `§10§`; round 8 reproduced the pattern in a
+    resumed session (~2 h idle, historian wrote its first compartment during
+    the step): the turn-1 assistant reply and the new turn-2 user prompt both
+    render `§2§` (`turnOutline`: `§2§ Hello from round 7 …` /
+    `§2§ Round 8 threshold check …`; next reply `§7§ OK`). The model answered
+    correctly. Tag numbers are UNIQUE per session in the DB, so this is
+    most likely an identity issue of the surface-replace copies (each replace
+    gives the message a new event id and the prefix is re-read from the
+    text) rather than a double allocation — inferred from the code, not
+    confirmed. Next step: dump the session's `tags` rows and the surface
+    `user/message` sources around the compartment write with
+    `scripts/e2e/inspect-db.ts`.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
