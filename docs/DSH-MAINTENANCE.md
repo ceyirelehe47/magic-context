@@ -42,10 +42,10 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Without `@huggingface/transformers` installed (e.g. a slimmed local install)
-`typecheck:dsh` reports exactly one environmental error in core
-`features/magic-context/memory/embedding-local.ts` (dynamic import). The CI
-install includes it.
+Baseline (round 7, 2026-11-01, DSH 0.2.1-rc.5, filtered install above):
+`typecheck:dsh` **0 errors**, `adapter-api` **14 pass**, `dsh-plugin`
+**370 pass**, `contracts:dsh` **98 pass**, 0 fail everywhere. The filtered
+install is enough for a clean typecheck; nothing else has to be installed.
 
 ## Syncing with upstream
 
@@ -111,9 +111,39 @@ from `src/doctor/cli.ts`; `@deepseek-ai/cordis` is inlined so it runs outside
 a DSH tree). It is **not** a `dsh` sub-command.
 
 ```bash
-dsh-magic-context setup  [--dsh-home <dir>] [--dsh-install <dir>] [--stock-preset <file>] [--profile <name>] [--dry-run]
-dsh-magic-context doctor [--dsh-home <dir>] [--dsh-install <dir>] [--stock-preset <file>] [--profile <name>] [--directory <dir>]
+dsh-magic-context setup  [--dsh-home <dir>] [--dsh-install <dir>] [--profile <name>] [--dry-run]
+                         [--preset <id>[,<id>]]... [--all-presets] [--disable-preset <id>]...
+dsh-magic-context doctor [--dsh-home <dir>] [--dsh-install <dir>] [--profile <name>] [--directory <dir>]
+                         [--preset <id>]... [--all-presets] [--disable-preset <id>]...   (expectations)
 ```
+
+### Enabling Magic Context per agent preset
+
+Web profiles compose several **agent presets** (UI "modes": `standard`,
+`ptc`, `minimal`, `cordis` = Creator mode). Magic Context is enabled per
+preset; flat (headless/tui) profiles have a single pseudo-preset `root`.
+
+| flag | effect |
+|---|---|
+| *(none, first run)* | web: generate `magic-standard` (a clone of `standard` with Magic) and enable only that; flat: `root` |
+| `--preset standard,ptc` (repeatable, comma lists ok) | **add** these stock presets to the current selection — the stock preset rows are patched in place (`compaction-basic` disabled, `magic-compaction` + `magic-agent` inserted) |
+| `--all-presets` | enable every stock preset found in the installed layout (all except the generated `magic-standard`) |
+| `--disable-preset ptc` (repeatable) | **remove** these presets from the selection; their stock rows are restored |
+| *(none, later runs)* | keep the recorded selection and just refresh the block |
+
+The selection is recorded in the managed block itself
+(`# magic-presets: cordis,minimal,ptc,standard`), so every run adds/removes
+relative to what is there. An empty selection removes the whole block (Magic
+fully off for the profile, native compaction and meter back). New sessions of
+a changed preset pick the change up; running sessions keep their composition
+until restarted.
+
+`doctor` reports every preset of the profile as `enabled`/`disabled` (plus
+`unsupported (<why>)` for presets whose stock layout has no compaction group)
+and which composer indicator is active. Passing the same flags to `doctor`
+turns them into expectations — e.g. `doctor --disable-preset ptc` fails if
+`ptc` is still enabled. `magic-standard: disabled` simply means the generated
+clone is not in use (stock presets are patched instead).
 
 How `setup` works (`src/doctor/setup.ts`, `profile-wiring.ts`, `env.ts`,
 `compat/dsh-0.1/profile-patch.ts`):
@@ -141,7 +171,10 @@ How `setup` works (`src/doctor/setup.ts`, `profile-wiring.ts`, `env.ts`,
 
    ```yaml
    # >>> dsh-magic-context (managed by `dsh-magic-context setup`; do not edit inside) >>>
+   # magic-presets: root
    - id: compaction-basic
+     disabled: true
+   - id: token-meter
      disabled: true
    - insert:
        - id: magic-compaction
@@ -150,15 +183,29 @@ How `setup` works (`src/doctor/setup.ts`, `profile-wiring.ts`, `env.ts`,
            auto: true
        - id: magic-agent
          name: dsh-magic-context/agent
+       - id: magic-meter
+         name: dsh-magic-context/meter
+         config: { flat: true }
    # <<< dsh-magic-context <<<
    ```
 
-   (flat layout; the web layout instead gets a `magic-standard` agent preset
-   with the guarded compaction patch). Re-running replaces the block in place
+   (flat layout; web layouts instead get one `- id: preset-<id>` row per
+   enabled stock preset — the stock preset's plugin list with
+   `compaction-basic` disabled and `magic-compaction`/`magic-agent` added —
+   plus `token-meter: disabled` and the `magic-meter` row with
+   `magicPresets: [...]`). Re-running replaces the block in place
    (`mergeManagedBlock`) and keeps every user row outside it; a flow-style
    non-empty list is refused. `--dry-run` prints the block and writes
    nothing. Put your own overrides (e.g. `magic-agent` `historian.model`)
    **outside** the block, as separate `- id: magic-agent` rows.
+
+   **DSH's settings writer.** Saving anything on the DSH Settings page
+   (including the Magic Context section) makes DSH re-serialise the profile
+   patch file and append the changed row at the end of the file. `setup`
+   therefore always leaves an *edit anchor* row after the block, compares the
+   block semantically (a re-serialised block is still "up to date"), and
+   moves foreign rows that DSH appended *inside* the block back out (doctor
+   reports them as a warning first).
 6. Create `~/.config/cortexkit/magic-context.jsonc` from defaults once; an
    existing file is never overwritten (only missing recommended keys are
    hinted).
@@ -175,6 +222,81 @@ fatal) + liveness markers; config load outcome. After a DSH upgrade run
 Reference outputs: `docs/dsh/e2e/evidence-0.2.1-rc.5/{setup.txt,doctor.txt,profile-cordis.patch.yml}`.
 The old hand overlay is kept only for diffing:
 `packages/dsh-plugin/scripts/e2e/manual-overlay-headless.yml`.
+
+## DSH Settings page (Magic Context section)
+
+The `magic-host` row (host bundle `cordis.patch.yml`) declares a small
+**volatile** Cordis config; DSH's settings service (`@deepseek-ai/dsh-settings`)
+publishes it as the settings namespace `magic-host` (`applies: live`), and the
+client bundle renders an editable **Magic Context** section on the Settings
+page (`settings.section` slot + `plugins.bundle.config`). Fields (all optional;
+*unset = inherit*):
+
+| field | type / bounds | inherits from (jsonc) |
+|---|---|---|
+| `enabled` | boolean — live: pauses per-step Magic work | `enabled` |
+| `historianModel` | `provider/model` string | `historian.model` (then `historian.opencode.model`) |
+| `historianAwaitAtTurnEndMs` | 0–60000 ms | env `MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS`, else 0 |
+| `executeThresholdPercentage` | 20–90 % | `execute_threshold_percentage` (number form) |
+| `executeThresholdByModel` | `provider/model` → 20–90 % (DSH or canonical form) | merged over jsonc per-model `execute_threshold_percentage` keys |
+| `protectedTokens` | 4000–1000000 | `protected_tokens` (else core's derived default) |
+
+**Precedence (one-way overlay, never a sync):**
+**DSH override > `magic-context.jsonc` (project > user) > core default.** A
+field set in DSH wins; an unset field inherits the jsonc value; an unset jsonc
+key falls back to the core schema default. DSH never writes the jsonc file
+(other harnesses share it); "reset to jsonc" = unset the DSH field. The force
+(execute + 20, capped) and emergency (95 %) bands are derived from the
+effective execute threshold exactly as in core.
+
+Wire: the client talks to the `magicContext/*` Typert endpoints of the
+`magic-remote` row — `settings` (effective values with a `source` per field:
+`dsh` / `jsonc` / `default`, bounds, jsonc path, revision) and
+`updateSettings({ ops: [{op:"set"|"unset", path:[field], value}],
+expectedRevision })`. `updateSettings` goes through `settings.mutate`, which
+writes a `- id: magic-host  config: {…}` row into the **active profile's**
+`cordis.patch.yml` (outside the managed block) and refreshes the volatile
+config in place — readers dereference it on every use, so the next agent
+step uses the new value without a remount. A stale `expectedRevision` returns
+`conflict` with the reloaded view (the page rebases and asks to save again).
+
+## Magic Context composer meter (replacing the native context indicator)
+
+Goal: the composer's context ring shows Magic Context's view (yellow at the
+MC execute threshold, red near force, click → MC details) instead of DSH's
+native one.
+
+How it works (`entries/meter.ts`, `host/meter.ts`, `client/client.js`):
+
+- `setup` disables the stock **`token-meter`** row and inserts **`magic-meter`**
+  (`dsh-magic-context/meter`). `magic-meter` mounts the **real
+  `@deepseek-ai/dsh-token-meter`** inside a child scope whose
+  `sessionProjections` is a renaming facade: the unit TokenMeter registers as
+  `contextPressure` is re-registered as **`magicContextPressure`**, its wire
+  view extended with the MC thresholds (`executePercentage`,
+  `forcePercentage`, `emergencyPercentage`, mode), `managed` (is this session's
+  agent preset in `magicPresets` / flat) and `enabled`. Every other
+  projection (`tokenUsage`, `contextBreakdown`, …) passes through unchanged.
+- **Why rename instead of just disabling token-meter:** the stock web client
+  renders its native ring whenever a `contextPressure` projection exists, so
+  that key must disappear; but **`tool-result-pruner` injects `tokenMeter`**
+  (`static inject = ["tokenMeter"]`, it prices pruned nodes with
+  `tokenMeter.estimateMessage`). Disabling token-meter outright would leave
+  the pruner — and anything else injecting `tokenMeter` — pending forever.
+  Running the real TokenMeter under a renamed projection keeps the
+  `tokenMeter` service global and the pruner alive, while the native ring
+  sees no `contextPressure` and stays hidden.
+- If the stock `token-meter` row is still mounted (setup not run / hand
+  patch), `magic-meter` never provides a second `tokenMeter`; it only adds
+  `magicContextPressure` beside the native key (both rings show) and logs a
+  hint to run setup.
+- The client registers a `conversation.composer.dock` component: a ring + %
+  (`ckmc-meter`), **yellow ≥ execute**, **red ≥ force − 3**; clicking opens a
+  popover fed by `magicContext/context` (thresholds, system/tools/conversation
+  breakdown from `contextBreakdown`, compartments + historian state, pending
+  drops/outbox, tag counts, m0/m1 knowledge tokens, nudge band) with a link to
+  the Settings section through `pluginNavigation`. Unmanaged sessions (preset
+  not enabled) get no MC ring.
 
 ## Historian configuration
 
@@ -252,23 +374,38 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
    assistant message* land in the following `user` message
    (`agent/transcript.ts`). This is a DSH design constraint, not a bug to fix
    in the adapter.
-2. **Nudge U/T are approximations; `hasRecentReduce` is always `false`**
-   (no post-reduce grace). See open point 1 below.
-3. **Protection window counts tags, not a token floor**
-   (`countProtectionWindow`). See open point 2.
-4. **Core borrows the `opencode` model harness** (`historian.opencode`,
+   Observed on real rc.5 (round 7): after the first tool step the surface
+   holds the folded `[tool: …]` user message *and* a Magic-sourced re-tagged
+   copy of the user prompt (`§2§ …`, `source.kind: "magic-context"`) after
+   it. The model still answers correctly, but the ordering is a side effect
+   of range replacement worth watching on long sessions.
+2. **Core borrows the `opencode` model harness** (`historian.opencode`,
    `dreamer.opencode`); there is no first-class `dsh` harness in core. See
-   open point 3.
-5. **Unpublished rc.5 client packages.** `@deepseek-ai/dsh-client-runtime`
-   (and the other `dsh-client-*` inject targets in `package.json` `dsh.client`)
-   are not published at 0.2.1-rc.5, so the Web panel (`client/client.js`) may
-   fail to load. Server-side features are unaffected.
-6. **Worker tool allowlist not verified against a real DSH runtime** (unit
-   tests only; no production path uses the worker yet). See open point 4.
-7. **No bubblewrap on the verification machine.** The Linux sandbox used for
+   open point 1.
+3. **Worker tool allowlist not verified against a real DSH runtime** (unit
+   tests only; no production path uses the worker yet). See open point 2.
+4. **No bubblewrap on the verification machine.** The Linux sandbox used for
    the e2e runs has no `bwrap`, so DSH's sandboxed shell/tool execution was
-   not exercised there; tool calls that depend on the DSH sandbox are
-   unverified on Linux.
+   not exercised there; in the web UI every shell call asks for
+   *danger-full-access* approval on such a host.
+5. **The Settings page edits the active profile only.** `updateSettings`
+   writes the `magic-host` row into the profile DSH is running; another
+   profile (e.g. headless `test`) keeps its own overrides. The jsonc file is
+   never written from DSH.
+6. **The MC meter needs `setup`.** Without the managed block (hand-written
+   layer, or the stock `token-meter` row re-enabled) both the native ring and
+   the MC ring show. A preset that is not in `magicPresets` shows no ring at
+   all (the native one is disabled profile-wide).
+7. **`tool-result-pruner` is loaded but idle under Magic.** Its only caller in
+   rc.5 is `compaction-basic`, which Magic disables; Magic's own drops/
+   compartments do the pruning. It is kept mounted (and its `tokenMeter`
+   dependency satisfied) so re-enabling native compaction needs no rewiring.
+8. **Client bundle is plain JS against the rc.5 web boot.** It may only
+   `require` the web boot's static modules (`react`, `react/jsx-runtime`,
+   `react-dom`, `@deepseek-ai/dsh-client-store`, `…-ui-slots`, …); the test
+   `client.test.ts` pins that allowlist. A DSH web release that renames those
+   modules or the slot ids (`conversation.composer.dock`, `settings.section`)
+   breaks the UI part only — the server side keeps working.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
@@ -281,48 +418,39 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
 | `agent/coordinator.ts`, `agent/outbox.ts` | CAS + saga that applies those ops through DSH's surface transaction with crash-safe SQLite outbox; no core equivalent (OpenCode/Pi mutate the request array) |
 | `agent/context-plane.ts`, `agent/knowledge-gate.ts`, `agent/system-guidance.ts`, `agent/auto-search.ts` | DSH "inject, don't rewrite" delivery of m0/m1 knowledge, guidance and the `<ctx-search-hint>`: appended to the **current** pre-step batch (never `agent.inject`, no next-step inbox copy) + watermark de-dup |
 | `agent/historian*.ts`, `agent/recomp.ts`, `agent/dreamer.ts` | drive core historian/recomp/wrapup/dreamer with a DSH LLM client facade (OpenCode-SDK-shaped) and a transcript-backed raw-message provider |
-| `agent/nudge.ts`, `agent/protection.ts` | ctx_reduce nudges and protection window adapted to the data DSH has (see open points) |
+| `agent/nudge.ts`, `agent/protection.ts` | ctx_reduce nudges (core tail-hygiene walk over the DSH transcript, delivered by inject) and the core token-floor protection window fed with DSH inputs |
+| `settings/magic-settings.ts`, `host/remote.ts` (settings/updateSettings/context) | DSH Settings-page overlay (volatile `magic-host` config over jsonc) and the endpoints behind the settings section and the meter popover |
+| `entries/meter.ts`, `host/meter.ts`, `host/context-details.ts` | MC composer meter: real TokenMeter under a renamed `magicContextPressure` projection + per-session details |
 | `agent/tools.ts`, `agent/commands.ts` | register core `ctx_*` tools and `/ctx-*` commands in DSH registries |
 | `host/*`, `entries/*`, `client/client.js`, `cordis.patch.yml` | cordis plugin entry points, storage bootstrap (shared SQLite, `harness='dsh'`), Typert remote + web client panel |
 | `doctor/*` | `dsh-magic-context setup|doctor` CLI (preset generation, install/version/profile/DB checks) |
 
 ## Open compatibility points (as of DSH 0.2.1-rc.5 / core v0.49.34)
 
-1. **Nudge baseline is approximated.** Core 0.49 decides Channel 1/2 from a
-   tail-hygiene baseline (U undropped reclaimable, T live tail) produced by
-   the OpenCode/Pi transform's tail walk. DSH has no such walk; the adapter
-   uses the persisted tag aggregate (U = active tool output below the
-   protection cutoff, T = active conversation + tool tokens, zero turn
-   deltas). `hasRecentReduce` is always false and the post-reduce grace is
-   never armed (`markChannel1PostReduceGracePending` is not called from the
-   DSH `ctx_reduce`). Expect different cadence from OpenCode/Pi.
-2. **Protection window is count-based.** Core moved to a token-floor window
-   (`getProtectionWindowForSession`) and treats `protected_tags` as a
-   deprecated inert key. DSH still converts "newest N tags" via
-   `countProtectionWindow()`. Porting to the token floor needs DSH-side
-   pricing of the floor (`protected_tokens_effective` snapshot).
-3. **Model harness.** Core's `ModelHarness` is `opencode | pi | omp`. DSH
+Resolved since the import (kept here so nobody re-opens them): the nudge
+baseline now feeds core's real tail-hygiene walk with the DSH transcript
+(U/T, turn deltas, `hasRecentReduce`, post-reduce grace — `agent/nudge.ts`);
+the protection window is core's token floor (`agent/protection.ts`,
+`protected_tokens`); the context-pressure key is pinned by
+`token-meter-projection.contract.test.ts` and read as `magicContextPressure`
+(MC meter) or `contextPressure` (stock meter), falling back to the event log;
+the client requires `@deepseek-ai/dsh-client-store` (the nonexistent
+`dsh-client-runtime` is gone) and renders on real rc.5.
+
+1. **Model harness.** Core's `ModelHarness` is `opencode | pi | omp`. DSH
    reads the `opencode` blocks (`dreamer.opencode`, `historian.opencode`)
    because DSH model refs are `provider/model`. A first-class `dsh` harness
    block would need a core change.
-4. **Worker tool allowlist.** DSH 0.2 dropped `toolFilter`/`persona` from
+2. **Worker tool allowlist.** DSH 0.2 dropped `toolFilter`/`persona` from
    `SubagentStartRequest`. The worker restricts tools from an `agent/created`
    listener matched on `header.origin === "subagent"` and
    `header.parentSession === parent`, and fails closed if it cannot. Not
    exercised against a real DSH runtime; the worker is not used by any
    production path yet. DSH's own `ChildComposition.toolFilter`
    (`applyChildComposition`) may be the cleaner route.
-5. **Context pressure source.** The historian trigger first reads
-   `sessionProjections.snapshot(session).values.contextPressure` (token-meter
-   projection); the key was not re-verified for 0.2. The event-log fallback
-   (last call `input + cacheRead + cacheWrite` / `request/context`
-   window) is what the tests cover.
-6. **Client panel.** `client/client.js` requires
-   `@deepseek-ai/dsh-client-runtime/client`, which is not published at
-   0.2.1-rc.5 (the peer was dropped); the web panel may not load on 0.2.
-7. **Removed upstream, removed here:** `/ctx-aug` (sidekick),
+3. **Removed upstream, removed here:** `/ctx-aug` (sidekick),
    `/ctx-session-upgrade`, `runManagedUpgrade`, `runMigration`. `/ctx-recomp
    --upgrade` answers with the core deprecation text.
-8. **Dreamer facade is "hidden".** The DSH dream client sets
+4. **Dreamer facade is "hidden".** The DSH dream client sets
    `backgroundSessionsAreHidden: true`; without it core 0.49 skips every
    non-host-only scheduled task ("no ordinary parent session").

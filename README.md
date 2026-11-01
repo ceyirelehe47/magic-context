@@ -159,6 +159,33 @@ Run `npx @cortexkit/magic-context@latest doctor` any time to re-check and auto-f
 
 </details>
 
+<details>
+<summary><b>DeepSeek Harness (DSH) — <code>dsh-integration</code> branch of this fork</b></summary>
+
+`packages/dsh-plugin` (`dsh-magic-context`, DSH 0.2.1-rc.5) runs the same core
+on DeepSeek Harness, sharing the SQLite store with OpenCode/Pi.
+
+```sh
+dsh-magic-context setup  --profile web --all-presets   # or --preset standard,ptc / --disable-preset ptc
+dsh-magic-context doctor --profile web                 # reports Magic per agent preset
+```
+
+- **Per-mode enable:** Magic Context is switched on per DSH agent preset
+  (Standard / PTC / Minimal / Creator); `doctor` lists each as enabled/disabled.
+- **Settings page:** *Settings → Magic Context* overrides enabled, historian
+  model, execute threshold (global and per model), protected tokens, historian
+  await — precedence **DSH override > `magic-context.jsonc` > default**; DSH
+  never writes the jsonc.
+- **Context meter:** the composer ring is replaced by a Magic Context ring
+  (yellow at the MC execute threshold, click for MC details). The real token
+  meter keeps running under a renamed projection (`magicContextPressure`)
+  because `tool-result-pruner` depends on it.
+
+Details, limitations and maintenance: [`packages/dsh-plugin/README.md`](packages/dsh-plugin/README.md),
+[`docs/DSH-MAINTENANCE.md`](docs/DSH-MAINTENANCE.md).
+
+</details>
+
 ---
 
 ## Part of CortexKit
