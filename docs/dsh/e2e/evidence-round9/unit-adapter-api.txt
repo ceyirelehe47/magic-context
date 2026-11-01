@@ -1,0 +1,24 @@
+bun test v1.4.4 (38afee6c8)
+
+src/harness.test.ts:
+(pass) harness identity boundary > locks the harness to 'dsh' [0.10ms]
+(pass) harness identity boundary > is idempotent when already locked to dsh [0.03ms]
+(pass) harness identity boundary > DSH_HARNESS is the exact runtime string [0.04ms]
+(pass) canonical session key > derives an invertible canonical key [0.28ms]
+(pass) canonical session key > rejects empty segments [0.28ms]
+(pass) canonical session key > rejects a dsh session id containing the separator [0.11ms]
+(pass) canonical session key > returns undefined for non-DSH keys and malformed shapes [0.11ms]
+(pass) canonical session key > round-trips DSH session ids that themselves contain no colon [0.03ms]
+
+src/model-map.test.ts:
+(pass) DSH model geometry > maps the official DeepSeek route to the canonical provider prefix [0.09ms]
+(pass) DSH model geometry > maps the canonical form back to the DSH-native route, idempotently [0.04ms]
+(pass) DSH model geometry > preserves model ids containing additional slashes byte-for-byte [0.01ms]
+(pass) DSH model geometry > leaves unmapped providers as identities [0.02ms]
+(pass) DSH model geometry > handles prototype-colliding provider names safely [0.01ms]
+(pass) DSH model geometry > exposes the canonical DeepSeek provider constants [0.03ms]
+
+ 14 pass
+ 0 fail
+ 23 expect() calls
+Ran 14 tests across 2 files. [79.00ms]

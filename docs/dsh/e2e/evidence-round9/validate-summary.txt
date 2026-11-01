@@ -1,0 +1,6 @@
+typecheck: tc-adapter rc=0, tc-dsh rc=0 (0 errors)
+tc-adapter rc=0
+tc-dsh rc=0
+adapter-api rc=0  14 pass  0 fail 
+dsh-plugin rc=0  373 pass  0 fail 
+contracts rc=0  98 pass  0 fail 

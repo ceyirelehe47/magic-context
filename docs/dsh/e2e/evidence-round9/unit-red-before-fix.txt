@@ -41,9 +41,9 @@ error: expect(received).toEqual(expected)
 - Expected  - 1
 + Received  + 26
 
-      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:141:20)
-      at async withDb (/workspace/work/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:104:11)
-      at async <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:117:11)
+      at <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:141:20)
+      at async withDb (<work>/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:104:11)
+      at async <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:117:11)
 (fail) first-call §N§ preview uses the core tag key (one tag per message) > never allocates a bare-id tag and shows the same number the surface shows [1876.26ms]
 
  0 pass

@@ -20,9 +20,9 @@ error: expect(received).toEqual(expected)
 - Expected  - 1
 + Received  + 5
 
-      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/legacy-tag-cleanup.test.ts:187:64)
-      at async withDb (/workspace/work/magic-context/packages/dsh-plugin/src/agent/legacy-tag-cleanup.test.ts:67:11)
-      at async <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/legacy-tag-cleanup.test.ts:172:11)
+      at <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/legacy-tag-cleanup.test.ts:187:64)
+      at async withDb (<work>/magic-context/packages/dsh-plugin/src/agent/legacy-tag-cleanup.test.ts:67:11)
+      at async <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/legacy-tag-cleanup.test.ts:172:11)
 (fail) legacy bare-id §N§ tags are folded once per session > the context plane runs the fold on the first pass of a process [599.11ms]
 
  0 pass
