@@ -1,0 +1,24 @@
+# DSH session events (user/assistant only), text truncated to 90 chars; seq = DSH event seq
+4 turn/start {'turn': 1}
+6 step/start {'turn': 1, 'step': 1}
+8 user/message src=magic-context '<session-history></session-history>'
+9 user/message src=magic-context '<session-history-since>(no new content since last materialization)</session-history-since>'
+10 user/message src=user 'Turn 1. Do not call any tools. In about 350 words, explain how a hash map handles collisio'
+11 user/message src=runtime-context 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurr'
+16 assistant/message src=model '§1§ A hash map stores key-value pairs in an array of buckets, using a hash function to con'
+21 turn/start {'turn': 2}
+23 user/message src=magic-context '§3§ A hash map stores key-value pairs in an array of buckets, using a hash function to con'
+24 user/message src=magic-context '§2§ Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n'
+25 user/message src=magic-context '§1§ Turn 1. Do not call any tools. In about 350 words, explain how a hash map handles coll'
+26 step/start {'turn': 2, 'step': 1}
+27 user/message src=user 'Turn 2. Do not call any tools. In about 300 words, compare Robin Hood hashing with cuckoo '
+28 user/message src=runtime-context 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurr'
+30 assistant/message src=model '§4§ Both are schemes for resolving collisions in hash tables, but they optimize for differ'
+35 turn/start {'turn': 3}
+37 user/message src=magic-context '§6§ Both are schemes for resolving collisions in hash tables, but they optimize for differ'
+38 user/message src=magic-context '§5§ Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n'
+39 user/message src=magic-context '§4§ Turn 2. Do not call any tools. In about 300 words, compare Robin Hood hashing with cuc'
+40 step/start {'turn': 3, 'step': 1}
+41 user/message src=user 'Turn 3. Do not call any tools. In about 200 words, say when you would pick a B-tree over a'
+42 user/message src=runtime-context 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurr'
+44 assistant/message src=model '§7§ Choose a B-tree when order, ranges, or disk I/O matter. A hash map answers one questio'

@@ -1,0 +1,11 @@
+key dsh:<home>:session-e26ef300-0e69-4de2-9933-3b97cc999653
+tags total 6 message 6 tool 0 bare-id message tags 0
+message_id keys distinct 6 dup keys 0
+1 message active 71c6c297:p0
+2 message active e5423864:p0
+3 message active a83d992c:p0
+4 message active 658eb9ea:p0
+5 message active e36a1c8a:p0
+6 message active 89bd5e71:p0
+compartments 2
+compartment rows [{"sequence":0,"start_message":1,"end_message":2,"t":"Empty session-history handoff with no prior content"},{"sequence":1,"start_message":3,"end_message":3,"t":"Benchmark turn 1: explain hash map collision handling withou"}]

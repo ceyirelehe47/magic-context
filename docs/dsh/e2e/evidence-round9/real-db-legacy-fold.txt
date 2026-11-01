@@ -1,0 +1,29 @@
+# real round 7/8/9-pre-fix DB copy (taken before this round's DSH turns); fold run with the shipped function, no view mapping (sessions not loaded)
+
+## dsh:<home>:session-393bb9a7
+before: 8 message tags, bare=1, owners with >1 tag=1, pending_ops=0
+before rows: 1=41998ab7, 2=41998ab7:p0, 3=2540d975:p0, 4=426fc1c5:p0, 5=synth-user-0a98c942:p0, 7=f9d72a69:p0, 8=synth-user-b31a5dda:p0, 10=9303defa:p0
+fold: removed=[1] retargeted=[] discardedOps=0
+after: 7 message tags, bare=0, owners with >1 tag=0
+after rows: 2=41998ab7:p0, 3=2540d975:p0, 4=426fc1c5:p0, 5=synth-user-0a98c942:p0, 7=f9d72a69:p0, 8=synth-user-b31a5dda:p0, 10=9303defa:p0
+
+## dsh:<home>:session-4c2b638c
+before: 22 message tags, bare=4, owners with >1 tag=3, pending_ops=0
+before rows: 1=22232f51, 2=22232f51:p0, 3=3648f733:p0, 4=fa426e24:p0, 5=synth-user-3c187a1f:p0, 7=c22b0fbb:p0, 9=38b747fc:p0, 10=synth-user-7e296919:p0, 12=3a26b42a, 13=8038d95d:p0, 15=3a26b42a:p0, 16=93173d95:p0, 18=cc9f762e, 19=beeccc05:p0, 20=synth-user-f8007e80:p0, 22=cc9f762e:p0, 23=0125d03a:p0, 25=86526acc:p0, 26=synth-user-a5a32014:p0, 28=5dfc64da, 29=532533f0:p0, 30=synth-user-105c325e:p0
+fold: removed=[1,12,18,28] retargeted=[] discardedOps=0
+after: 18 message tags, bare=0, owners with >1 tag=0
+after rows: 2=22232f51:p0, 3=3648f733:p0, 4=fa426e24:p0, 5=synth-user-3c187a1f:p0, 7=c22b0fbb:p0, 9=38b747fc:p0, 10=synth-user-7e296919:p0, 13=8038d95d:p0, 15=3a26b42a:p0, 16=93173d95:p0, 19=beeccc05:p0, 20=synth-user-f8007e80:p0, 22=cc9f762e:p0, 23=0125d03a:p0, 25=86526acc:p0, 26=synth-user-a5a32014:p0, 29=532533f0:p0, 30=synth-user-105c325e:p0
+
+## dsh:<home>:session-8ff18b72
+before: 7 message tags, bare=1, owners with >1 tag=1, pending_ops=0
+before rows: 1=5d3a2430, 2=5d3a2430:p0, 3=2f894acb:p0, 4=dbf8c9c6:p0, 5=synth-user-11595873:p0, 7=0841e851:p0, 8=synth-user-540d6c55:p0
+fold: removed=[1] retargeted=[] discardedOps=0
+after: 6 message tags, bare=0, owners with >1 tag=0
+after rows: 2=5d3a2430:p0, 3=2f894acb:p0, 4=dbf8c9c6:p0, 5=synth-user-11595873:p0, 7=0841e851:p0, 8=synth-user-540d6c55:p0
+
+## dsh:<home>:session-96b69888
+before: 11 message tags, bare=3, owners with >1 tag=2, pending_ops=0
+before rows: 1=b43756fb, 2=3717b6de, 3=b43756fb:p0, 4=1eb752c7:p0, 5=b0899b61:p0, 6=b6e1db03:p0, 7=ef6d5e3e, 8=3717b6de:p0, 9=2f678780:p0, 10=52cb17ce:p0, 11=d2ce6dda:p0
+fold: removed=[1,2,7] retargeted=[] discardedOps=0
+after: 8 message tags, bare=0, owners with >1 tag=0
+after rows: 3=b43756fb:p0, 4=1eb752c7:p0, 5=b0899b61:p0, 6=b6e1db03:p0, 8=3717b6de:p0, 9=2f678780:p0, 10=52cb17ce:p0, 11=d2ce6dda:p0
