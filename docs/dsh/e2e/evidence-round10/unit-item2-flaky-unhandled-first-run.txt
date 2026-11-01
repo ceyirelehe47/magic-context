@@ -1,0 +1,489 @@
+bun test v1.4.4 (38afee6c8)
+
+src/packaging.test.ts:
+(pass) dsh-plugin packaging > no workspace:* runtime dependencies (adapter is bundled) [0.18ms]
+(pass) dsh-plugin packaging > build emits every core worker into dist/ and dist/entries/ [0.20ms]
+(pass) dsh-plugin packaging > setup/doctor bin inlines @deepseek-ai/cordis [0.23ms]
+
+src/agent/auto-search.test.ts:
+(pass) agent auto-search (<ctx-search-hint> delivered into the current batch) > queues a hint when the top hit clears the threshold and persists the decision [668.12ms]
+(pass) agent auto-search (<ctx-search-hint> delivered into the current batch) > skips (too-short) without searching and records a no-hint decision [456.64ms]
+(pass) agent auto-search (<ctx-search-hint> delivered into the current batch) > skips stacked augmentations without searching [423.20ms]
+(pass) agent auto-search (<ctx-search-hint> delivered into the current batch) > does not inject below the score threshold [391.48ms]
+(pass) agent auto-search (<ctx-search-hint> delivered into the current batch) > does not double-inject when a decision for the message already exists [446.54ms]
+(pass) agent auto-search (<ctx-search-hint> delivered into the current batch) > extractLatestUserPrompt picks the latest genuine user-sourced message [0.23ms]
+
+src/agent/cache-classification.test.ts:
+(pass) cache classification contract (SOFT+/SOFT/HARD) > byte-hash: the prefix hash is stable under tail appends [0.28ms]
+(pass) cache classification contract (SOFT+/SOFT/HARD) > ordinary turns: first-diff lands exactly at the old tail (SOFT+) [0.24ms]
+(pass) cache classification contract (SOFT+/SOFT/HARD) > mid-range replacement inside m1: first-diff is within the m1 region (SOFT) [0.15ms]
+(pass) cache classification contract (SOFT+/SOFT/HARD) > baseline replacement is HARD (first-diff crosses into m0) [0.04ms]
+(pass) cache classification contract (SOFT+/SOFT/HARD) > HARD is only produced by the enumerated triggers [0.06ms]
+(pass) cache classification contract (SOFT+/SOFT/HARD) > hardTriggersFor enumerates the active triggers from meta signals [0.09ms]
+(pass) cache classification contract (SOFT+/SOFT/HARD) > SOFT never crosses the m1 boundary (first-diff >= m0 end) [0.03ms]
+(pass) cache classification contract (SOFT+/SOFT/HARD) > empty plan / no changes classifies SOFT+ [0.03ms]
+(pass) cache classification contract (SOFT+/SOFT/HARD) > replay invariant: the same change yields the same first-diff every time [0.04ms]
+(pass) cache classification contract (SOFT+/SOFT/HARD) > message bytes are stable and hash-consistent [0.09ms]
+
+src/agent/commands.test.ts:
+(pass) registerCtxCommands (DSH /ctx-* commands) > registers the six core-parity commands and unregisters via the disposer [445.30ms]
+(pass) /ctx-status > renders executeStatus output including the canonical session key [540.09ms]
+(pass) /ctx-flush > flushes pending drops and marks tags dropped [783.94ms]
+(pass) LLM-dependent commands (guard / not-wired messages) > /ctx-dream rejects unknown tasks and reports the not-wired runner [516.47ms]
+(pass) LLM-dependent commands (guard / not-wired messages) > /ctx-aug and /ctx-session-upgrade are not registered (removed upstream) [552.75ms]
+(pass) LLM-dependent commands (guard / not-wired messages) > /ctx-recomp and /ctx-wrapup parse args and gate on compactionOff [510.00ms]
+(pass) compaction-off command gates (Pi parity) > /ctx-flush gates on compaction-off; /ctx-status stays informational [514.08ms]
+
+src/agent/context-plane-preview-tags.test.ts:
+(pass) first-call §N§ preview uses the core tag key (one tag per message) > never allocates a bare-id tag and shows the same number the surface shows [1025.69ms]
+(pass) first-call §N§ preview uses the core tag key (one tag per message) > tags the step's new input (not yet in the session) under the key core will use, so the model's next number is right [639.85ms]
+(pass) first-call §N§ preview uses the core tag key (one tag per message) > pre-assigns a new user message that follows an unfolded tool call under the folded ordinal (:p1, round 10) [558.36ms]
+
+src/agent/context-plane.commit.test.ts:
+(pass) recentCommitClusterCount (lightweight Pi-parity trigger) > counts contiguous commit-mention bursts, not individual hashes [0.65ms]
+(pass) recentCommitClusterCount (lightweight Pi-parity trigger) > returns 0 for text without commit hashes [0.22ms]
+
+src/agent/context-plane.test.ts:
+(pass) context plane (pre-step wiring of transcript + coordinator) > reconciles the outbox and applies the derived plan on the first step [509.53ms]
+(pass) context plane (pre-step wiring of transcript + coordinator) > is fail-open: a broken host bootstrap still passes the step through [1.23ms]
+(pass) context plane (pre-step wiring of transcript + coordinator) > does not derive plans when disabled [540.82ms]
+(pass) context plane (pre-step wiring of transcript + coordinator) > fires the historian pass when the context pressure crosses the threshold [488.59ms]
+(pass) context plane (pre-step wiring of transcript + coordinator) > does not fire the historian pass below the threshold [559.06ms]
+
+src/agent/coordinator.test.ts:
+(pass) SurfaceMutationCoordinator (CAS + saga) > applies a plan through the official surface transaction and commits the saga [821.68ms]
+(pass) SurfaceMutationCoordinator (CAS + saga) > rejects a replayed plan as already-applied (opId CAS) [462.09ms]
+(pass) SurfaceMutationCoordinator (CAS + saga) > rejects a stale plan when the session moved on (input digest CAS) [443.81ms]
+(pass) SurfaceMutationCoordinator (CAS + saga) > rejects a plan whose surface generation moved on (generation CAS) [445.79ms]
+(pass) SurfaceMutationCoordinator (CAS + saga) > fails closed on an invalid op (official validation) and abandons the record [520.44ms]
+(pass) SurfaceMutationCoordinator (CAS + saga) > serializes concurrent plans per session (second sees the first's effects) [510.08ms]
+(pass) SurfaceMutationCoordinator (CAS + saga) > applyPlanOps merges temporal insertion ops into the adjacent node [431.86ms]
+(pass) SurfaceMutationCoordinator (CAS + saga) > applyPlanOps rejects out-of-range ops before touching the surface [1.09ms]
+
+src/agent/dreamer.test.ts:
+(pass) discoverDreamProjects > returns deduped dsh-harness project identities in stable order [488.19ms]
+(pass) createDshDreamClient (DreamTimerClient-shaped facade) > creates a session and serves the direct-LLM turn via prompt + messages + delete [501.73ms]
+(pass) createDshDreamClient (DreamTimerClient-shaped facade) > fails explicitly for tool-requiring dream agents (P1: no tool workers) [501.72ms]
+(pass) createDshDreamClient (DreamTimerClient-shaped facade) > propagates LLM error / abort / empty output as rejected prompts [506.94ms]
+(pass) createDshDreamClient (DreamTimerClient-shaped facade) > honors the per-attempt body.model override and an already-aborted signal [525.70ms]
+(pass) dshDreamSeams (/ctx-dream seam) > returns tasks/executor/runnable/scheduleSummary for the default enabled config [534.62ms]
+(pass) dshDreamSeams (/ctx-dream seam) > reports runnable=false when compaction-off is configured [514.25ms]
+(pass) dshDreamSeams (/ctx-dream seam) > seam runnable reflects registerDshDreamer's disabled config [563.77ms]
+(pass) dshDreamSeams (/ctx-dream seam) > executor runs a no-LLM path (compress-cues without mural → core skip) and records dream telemetry [511.92ms]
+(pass) registerDshDreamer (schedule timer) > registers one interval per discovered project; ticks seed the scheduler state [575.75ms]
+(pass) registerDshDreamer (schedule timer) > does not register intervals when dreamer is disabled [496.94ms]
+(pass) registerDshDreamer (schedule timer) > does not register intervals when the host bootstrap is refused [499.14ms]
+(pass) registerDshDreamer (schedule timer) > defaults tickMs to 15 minutes [587.95ms]
+
+src/agent/embed.test.ts:
+(pass) embed drain (/ctx-embed seam) > maps the core outcome statuses to user-facing texts [534.47ms]
+(pass) embed drain (/ctx-embed seam) > pause aborts the active run and reports coverage [457.99ms]
+(pass) embed drain (/ctx-embed seam) > idempotent start keeps an active drain [603.30ms]
+
+src/agent/feedback.test.ts:
+(pass) feedback bridge (message-feedback → dreamer signal) > ingests negative feedback newer than the watermark (idempotent per message) [592.63ms]
+(pass) feedback bridge (message-feedback → dreamer signal) > consumes the official feedback service and is fail-open without it [636.26ms]
+
+src/agent/hardening.test.ts:
+(pass) Phase 5 hardening > fault injection: a failing op in a multi-op plan converges via reconcile + replay [669.93ms]
+(pass) Phase 5 hardening > performance: 400-message transcript mapping and plan derivation stay bounded [967.54ms]
+(pass) Phase 5 hardening > leak: coordinator + outbox leave no dangling state after the session is done [751.41ms]
+
+src/agent/historian-drain.test.ts:
+(pass) historian drain > tracks in-flight passes per session and forgets settled ones [18.66ms]
+(pass) historian drain > waits until passes settle [30.56ms]
+(pass) historian drain > stops waiting at the deadline without cancelling the pass [110.78ms]
+(pass) historian drain > drain with nothing in flight returns immediately [0.24ms]
+(pass) resolveAwaitAtTurnEndMs > config wins over env; non-positive disables [0.25ms]
+(pass) awaitHistorianAtTurnEnd > awaits the session's in-flight pass at the turn boundary [44.19ms]
+(pass) awaitHistorianAtTurnEnd > re-evaluates the trigger with the final pressure and awaits the new pass [35.83ms]
+(pass) awaitHistorianAtTurnEnd > is a no-op when disabled or the budget is 0 [0.82ms]
+
+src/agent/historian.test.ts:
+(pass) checkDshCompartmentTrigger (pure percentage gate) > fires at/above the proactive floor (threshold - 2) [0.05ms]
+(pass) checkDshCompartmentTrigger (pure percentage gate) > never fires without a percentage, a budget, or a finite threshold [0.09ms]
+(pass) deferred signals (process-local) > consumes once and clears [0.27ms]
+(pass) runDshHistorian > publishes atomically: compartments + marker + onPublished + lease released + telemetry [755.68ms]
+(pass) runDshHistorian > validation failure: nothing published, nothing staged, no exception, lease released [702.22ms]
+(pass) runDshHistorian > LLM failure: no throw, no publish, no marker [829.19ms]
+(pass) runDshHistorian > lease busy: returns false without calling the LLM [683.38ms]
+(pass) runDshHistorian > atomicity: a mid-publish failure rolls back the whole transaction [861.72ms]
+(pass) runDshHistorian > discard-last boundary healing drops the provisional final compartment [726.65ms]
+(pass) applyDshCompactionMarkerIfCovered (rendered-coverage gate) > is stale when no marker exists or it is already applied [699.75ms]
+(pass) applyDshCompactionMarkerIfCovered (rendered-coverage gate) > defers while the pass has not rendered through the marker ordinal [610.22ms]
+(pass) applyDshCompactionMarkerIfCovered (rendered-coverage gate) > applies when covered: appendCompaction(summary, firstKeptOrdinal, tokensBefore) + CAS clear [758.97ms]
+(pass) createMagicSummarizeHook (Magic 压缩策略) > fully covered: renders the compartment block without calling the LLM [656.45ms]
+(pass) createMagicSummarizeHook (Magic 压缩策略) > incomplete coverage: runs one synchronous mini-historian then re-renders [536.55ms]
+(pass) createMagicSummarizeHook (Magic 压缩策略) > LLM failure: the hook throws (fail-closed) and releases the lease [540.47ms]
+
+src/agent/knowledge-gate.test.ts:
+(pass) agent knowledge gate (m0/m1 first-step injection) > injects the knowledge baseline once on the first pre-step [720.12ms]
+(pass) agent knowledge gate (m0/m1 first-step injection) > delivers the baseline in the CURRENT batch only (no next-step inbox copy) [669.44ms]
+(pass) agent knowledge gate (m0/m1 first-step injection) > delivers the auto-search hint in the CURRENT batch, never via agent.inject [737.73ms]
+(pass) agent knowledge gate (m0/m1 first-step injection) > does not re-inject within the same surface generation [731.11ms]
+(pass) agent knowledge gate (m0/m1 first-step injection) > re-injects on a new surface generation, reusing the cache watermark [620.88ms]
+(pass) agent knowledge gate (m0/m1 first-step injection) > watermark de-dup skips injection when the surface already carries the baseline (resume) [562.12ms]
+(pass) agent knowledge gate (m0/m1 first-step injection) > passes the pre-step through when the storage bootstrap is refused [678.47ms]
+(pass) agent knowledge gate (m0/m1 first-step injection) > materializeKnowledgeBlocks returns a stable watermark across cache-valid passes [678.72ms]
+(pass) agent knowledge gate (m0/m1 first-step injection) > maybeInjectKnowledge is a no-op when knowledge is disabled [689.22ms]
+(pass) agent knowledge gate (m0/m1 first-step injection) > rides the mural image block on the baseline when enabled + vision + data URL [752.61ms]
+(pass) synthetic todowrite replay (Magic todo-view parity) > injects a mc-todo replay message on materialization when last_todo_state exists [896.75ms]
+(pass) synthetic todowrite replay (Magic todo-view parity) > skips the todo replay when the snapshot is all-terminal [718.08ms]
+(pass) deferred materialization after historian publish (Pi parity) > forces an m0 re-materialization that renders <session-history> compartments [485.24ms]
+
+src/agent/legacy-tag-cleanup.test.ts:
+(pass) legacy bare-id §N§ tags are folded once per session > deletes bare rows and retargets pending drops onto the core tag of the same text [577.50ms]
+(pass) legacy bare-id §N§ tags are folded once per session > the context plane runs the fold on the first pass of a process [648.44ms]
+
+src/agent/new-input-fold-tags.test.ts:
+(pass) new input after a pending fold is pre-tagged under core's exact :pN key > payload fold (tool-call + result + steer in the payload): steer pre-tagged at :p1 and core keeps that number [593.58ms]
+(pass) new input after a pending fold is pre-tagged under core's exact :pN key > session-tail fold left unreplaced: the new prompt is keyed after the absorbed assistant text [554.54ms]
+(pass) new input after a pending fold is pre-tagged under core's exact :pN key > after a landed replace the tail is no longer a fold: the new prompt stays at :p0 (real rc.5 path) [566.79ms]
+
+src/agent/nudge.test.ts:
+(pass) nudge (ctx_reduce Channel-1 parity) > scans session metrics: context window + last input usage [0.35ms]
+(pass) nudge (ctx_reduce Channel-1 parity) > counts cached prompt tokens and keeps only the LAST call (DSH 0.2 exclusive TokenUsage) [0.24ms]
+(pass) nudge (ctx_reduce Channel-1 parity) > persists nudge cadence state and stays silent below the floor [532.69ms]
+(pass) nudge (ctx_reduce Channel-1 parity) > fires Channel 1 and injects a reminder when reclaimable tool output is large [495.30ms]
+(pass) nudge on real tail-hygiene measurements (core walk) > measures U/T from the transcript with the token-floor window and fires Channel 1 [744.29ms]
+(pass) nudge on real tail-hygiene measurements (core walk) > protects more mass with a larger floor (U shrinks) [683.49ms]
+(pass) nudge on real tail-hygiene measurements (core walk) > hasRecentReduce: a drop queued after the last refreeze keeps Channel 1 quiet until the next bust [586.93ms]
+(pass) nudge on real tail-hygiene measurements (core walk) > computeHasRecentReduce: new ctx_reduce call ids or post-refresh queued drops [1.17ms]
+(pass) nudge on real tail-hygiene measurements (core walk) > ctxReduceCallIds extracts DSH ctx_reduce tool parts [2.16ms]
+
+src/agent/outbox.test.ts:
+(pass) dsh outbox (saga records + recovery) > initializes the adapter tables idempotently and records the schema version [443.33ms]
+(pass) dsh outbox (saga records + recovery) > inserts pending records idempotently and walks the status machine [573.35ms]
+(pass) dsh outbox (saga records + recovery) > marks abandoned with an error detail [466.42ms]
+(pass) dsh outbox (saga records + recovery) > classifyOutboxRecord (four-way deterministic reconciliation) > committed records stay committed [0.99ms]
+(pass) dsh outbox (saga records + recovery) > classifyOutboxRecord (four-way deterministic reconciliation) > abandoned records classify as stale-input [0.06ms]
+(pass) dsh outbox (saga records + recovery) > classifyOutboxRecord (four-way deterministic reconciliation) > ack seq present in the log → committed (crash after DSH append, before SQLite commit) [0.42ms]
+(pass) dsh outbox (saga records + recovery) > classifyOutboxRecord (four-way deterministic reconciliation) > no ack + generation unchanged → retryable (crash before the DSH append) [0.05ms]
+(pass) dsh outbox (saga records + recovery) > classifyOutboxRecord (four-way deterministic reconciliation) > no ack + generation advanced → stale-input [0.31ms]
+(pass) dsh outbox (saga records + recovery) > classifyOutboxRecord (four-way deterministic reconciliation) > digest mismatch flagged by the caller → conflict-recompute [2.42ms]
+(pass) dsh outbox (saga records + recovery) > classifyOutboxRecord (four-way deterministic reconciliation) > crash-set convergence: every intermediate state settles to the uninterrupted outcome [0.16ms]
+(pass) dsh outbox (saga records + recovery) > reconcileSessionOutbox commits/applies terminal classifications [532.18ms]
+(pass) dsh outbox (saga records + recovery) > compaction marker: stage → read → CAS clear [524.41ms]
+
+src/agent/protection.test.ts:
+(pass) DSH token-floor protection window (core parity) > usable window falls back to the shared 128k default [0.09ms]
+(pass) DSH token-floor protection window (core parity) > returns a null cutoff and an empty set without persisted tool rows [509.45ms]
+(pass) DSH token-floor protection window (core parity) > protects newest tool rows until their token mass reaches the floor (not a tag count) [1027.78ms]
+(pass) DSH token-floor protection window (core parity) > matches the core pure walk exactly (same membership/cutoff) [503.35ms]
+(pass) DSH token-floor protection window (core parity) > keeps the structural minimum of the newest three tool tags even when one row exceeds the floor [508.42ms]
+(pass) DSH token-floor protection window (core parity) > derives the default floor from the DSH context window when protected_tokens is unset [497.57ms]
+(pass) DSH token-floor protection window (core parity) > follows the core epoch lifecycle: persisted only on a bust, read verbatim on defer passes [403.53ms]
+(pass) DSH token-floor protection window (core parity) > a project tier may raise but never lower the trusted user floor [429.51ms]
+(pass) DSH token-floor protection window (core parity) > read-only window uses the observed epoch floor without writing state [488.72ms]
+(pass) DSH token-floor protection window (core parity) > token_count is the ai-tokenizer estimate written by the shared tagger [0.17ms]
+
+src/agent/recomp.test.ts:
+(pass) createDshSessionClient > session.get reports the configured directory (or an empty data object) [0.37ms]
+(pass) createDshSessionClient > session.create returns distinct opaque ids [0.39ms]
+(pass) createDshSessionClient > prompt runs the LLM with parts text, body.system, the model override, and purpose compaction [1.38ms]
+(pass) createDshSessionClient > resolves the registered Magic historian agent prompt when body.system is absent [0.68ms]
+(pass) createDshSessionClient > falls back to the default route when the body has no model override [0.55ms]
+(pass) createDshSessionClient > messages returns the synthetic assistant message for the prompted child [3.24ms]
+(pass) createDshSessionClient > noReply prompts surface the text through log and never call the LLM [0.37ms]
+(pass) createDshSessionClient > times out through AbortSignal + race when the stream hangs [27.83ms]
+(pass) createDshSessionClient > propagates an external abort as 'prompt aborted by external signal' [11.37ms]
+(pass) createDshSessionClient > empty parts prompts are skipped without an LLM call [0.96ms]
+(pass) createRecompSeams > runRecomp builds the managed context, registers the raw provider, and passes the message through [488.56ms]
+(pass) createRecompSeams > runRecomp honors config overrides and forwards a partial range from rawInput [578.73ms]
+(pass) createRecompSeams > runRecomp returns error text for invalid args without calling the runner [506.69ms]
+(pass) createRecompSeams > runRecomp skips fast on an already-aborted signal and gates on the bootstrap [612.83ms]
+(pass) createRecompSeams > runWrapup forwards messagesToKeep and the wrapup context defaults [911.26ms]
+(pass) createRecompSeams > links the invocation signal to the in-flight client prompt (abortFor) [618.58ms]
+(pass) createRecompSeams > true-core wrapup: real runManagedWrapup with the compartment-agent runner stubbed [607.17ms]
+
+src/agent/runtime-context-tags.test.ts:
+(pass) runtime-context snapshot is a baseline (no tag, no replace) > the model's own reply prefix is the number core gives the reply; no number is owned twice across raw + surface [466.27ms]
+(pass) runtime-context snapshot is a baseline (no tag, no replace) > a snapshot right after tool results does not swallow them: the results stay tagged, the snapshot untouched [445.18ms]
+
+src/agent/system-guidance.test.ts:
+(pass) agent system-guidance (static Magic Context section) > builds the v2 guidance-only section text [0.42ms]
+(pass) agent system-guidance (static Magic Context section) > drops memory guidance when memory is disabled [0.11ms]
+(pass) agent system-guidance (static Magic Context section) > is byte-stable across repeated builds (cache-prefix stability) [0.06ms]
+(pass) agent system-guidance (static Magic Context section) > registers one section with the stable identity and disposes on unload [0.43ms]
+(pass) agent system-guidance (static Magic Context section) > skips registration when guidance is disabled [0.08ms]
+(pass) agent system-guidance (static Magic Context section) > skips registration (fail-open) when the systemPrompt service is absent [0.12ms]
+
+src/agent/tools.test.ts:
+(pass) registerCtxTools (DSH ctx_* tools) > registers the six Pi-parity tools and unregisters them via the disposer [371.21ms]
+(pass) registerCtxTools (DSH ctx_* tools) > omits ctx_reduce when compactionOff is set (Pi parity) [400.24ms]
+(pass) registerCtxTools (DSH ctx_* tools) > omits session-scoped tools when sessionScopedToolsDisabled is set [455.20ms]
+(pass) registerCtxTools (DSH ctx_* tools) > omits ctx_memory when memoryToolEnabled is false [548.48ms]
+(pass) ctx_search (no-embedding stub lane) > searches and returns a formatted no-results text without touching embeddings [573.36ms]
+(pass) ctx_note write path > writes a session note row under the canonical session key [715.28ms]
+(pass) ctx_memory write path > inserts a memory row for the project and dedups identical content [589.65ms]
+(pass) ctx_memory write path > rejects dreamer-only actions unless allowDreamerActions is set [523.44ms]
+(pass) ctx_reduce drop path > queues a pending_ops drop row for an existing tag [503.94ms]
+(pass) ctx_reduce drop path > defers drops inside the core token-floor window and opens the post-reduce grace [608.09ms]
+(pass) ctx_reduce drop path > rejects unknown tag ids [499.46ms]
+(pass) todowrite (Pi parity tool surface) > registers alongside the ctx_* tools by default [506.93ms]
+(pass) todowrite (Pi parity tool surface) > is omitted when todowriteEnabled is false [519.84ms]
+(pass) todowrite (Pi parity tool surface) > echoes the full todo list as pretty JSON and persists last_todo_state [619.33ms]
+
+src/agent/transcript-cleanup.test.ts:
+(pass) heuristic cleanup integration (Pi/OpenCode parity) > runs without error and keeps the plan pipeline intact when enabled [567.90ms]
+
+src/agent/transcript.test.ts:
+(pass) transcript mapping (DSH events → RawMessage[]) > reads DSH 0.2 tool-result text blocks as the tool output (regression: empty outputs) [0.93ms]
+(pass) transcript mapping (DSH events → RawMessage[]) > folds tool results AND their tool-call assistant into the following user message [1.29ms]
+(pass) transcript mapping (DSH events → RawMessage[]) > builds a reversible seq ↔ ordinal map [3.11ms]
+(pass) transcript mapping (DSH events → RawMessage[]) > produces a stable read-only view with digest/watermark/generation [2.43ms]
+(pass) transcript mapping (DSH events → RawMessage[]) > detects the Magic knowledge baseline (m0) in the surface [0.88ms]
+(pass) deriveMutationPlan (recording pipeline) > records §N§ prefix injections on the first pass and replays byte-identically [536.25ms]
+(pass) deriveMutationPlan (recording pipeline) > derives a drop op from a queued pending operation [639.24ms]
+(pass) deriveMutationPlan (recording pipeline) > defers a queued drop of a tool tag inside the token-floor window (core protection parity) [558.30ms]
+(pass) deriveMutationPlan (recording pipeline) > is deterministic: identical views + DB state produce identical ops [549.03ms]
+(pass) deriveMutationPlan (recording pipeline) > never mutates the input events or surface (read-only view) [594.99ms]
+(pass) deriveMutationPlan (recording pipeline) > returns null for an empty session [550.79ms]
+(pass) deriveMutationPlan (recording pipeline) > fold write-back ops cover the tool-call assistant node (LLM-valid surface) [513.86ms]
+(pass) deriveMutationPlan (recording pipeline) > keeps dsh skill-catalog messages out of the tag/drop pipeline (no ops, marked baseline) [613.01ms]
+(pass) temporal gap markers (Magic temporal-awareness parity) > inserts a <!-- +Xm --> marker before a user message after a 5+ minute gap [605.30ms]
+(pass) temporal gap markers (Magic temporal-awareness parity) > does not insert a marker for sub-threshold gaps [545.98ms]
+
+src/agent/worker.test.ts:
+(pass) magic worker (PLAN §5.13 minimal worker) > starts a caller-delivered activation with depth 0, restricts the child's tools and returns the text [8.41ms]
+(pass) magic worker (PLAN §5.13 minimal worker) > fails closed when the child's tools cannot be restricted [1.56ms]
+(pass) magic worker (PLAN §5.13 minimal worker) > returns null on failure / missing service (never throws) [1.44ms]
+(pass) recursion isolation (PLAN §9) > identifies child sessions by origin or delegation depth [0.11ms]
+
+src/client/client.test.ts:
+(pass) client bundle > only requires modules the rc.5 web boot provides statically [23.34ms]
+(pass) client bundle > declares only installed client inject targets (no dsh-client-runtime) [1.25ms]
+(pass) client bundle > never requires @deepseek-ai/dsh-client-ui-primitives and registers its four slots [2.59ms]
+(pass) client bundle > draft → ops: inherit unsets, override sets bounded values, per-model diff is one op [2.36ms]
+(pass) client bundle > indicator tone: neutral < execute ≤ warn < force−3 ≤ danger; unmanaged/paused stay neutral [1.68ms]
+(pass) client bundle > remote calls ride the Typert /api channel as magicContext/<method> with payload.args.args [0.62ms]
+
+src/contracts/core-import-surface.contract.test.ts:
+(pass) core import surface used by the DSH adapter > scans a non-trivial surface (guards against a broken scanner) [0.11ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/agents/magic-context-prompt exports buildMagicContextSection [0.86ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/config exports loadPluginConfig, loadPluginConfigDetailed [0.27ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/config/agent-disable exports isCompactionEnabled, isDreamerRunnable, isHistorianRunnable [1.87ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/config/migrate-config-location exports migrateMagicContextConfigLocations, resolveCortexKitUserConfigPath [0.73ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/config/project-security exports getProtectedTokensTierOverrides [0.16ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/config/schema/magic-context exports DreamerConfigSchema, deriveDefaultProtectedTokens [0.45ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/compartment-events exports insertCompartmentEvents [0.16ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/compartment-lease exports acquireCompartmentLease, isCompartmentLeaseHeld, releaseCompartmentLease [0.18ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/compartment-storage exports appendCompartments, buildCompartmentBlock, getCompartments, getLastCompartmentEndMessage, getSessionFacts [0.16ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/dreamer/storage-ta<key> exports getMostRecentTaskRunAt [0.48ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/dreamer/task-config exports buildDreamTaskRuntimeConfigs, summarizeDreamSchedule, userMemoryCollectionEnabled [0.39ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/dreamer/ta<key> exports createDreamTaskExecutor [0.47ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/dreamer/task-gates exports getDreamTaskBacklogs [0.25ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/dreamer/ta<key> exports CANONICAL_DREAM_TASKS, formatDreamTaskBacklogs, isCanonicalDreamTask [0.17ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/dreamer/ta<key> exports runDueTasksForProject, runManualDream [0.29ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/memory exports V2_MEMORY_CATEGORIES, archiveMemory, getMemoriesByIds, getMemoriesByProject, getMemoryByHash, getMemoryById, hasMemoryClassifiedAtColumn, hasMemoryShareableColumn, insertMemory, mergeMemoryStats, saveEmbedding, supersededMemory, updateMemoryContent, updateMemorySeenCount [0.60ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/memory/embedding exports embedTextForProject, getProjectEmbeddingSnapshot [0.22ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/memory/embedding-cache exports invalidateMemory [0.23ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/memory/normalize-hash exports computeNormalizedHash [0.12ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/memory/project-identity exports normalizeStoredProjectPath, resolveProjectIdentityForSession, storedPathBelongsToIdentity [0.03ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/memory/promotion exports promoteSessionFactsDurable [0.30ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/memory/storage-memory exports getMemoryCount [0.27ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/message-index exports getLastIndexedOrdinal [0.22ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/project-embedding-registry exports embedSessionCompartmentChunks, getEmbeddingCoverageStatus [0.24ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/protection-window exports getProtectionWindowForSession [0.13ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/range-parser exports parseRangeString [0.12ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/scheduler exports parseCacheTtl [0.21ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/search exports parseIdShapedQuery, resolveMemoriesByIdsForSearch, unifiedSearch [0.26ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/session-decision-calibration exports sessionDecisionCalibration [0.22ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/session-project-storage exports recordSessionProjectIdentity [0.12ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/storage exports addNote, dismissNote, getNotes, getOrCreateSessionMeta, getOverflowState, getPendingOps, getTagsBySession, queueMemoryMutation, queuePendingOp, recordProtectedTailPublicationFloor, setNoteLastReadAt, updateNote, updateSessionMeta [0.23ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/storage-db exports LATEST_SUPPORTED_VERSION, applySqliteTuningPragmas, getMigrationOnOpenRefusal, getPersistedSchemaVersion, getSchemaFenceRejection, initializeDatabase, openDatabaseAsync, setSqlitePragmaConfig [0.05ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/storage-historian-runs exports recordHistorianRun, summarizeImportance, tallyFactsByCategory [0.20ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/storage-meta-persisted exports appendAutoSearchHintDecision, captureChannel1PostReduceGraceBaseline, casChannel2NudgeState, getAutoSearchHintDecisions, getChannel1NudgeState, getChannel2NudgeState, getLastNudgeUndropped, getObservedEpochFloor, getOverflowState, markChannel1PostReduceGracePending, resolveEpochFloorForPass, setChannel1NudgeState, setLastNudgeUndropped [0.55ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/tagger exports createTagger [0.21ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/features/magic-context/types exports (module only) [2.53ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/apply-operations exports applyFlushedStatuses, applyPendingOperations [0.22ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/auto-search-hint exports buildAutoSearchHint [0.13ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/command-handler exports parseRecompArgs, parseWrapupArgs [0.18ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/compartment-prompt exports COMPARTMENT_AGENT_SYSTEM_PROMPT, COMPARTMENT_STRUCTURAL_SYSTEM_PROMPT, HISTORIAN_EDITOR_SYSTEM_PROMPT, buildCompartmentAgentPrompt [0.25ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/compartment-runner-drop-queue exports queueDropsForCompartmentalizedMessages [0.12ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/compartment-runner-types exports (module only) [1.53ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/compartment-runner-validation exports buildHistorianFailureNotice, shouldDiscardLastHistorianCompartment, validateChunkCoverage, validateHistorianOutput, validateStoredCompartments [0.20ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/compartment-trigger exports getProactiveCompartmentTriggerPercentage [0.49ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/ctx-reduce-nudge exports buildChannel1Reminder, buildChannel2Reminder, currentReclaimableToolOutputCount, decideChannel1, evaluateChannel2 [4.43ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/derive-budgets exports deriveHistorianChunkTokens, deriveTriggerBudget, resolveHistorianContextLimit [0.33ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/embed-session-state exports embedPauseBySession, embedRunStateBySession [0.26ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/event-resolvers exports resolveCacheTtl, resolveExecuteThresholdDetail [0.28ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/execute-flush exports executeFlush [0.20ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/execute-status exports executeStatus [0.17ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/format-embed-status exports formatEmbedStatusText [0.25ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/heuristic-cleanup exports applyHeuristicCleanup [0.16ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/inject-compartments exports getVisibleMemoryIds, materializeWithRetry, mustMaterialize, renderM1 [0.28ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/live-session-state exports createLiveSessionState [0.03ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/note-nudger exports markNoteNudgeDelivered, onNoteTrigger, peekNoteNudgeText [0.37ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/protected-tail-boundary exports createDefaultBoundarySnapshotForTests, hasRunnableCompartmentWindow, validateBoundarySnapshot [0.17ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/read-session-chunk exports readRawSessionMessageOrdinalById, readSessionChunk, setRawMessageProvider, withRawMessageProvider [0.23ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/read-session-formatting exports estimateTokens [0.03ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/read-session-raw exports (module only) [0.03ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/recomp-orchestrator exports runManagedRecomp [0.03ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/tag-content-primitives exports byteSize, peelLeadingMcTagNotation, stripTagPrefix [0.32ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/tag-messages exports (module only) [12.40ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/tail-hygiene-walk exports effectiveTailHygiene, refreshTailHygieneBaseline [0.45ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/temporal-awareness exports TEMPORAL_MARKER_PATTERN, formatGap, temporalMarkerPrefix [0.19ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/todo-view exports TERMINAL_STATUSES, TITLE_DONE_STATUSES, TODO_PRIORITIES, TODO_STATUSES, buildSyntheticTodoPart, normalizeTodoStateJson [1.51ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/tool-drop-target exports (module only) [0.14ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/hooks/magic-context/wrapup-orchestrator exports runManagedWrapup [0.03ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/shared/data-path exports getMagicContextStorageDir [0.03ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/shared/error-message exports describeError, getErrorMessage [0.04ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/shared/escalation-bands exports ABSOLUTE_EMERGENCY_PERCENTAGE, MAX_EXECUTE_THRESHOLD, escalationBands [0.49ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/shared/jsonc-parser exports parseJsonc, readJsoncFile [0.20ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/shared/models-dev-cache exports modelSupportsVision [0.39ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/shared/prompt-surface exports (module only) [0.23ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/shared/prompt-surface-runtime exports createPromptSurfaceRuntime [0.33ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/shared/sqlite exports (module only) [0.04ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/shared/tag-transcript exports tagTranscript [4.52ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/shared/transcript exports (module only) [6.49ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/tools/ctx-expand/constants exports CTX_EXPAND_DESCRIPTION, CTX_EXPAND_TOKEN_BUDGET [1.13ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/tools/ctx-expand/render exports renderMessageByOrdinal, renderVerboseRange [0.15ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/tools/ctx-memory/constants exports CTX_MEMORY_DESCRIPTION [0.56ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/tools/ctx-memory/verification-recording exports runImmediateTransaction [0.33ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/tools/ctx-note/constants exports CTX_NOTE_DESCRIPTION [0.42ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/tools/ctx-reduce/constants exports CTX_REDUCE_DESCRIPTION [1.88ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/tools/ctx-search/constants exports CTX_SEARCH_DESCRIPTION [0.32ms]
+(pass) core import surface used by the DSH adapter > @magic-context/core/tools/unwrap-imitated-reduced-args exports unwrapImitatedReducedArgs [0.16ms]
+
+src/contracts/magic-meter-projection.contract.test.ts:
+(pass) contract: magic-meter projections on a real cordis Context > hides contextPressure, keeps tokenUsage/contextBreakdown + ctx.tokenMeter, adds magicContextPressure [60.15ms]
+(pass) contract: magic-meter projections on a real cordis Context > folds window + usage + model route into the MC view with per-model thresholds [15.81ms]
+(pass) contract: magic-meter projections on a real cordis Context > web sessions are managed only in the listed presets [16.55ms]
+(pass) contract: magic-meter projections on a real cordis Context > checkpointed state round-trips through the stateSchema (projection cache) [12.94ms]
+(pass) contract: magic-meter projections on a real cordis Context > with the stock token-meter still mounted, adds only the MC key (no second tokenMeter) [28.89ms]
+
+src/contracts/token-meter-projection.contract.test.ts:
+(pass) contract: token-meter contextPressure projection (0.2.1-rc.5) > registers the unit under the key the adapter reads [6.69ms]
+(pass) contract: token-meter contextPressure projection (0.2.1-rc.5) > wire view publishes contextWindow / pressureTokens / projectedTokens [6.95ms]
+(pass) contract: token-meter contextPressure projection (0.2.1-rc.5) > readContextPressure reads exactly that key and view through snapshot() [6.66ms]
+(pass) contract: token-meter contextPressure projection (0.2.1-rc.5) > a present key is authoritative; only an absent key falls back to the session log [0.23ms]
+
+src/doctor/doctor.test.ts:
+(pass) dsh-magic-context doctor (Phase 2 slice C) > classifies a healthy shared DB open as ok [502.49ms]
+(pass) dsh-magic-context doctor (Phase 2 slice C) > classifies a newer persisted schema as a schema-fence refusal [5.10ms]
+(pass) dsh-magic-context doctor (Phase 2 slice C) > scans liveness markers: own pid is live, an impossible pid is stale [1.76ms]
+(pass) dsh-magic-context doctor (Phase 2 slice C) > reads profile bundle facts from a fake profile [9.28ms]
+(pass) dsh-magic-context doctor (Phase 2 slice C) > reports ok across the full checklist on a clean environment [576.49ms]
+(pass) dsh-magic-context doctor (Phase 2 slice C) > fails the version check on an exact-rc mismatch [13.76ms]
+(pass) dsh-magic-context doctor (Phase 2 slice C) > fails the bundle check when the package is missing from a profile [9.27ms]
+(pass) dsh-magic-context doctor (Phase 2 slice C) > fails the profile-wiring check when setup never wrote the Magic rows [18.70ms]
+(pass) dsh-magic-context doctor (Phase 2 slice C) > fails the profile-wiring check on a stale managed block [38.36ms]
+(pass) dsh-magic-context doctor (Phase 2 slice C) > fails the shared-db check on a schema-fence DB [11.96ms]
+
+src/doctor/presets.test.ts:
+(pass) setup --preset / --all-presets / --disable-preset (web) > --preset standard patches the stock row in place (no magic-standard clone) [13.12ms]
+(pass) setup --preset / --all-presets / --disable-preset (web) > selection persists across runs; --disable-preset removes one; empty selection removes the block [49.70ms]
+(pass) setup --preset / --all-presets / --disable-preset (web) > --all-presets enables every stock preset that passes the scan (not the clone) [9.54ms]
+(pass) setup --preset / --all-presets / --disable-preset (web) > an unknown preset fails closed and writes nothing [10.09ms]
+(pass) flat layout > --disable-preset root removes the rows; --preset other fails [8.74ms]
+(pass) doctor per-preset report > lists enabled/disabled presets and the meter swap; --preset expectations fail when unmet [20.08ms]
+(pass) doctor per-preset report > a pre-selection (round-5) block is reported stale so setup refreshes it [24.07ms]
+(pass) selection helpers > listFlag collects repeated and comma-separated values [0.17ms]
+(pass) selection helpers > applySelectionChange: default only when no flag is given [0.17ms]
+(pass) selection helpers > removeManagedBlock keeps user rows and restores [] when nothing is left [0.08ms]
+(pass) selection helpers > scanPresetRow rejects a preset without a compaction realm [0.11ms]
+(pass) DSH settings writer vs the managed block (round 7, seen on real 0.2.1-rc.5) > a row DSH appended INSIDE the block is a warn (not stale); setup moves it out and keeps it [35.86ms]
+(pass) DSH settings writer vs the managed block (round 7, seen on real 0.2.1-rc.5) > a block re-serialised by DSH (different quoting) is still up to date [23.99ms]
+(pass) DSH settings writer vs the managed block (round 7, seen on real 0.2.1-rc.5) > a missing edit anchor is a warn; setup restores it; disabling Magic removes it with the block [35.19ms]
+
+src/doctor/setup.test.ts:
+(pass) dsh-magic-context setup (DSH 0.2 profile layer) > flat profile: adds the bundle and writes the managed rows (= the hand overlay) [11.33ms]
+(pass) dsh-magic-context setup (DSH 0.2 profile layer) > web profile: inserts a magic-standard agent preset with the guarded compaction patch [10.30ms]
+(pass) dsh-magic-context setup (DSH 0.2 profile layer) > fails closed on a stock layout mismatch and writes nothing [5.66ms]
+(pass) dsh-magic-context setup (DSH 0.2 profile layer) > refuses to wire a profile where the package is not installed [6.20ms]
+(pass) dsh-magic-context setup (DSH 0.2 profile layer) > asks for --profile when several profiles exist [2.80ms]
+(pass) dsh-magic-context setup (DSH 0.2 profile layer) > creates the user config once and never overwrites an existing one [5.39ms]
+(pass) dsh-magic-context setup (DSH 0.2 profile layer) > writes nothing on --dry-run [5.17ms]
+(pass) dsh-magic-context setup (DSH 0.2 profile layer) > reports a diagnosis when the DSH install cannot be found [1.50ms]
+(pass) mergeManagedBlock > replaces an existing block in place and keeps user rows [0.38ms]
+(pass) mergeManagedBlock > refuses a flow-style non-empty list [0.11ms]
+(pass) generated magic-context.jsonc header > documents the DSH settings override precedence instead of a read-only card [0.14ms]
+
+src/entries/preset-include.test.ts:
+(pass) magic preset-include entry (no-write include) > is a subclass of the loader's own Include tree class [0.04ms]
+(pass) magic preset-include entry (no-write include) > overrides write() with a no-op (shipped input, never a persistence target) [0.04ms]
+(pass) magic preset-include entry (no-write include) > inherits the loader's tree-carrier marker statically [0.07ms]
+
+src/host/bootstrap.test.ts:
+(pass) dsh storage bootstrap (Phase 1 boundary) > opens the shared DB with the liveness marker present [432.73ms]
+(pass) dsh storage bootstrap (Phase 1 boundary) > derives canonical session keys [0.13ms]
+
+src/host/context-details.test.ts:
+(pass) magicContext/context details > reads compartments, historian state, pending drops, knowledge tokens and nudges [1.41ms]
+(pass) magicContext/context details > decodes core's JSON Channel 1 nudge state to the band name (seen raw on real 0.2.1-rc.5) [1.92ms]
+(pass) magicContext/context details > degrades to empty fields without storage or tables [0.71ms]
+
+src/host/remote-security.test.ts:
+(pass) Phase 5 security audit > remote descriptors carry the strict namespace and no secret-adjacent fields [0.36ms]
+(pass) Phase 5 security audit > settings / updateSettings / context descriptors share the strict single-args shape [0.28ms]
+(pass) Phase 5 security audit > registers all five invocations in one host contribution (real cordis Context) [15.46ms]
+(pass) Phase 5 security audit > diagnostics descriptor bounds its input (sessionId length cap) [0.09ms]
+(pass) Phase 5 security audit > the client bundle never assigns untrusted content into innerHTML [2.72ms]
+(pass) Phase 5 security audit > the host status payload carries no environment or credential echo [0.23ms]
+
+src/settings/magic-settings.test.ts:
+(pass) DSH settings overlay schema (real schemastery) > resolves schemastery and exports a host Config [0.15ms]
+(pass) DSH settings overlay schema (real schemastery) > overlay fields are volatile refs even when unset; ordinary fields stay plain [6.26ms]
+(pass) DSH settings overlay schema (real schemastery) > rejects out-of-range overlay values at the schema (Loader refuses the write) [1.57ms]
+(pass) precedence: DSH override > jsonc > core default > unset overlay inherits jsonc, set overlay wins [0.33ms]
+(pass) precedence: DSH override > jsonc > core default > defaults when neither source sets a field (core 65%) [0.05ms]
+(pass) precedence: DSH override > jsonc > core default > thresholds: per-model match + force band max(85, t+2) + 95% wall [0.17ms]
+(pass) precedence: DSH override > jsonc > core default > execute_threshold_tokens from jsonc switches to tokens mode when the window is known [0.20ms]
+(pass) validateMagicSettingsOps > accepts overlay set/unset and bounded values [0.41ms]
+(pass) validateMagicSettingsOps > refuses foreign fields, bad paths and out-of-range values [0.09ms]
+(pass) magicContext/settings + updateSettings (remote) > view carries revision, user layer (overlay fields only), effective values and precedence [3.59ms]
+(pass) magicContext/settings + updateSettings (remote) > writes through settings.mutate with the expected revision [1.89ms]
+(pass) magicContext/settings + updateSettings (remote) > a stale revision answers conflict with the fresh view (no write) [1.01ms]
+(pass) magicContext/settings + updateSettings (remote) > invalid ops never reach mutate; missing dsh-settings answers unavailable [0.32ms]
+(pass) magicContext/settings + updateSettings (remote) > read-only profiles refuse the write [0.15ms]
+(pass) agent plane live settings > re-reads the host overrides on every call (live edits, no remount) [2.74ms]
+(pass) agent plane live settings > host service dereferences volatile refs from its Config [22.28ms]
+
+src/compat/dsh-0.1/compat-upgrade.test.ts:
+(pass) compat contract gate (dsh-0.1 upgrade matrix) > the pinned DSH contract vocabulary exists in the installed packages [850.90ms]
+(pass) compat contract gate (dsh-0.1 upgrade matrix) > the pinned SummarizationInput/SummaryResult shapes match the basic engine's summarizer [16.55ms]
+(pass) compat contract gate (dsh-0.1 upgrade matrix) > the pinned surface contract matches the session package [15.12ms]
+
+src/compat/dsh-0.1/liveness.test.ts:
+(pass) dsh liveness marker (migration guard) > writes an RpcPortFileRecord-shaped marker the core guard parses [0.64ms]
+(pass) dsh liveness marker (migration guard) > derives the project hash deterministically (16 hex) [0.17ms]
+(pass) dsh liveness marker (migration guard) > markerPath composes the exact scan path [0.22ms]
+
+src/compat/dsh-0.1/preset.test.ts:
+(pass) magic-standard thin preset (guarded patch) > disables compaction-basic and inserts the Magic engine into the group [14.38ms]
+(pass) magic-standard thin preset (guarded patch) > exactly one compaction provider remains [0.49ms]
+(pass) magic-standard thin preset (guarded patch) > contract scan rejects unknown layouts (fail closed) [0.23ms]
+(pass) magic-standard thin preset (guarded patch) > buildThinPresetEntries emits the include row with guarded patches [0.24ms]
+(pass) magic-standard thin preset (guarded patch) > include row names this package's no-write entry when includeEntry is set [0.27ms]
+(pass) magic-standard thin preset (guarded patch) > emits absolute magic-row names as file:// URLs [0.19ms]
+(pass) magic-standard thin preset (guarded patch) > thin preset round-trips through the loader YAML dialect [2.26ms]
+
+src/compat/dsh-0.1/session.test.ts:
+(pass) compat/dsh-0.1 session seams on DSH 0.2 > sessionEvents reads the real log (Session.events no longer exists) [1.74ms]
+(pass) compat/dsh-0.1 session seams on DSH 0.2 > sessionEvents still accepts plain test doubles with an events array [0.17ms]
+(pass) compat/dsh-0.1 session seams on DSH 0.2 > Magic sources use the merge-extensible magic-context kind and recognise legacy kind:plugin [0.66ms]
+(pass) compat/dsh-0.1 session seams on DSH 0.2 > replaceSurfaceRange lands a branded startSeq/endSeq replace [0.71ms]
+(pass) compat/dsh-0.1 session seams on DSH 0.2 > promptTokensOf = input + cacheRead + cacheWrite of one call [0.26ms]
+
+# Unhandled error between tests
+-------------------------------
+2881 |             return opened;
+2882 |         } catch (error) {
+2883 |             if (db) closeQuietly(db);
+2884 |             const detail = getErrorMessage(error);
+2885 |             log(`[magic-context] storage fatal: failed to open ${dbPath}: ${detail}`);
+2886 |             throw new Error(
+                             ^
+error: [magic-context] storage unavailable: unable to open database file. Magic Context is disabled for this run; check log for details.
+      at <anonymous> (<work>/magic-context/packages/plugin/src/features/magic-context/storage-db.ts:2886:23)
+      at async openDatabaseAsync (<work>/magic-context/packages/plugin/src/features/magic-context/storage-db.ts:2905:22)
+      at async bootstrapDshStorage (<work>/magic-context/packages/dsh-plugin/src/host/bootstrap.ts:107:22)
+-------------------------------
+
+
+ 380 pass
+ 0 fail
+ 1 error
+ 1406 expect() calls
+Ran 380 tests across 43 files. [83.17s]

@@ -1,0 +1,39 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/new-input-fold-tags.test.ts:
+80 |       const result = createToolResultMessage({ callId: "call-9", content: [{ type: "text", text: "ok" }], isError: false });
+81 |       const steer = createUserMessage({ content: [{ type: "text", text: "steer" }], source: { kind: "user" } });
+82 |       const payload = [call, result, steer];
+83 |       await runContextPlaneStep(state, deps, { agent: { id: session.id, session } as never, messages: payload as never }, async () => ({ reject: false, messages: [] }));
+84 |       const preview = tagRows(db).get(`${steer.id}:p1`);
+85 |       expect(preview).toBeDefined();
+                           ^
+error: expect(received).toBeDefined()
+
+Received: undefined
+
+      at <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/new-input-fold-tags.test.ts:85:23)
+      at async withDb (<work>/magic-context/packages/dsh-plugin/src/agent/new-input-fold-tags.test.ts:29:11)
+      at async <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/new-input-fold-tags.test.ts:69:11)
+(fail) new input after a pending fold is pre-tagged under core's exact :pN key > payload fold (tool-call + result + steer in the payload): steer pre-tagged at :p1 and core keeps that number [937.87ms]
+118 |       previewTagPayloadMessages(db, KEY, payload, textTagContentIdsBySource(v), {
+119 |         pending: endsInPendingFold(v),
+120 |         textCount: pendingFoldTextCount(v),
+121 |       });
+122 |       const preview = tagRows(db).get(`${prompt.id}:p1`);
+123 |       expect(preview).toBeDefined();
+                            ^
+error: expect(received).toBeDefined()
+
+Received: undefined
+
+      at <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/new-input-fold-tags.test.ts:123:23)
+      at withDb (<work>/magic-context/packages/dsh-plugin/src/agent/new-input-fold-tags.test.ts:29:11)
+      at async <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/new-input-fold-tags.test.ts:102:11)
+(fail) new input after a pending fold is pre-tagged under core's exact :pN key > session-tail fold left unreplaced: the new prompt is keyed after the absorbed assistant text [296.04ms]
+(pass) new input after a pending fold is pre-tagged under core's exact :pN key > after a landed replace the tail is no longer a fold: the new prompt stays at :p0 (real rc.5 path) [326.19ms]
+
+ 1 pass
+ 2 fail
+ 8 expect() calls
+Ran 3 tests across 1 file. [2.97s]

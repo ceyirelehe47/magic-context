@@ -520,8 +520,24 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     already-tagged snapshot copies (harmless); a snapshot that followed tool
     results in an old session no longer hosts the folded results, so those
     get fresh keys once (`synth-user-…:pN`).
-    (2) after an unfolded tool call the step's new input is not pre-tagged
-    (its ordinals are unknown); (3) on a session that already runs on replaced
+    Remaining edge (2) — new input after an unfolded tool call — fixed in
+    round 10 (a81db15fb): the ordinals ARE knowable. A user/message that
+    follows a tool-call assistant / tool results with no closing user
+    message absorbs them (walkDshLog fold), so its own text starts at
+    `:p${n}`, n = text blocks of the absorbed tool-call assistant (tool parts
+    are not text). The preview replays that fold over the payload in append
+    order, starting from the session tail AFTER this pass's surface replace
+    (the preview now runs after `enqueuePlan`): on real rc.5 the replace
+    lands, the tail is no longer a fold and the offset is 0 (unchanged
+    behaviour, real1 turn 3); when the replace did not land (stale input /
+    generation mismatch / error) the offset is the synthetic tail's text
+    count. Unit tests red before (payload fold and tail fold). Not reproduced
+    live: a failed replace cannot be forced in a real run, and headless rc.5
+    has no mid-turn steer. Residual: a Magic knowledge message inserted by an
+    OUTER pre-step listener after this preview (ahead of the prompt) would
+    absorb the fold instead; the knowledge gate is the outer listener but it
+    appends to the batch before calling `next`, so the preview sees it;
+    (3) on a session that already runs on replaced
     surface copies, a pending drop on a legacy bare tag of a folded tool-call
     assistant text is discarded (no source mapping is left); (4) pre-fix
     sessions were created under the `standard` preset, which the one-shot runner

@@ -1,0 +1,8 @@
+# validation at a81db15fb (item 2)
+tc-adapter rc=0
+tc-dsh rc=0
+adapter-api rc=0  14 pass  0 fail 
+dsh-plugin rc=1  380 pass  0 fail 
+contracts rc=0  98 pass  0 fail 
+dsh-plugin(rerun-rerun2) rc=1  380 pass  0 fail  1 error 
+note: the 1 'error' is an unhandled async storage-open error reported between tests after compat/dsh-0.1/session.test.ts (0 failing tests); the same line is in round 9's log at 7471bfd42 (pre-existing, see unit-item2-flaky-unhandled-first-run.txt)
