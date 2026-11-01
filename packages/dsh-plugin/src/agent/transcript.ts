@@ -242,6 +242,27 @@ function isSkillCatalogMessage(message: Record<string, unknown>): boolean {
   return source !== null && source.kind === "skill-catalog";
 }
 
+/**
+ * True for the DSH agent-loop runtime-context snapshot
+ * (`source.kind === 'runtime-context'`, rc.5 `RuntimeContextProjection`).
+ * Treated as a baseline like the knowledge / skill-catalog messages:
+ *   - rc.5 appends it AFTER the pre-step waterfall, so it cannot be tagged
+ *     on its first call; tagging it on the next pass gave it the number the
+ *     model had already written as its own "highest + 1" reply prefix (that
+ *     prefix stays verbatim in the raw assistant event) — the round 9
+ *     raw-vs-surface `§N§` pair;
+ *   - replacing it nulls `RuntimeContextProjection.retained`
+ *     (`sourceEventSeqs` contains the retained seq), so DSH re-appended an
+ *     identical snapshot every turn while the Magic copy of the old one
+ *     stayed on the surface.
+ * It is never folded into (tool results before it flush first), tagged,
+ * dropped or replaced.
+ */
+function isRuntimeContextMessage(message: Record<string, unknown>): boolean {
+  const source = isRecord(message.source) ? message.source : null;
+  return source !== null && source.kind === "runtime-context";
+}
+
 function parseToolArguments(raw: unknown): Record<string, unknown> {
   if (typeof raw !== "string" || raw.length === 0) return {};
   try {
@@ -408,6 +429,8 @@ export const DSH_MESSAGE_SPAN_KEY = "__dshMessageNodeSpan";
 export const DSH_KNOWLEDGE_KEY = "__dshKnowledgeBaseline";
 /** Non-enumerable skill-catalog marker attached to view messages. */
 export const DSH_SKILL_CATALOG_KEY = "__dshSkillCatalog";
+/** Non-enumerable runtime-context marker attached to view messages. */
+export const DSH_RUNTIME_CONTEXT_KEY = "__dshRuntimeContext";
 
 /** The surface span of a view message, or null for messages without one. */
 export function messageNodeSpan(message: RawMessage): DshMessageSpan | null {
@@ -425,11 +448,17 @@ export function isSkillCatalogBaselineMessage(message: RawMessage): boolean {
   return (message as unknown as Record<string, unknown>)[DSH_SKILL_CATALOG_KEY] === true;
 }
 
+/** True when the view message is a DSH runtime-context snapshot (agent loop). */
+export function isRuntimeContextBaselineMessage(message: RawMessage): boolean {
+  return (message as unknown as Record<string, unknown>)[DSH_RUNTIME_CONTEXT_KEY] === true;
+}
+
 interface DshWalkResult {
   readonly messages: RawMessage[];
   readonly spans: ReadonlyArray<DshMessageSpan | null>;
   readonly knowledgeOrdinals: ReadonlySet<number>;
   readonly skillCatalogOrdinals: ReadonlySet<number>;
+  readonly runtimeContextOrdinals: ReadonlySet<number>;
   readonly ordinalToSeq: Map<number, number>;
   readonly seqToOrdinal: Map<number, number>;
 }
@@ -471,6 +500,7 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
   const spans: Array<DshMessageSpan | null> = [];
   const knowledgeOrdinals = new Set<number>();
   const skillCatalogOrdinals = new Set<number>();
+  const runtimeContextOrdinals = new Set<number>();
   const ordinalToSeq = new Map<number, number>();
   const seqToOrdinal = new Map<number, number>();
 
@@ -594,6 +624,31 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
       continue;
     }
 
+    if (type === "user/message" && isRuntimeContextMessage(record)) {
+      // Runtime-context snapshot: its own baseline message, never a fold
+      // target (pending tool results / tool-call assistant flush first, so
+      // they keep being tagged and dropped normally).
+      if (pendingAssistant !== null && pendingParts.length === 0) {
+        pushAssistant(pendingAssistant);
+        pendingAssistant = null;
+      }
+      if (pendingParts.length > 0 || pendingAssistant !== null) flushSynthetic();
+      const ordinal = messages.length + 1;
+      messages.push({
+        ordinal,
+        id: String(message.id),
+        role: "user",
+        parts: userTextParts(record.content, record.id),
+        createdAt: timeOf(event) ?? null,
+        version: seq >= 0 ? seq : null,
+      });
+      spans.push(surfaceNodes !== null ? { nodeStart: nodeIndex, nodeEnd: nodeIndex + 1, seqs: [seq] } : null);
+      ordinalToSeq.set(ordinal, seq);
+      if (seq >= 0) seqToOrdinal.set(seq, ordinal);
+      runtimeContextOrdinals.add(ordinal);
+      continue;
+    }
+
     if (type === "user/message") {
       // An orphan tool-call assistant (no results) stays as its own message.
       if (pendingAssistant !== null && pendingParts.length === 0) {
@@ -657,7 +712,15 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
     pendingAssistant = null;
   }
   if (pendingParts.length > 0 || pendingAssistant !== null) flushSynthetic();
-  return { messages, spans, knowledgeOrdinals, skillCatalogOrdinals, ordinalToSeq, seqToOrdinal };
+  return {
+    messages,
+    spans,
+    knowledgeOrdinals,
+    skillCatalogOrdinals,
+    runtimeContextOrdinals,
+    ordinalToSeq,
+    seqToOrdinal,
+  };
 }
 
 /**
@@ -746,6 +809,13 @@ export function readDshTranscript(input: DshTranscriptInput): DshTranscriptView 
     }
     if (walk.skillCatalogOrdinals.has(message.ordinal)) {
       Object.defineProperty(message, DSH_SKILL_CATALOG_KEY, {
+        value: true,
+        enumerable: false,
+        configurable: true,
+      });
+    }
+    if (walk.runtimeContextOrdinals.has(message.ordinal)) {
+      Object.defineProperty(message, DSH_RUNTIME_CONTEXT_KEY, {
         value: true,
         enumerable: false,
         configurable: true,
@@ -1099,6 +1169,7 @@ function buildRecordingTranscript(
     // visible-digest invariant and causing the per-round catalog loop.
     if (isKnowledgeBaselineMessage(raw)) continue;
     if (isSkillCatalogBaselineMessage(raw)) continue;
+    if (isRuntimeContextBaselineMessage(raw)) continue;
     const message = new RecordingMessage(
       { id: raw.id, role: raw.role, sessionId: view.sessionId },
       messageNodeSpan(raw),
@@ -1129,6 +1200,7 @@ export function textTagContentIdsBySource(
   for (const raw of view.messages) {
     if (isKnowledgeBaselineMessage(raw)) continue;
     if (isSkillCatalogBaselineMessage(raw)) continue;
+    if (isRuntimeContextBaselineMessage(raw)) continue;
     if (typeof raw.id !== "string" || raw.id.length === 0) continue;
     let textOrdinal = 0;
     for (const part of raw.parts) {

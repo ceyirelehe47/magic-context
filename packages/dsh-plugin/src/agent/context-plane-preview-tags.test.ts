@@ -236,15 +236,16 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
       const promptTag = rows.get(`${prompt.id}:p0`);
       const runtimeTag = rows.get(`${runtime.id}:p0`);
       expect(promptTag).toBeDefined();
-      expect(runtimeTag).toBe((promptTag as number) + 1);
+      // Runtime-context snapshots are baselines (round 10): never tagged.
+      expect(runtimeTag).toBeUndefined();
       expect([...rows.keys()].filter((k) => !/:p\d+$/.test(k))).toEqual([]);
       const shown = textsOf(payload2);
       expect(shown).toContain(`\u00a7${promptTag}\u00a7 turn four prompt`);
-      expect(shown).toContain(`\u00a7${runtimeTag}\u00a7 Current runtime context.`);
+      expect(shown).toContain("Current runtime context.");
       const numbers = shown.flatMap(tagNumbersIn);
       expect(new Set(numbers).size).toBe(numbers.length);
       const highest = Math.max(...numbers);
-      expect(highest).toBe(runtimeTag as number);
+      expect(highest).toBe(promptTag as number);
 
       // Once appended, core binds the SAME numbers (no second allocation), and
       // the model's "highest + 1" reply gets exactly that number.
@@ -264,7 +265,7 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
       await run(payload3);
       const after = rowsOf();
       expect(after.get(`${prompt.id}:p0`)).toBe(promptTag);
-      expect(after.get(`${runtime.id}:p0`)).toBe(runtimeTag);
+      expect(after.get(`${runtime.id}:p0`)).toBeUndefined();
       expect(after.get(`${reply.id}:p0`)).toBe(highest + 1);
       const surfaceNumbers = surfaceTexts(session).flatMap(tagNumbersIn);
       expect(new Set(surfaceNumbers).size).toBe(surfaceNumbers.length);

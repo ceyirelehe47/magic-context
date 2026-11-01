@@ -379,6 +379,9 @@ export function previewTagPayloadMessages(
       if (
         isMagicSource(msg.source) ||
         sourceKind === "skill-catalog" ||
+        // Runtime-context snapshots are baselines (never tagged; see
+        // agent/transcript.ts isRuntimeContextMessage).
+        sourceKind === "runtime-context" ||
         typeof msg.id !== "string" ||
         !Array.isArray(msg.content)
       ) {
