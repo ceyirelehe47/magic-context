@@ -1182,6 +1182,30 @@ function buildRecordingTranscript(
 }
 
 /**
+ * Text ordinals a NEW plain user message would inherit from the view's tail.
+ *
+ * When the view ends in a synthetic tail (`synth-user-…`: tool results, and
+ * their tool-call assistant, with no closing user message yet), the next
+ * `user/message` appended to the log absorbs those parts (walkDshLog fold):
+ * its own text blocks then start at `:p${n}`, where `n` is the number of
+ * text parts in that tail (the tool-call assistant's text; tool parts are not
+ * text). Returns 0 when the view does not end in a synthetic tail.
+ */
+export function pendingFoldTextCount(view: DshTranscriptView): number {
+  const last = view.messages[view.messages.length - 1];
+  if (last === undefined || !isSyntheticUserMessage(last)) return 0;
+  let n = 0;
+  for (const part of last.parts) if (isRecord(part) && classifyRecordingPart(part) === "text") n += 1;
+  return n;
+}
+
+/** True when the view ends in a synthetic tail (pending tool results). */
+export function endsInPendingFold(view: DshTranscriptView): boolean {
+  const last = view.messages[view.messages.length - 1];
+  return last !== undefined && isSyntheticUserMessage(last);
+}
+
+/**
  * The core text tag key of every taggable source text block in the view:
  * `sourceMessageId → (textBlockIndex → "${viewMessageId}:p${textOrdinal}")`.
  *

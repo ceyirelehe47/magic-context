@@ -272,7 +272,7 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
     });
   });
 
-  it("does not pre-assign a new user message that follows an unfolded tool call (ordinals unknown)", async () => {
+  it("pre-assigns a new user message that follows an unfolded tool call under the folded ordinal (:p1, round 10)", async () => {
     await withDb(async (db, dir) => {
       const { session, payload } = buildConversation();
       const deps: ContextPlaneDeps = {
@@ -307,8 +307,11 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
           message_id: string;
         }>
       ).map((r) => r.message_id);
-      expect(keys.some((k) => k.startsWith(`${steer.id}:`))).toBe(false);
-      expect(textsOf(messages)).toContain("steer");
+      // The tool-call assistant's "checking" folds into the steer message
+      // (core key `${steer}:p0`), so the steer text is `${steer}:p1`.
+      expect(keys).toContain(`${steer.id}:p1`);
+      expect(keys).not.toContain(`${steer.id}:p0`);
+      expect(textsOf(messages).some((t) => /^\u00a7\d+\u00a7 steer$/.test(t))).toBe(true);
     });
   });
 });

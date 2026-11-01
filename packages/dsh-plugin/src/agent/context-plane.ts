@@ -31,6 +31,8 @@ import {
 } from "./outbox";
 import {
   deriveMutationPlan,
+  endsInPendingFold,
+  pendingFoldTextCount,
   readDshTranscript,
   textTagContentIdsBySource,
   type PlanContext,
@@ -347,21 +349,36 @@ function maybeFireHistorian(
  * skill-catalog baselines, Magic-sourced copies) passes through unchanged.
  * Never throws (fail-open).
  */
+/**
+ * Pending fold at the session tail AFTER this pass's surface replace: the
+ * next appended user message absorbs it (see `pendingFoldTextCount`).
+ * `textCount` = text ordinals it occupies ahead of the new message's own text.
+ */
+export interface PendingTailFold {
+  readonly pending: boolean;
+  readonly textCount: number;
+}
+
 export function previewTagPayloadMessages(
   db: Database,
   sessionId: string,
   messages: readonly unknown[],
   contentIdsBySource: ReadonlyMap<string, ReadonlyMap<number, string>>,
+  tail: PendingTailFold = { pending: false, textCount: 0 },
 ): void {
   try {
     const tagger = createTagger();
     tagger.initFromDb(sessionId, db);
     const out: unknown[] = [];
-    // Whether a tool-call assistant / tool result precedes the current
-    // payload position without a closing user message: core folds that
-    // assistant text (and the results) INTO the next user message, so that
-    // message's text ordinals are not knowable from the payload alone.
-    let foldPending = false;
+    // Fold tracking (walkDshLog semantics, replayed over the payload in
+    // append order): a tool-call assistant / tool results with no closing
+    // user message are absorbed by the NEXT user/message, so that message's
+    // own text blocks start at `:p${foldTextCount}` (the tool-call
+    // assistant's text blocks; tool parts are not text). Starts from the
+    // session tail after this pass's replace. A runtime-context snapshot
+    // never absorbs (it flushes the fold into a synthetic tail).
+    let foldPending = tail.pending;
+    let foldTextCount = tail.pending ? tail.textCount : 0;
     for (const raw of messages) {
       const msg = raw as {
         id?: unknown;
@@ -372,10 +389,22 @@ export function previewTagPayloadMessages(
       const sourceKind = msg.source?.kind;
       const content = Array.isArray(msg.content) ? msg.content : [];
       const hasToolCall = content.some((part) => part !== null && typeof part === "object" && part.type === "tool-call");
-      const followsFold = foldPending;
-      if (msg.role === "assistant") foldPending = hasToolCall;
-      else if (msg.role === "tool") foldPending = true;
-      else if (msg.role === "user" && !isMagicSource(msg.source)) foldPending = false;
+      const ordinalOffset = foldPending ? foldTextCount : 0;
+      if (msg.role === "assistant") {
+        foldPending = hasToolCall;
+        foldTextCount = hasToolCall
+          ? content.filter((part) => part !== null && typeof part === "object" && part.type === "text" && typeof part.text === "string").length
+          : 0;
+      } else if (msg.role === "tool") {
+        if (!foldPending) foldTextCount = 0;
+        foldPending = true;
+      } else if (msg.role === "user") {
+        // Every user/message (incl. Magic / skill-catalog ones) closes the
+        // fold; the runtime-context snapshot flushes it instead — either
+        // way the next user message starts at :p0.
+        foldPending = false;
+        foldTextCount = 0;
+      }
       if (
         isMagicSource(msg.source) ||
         sourceKind === "skill-catalog" ||
@@ -394,12 +423,14 @@ export function previewTagPayloadMessages(
       // pre-step. Pre-assign the SAME key core will use once it is in the
       // view (`${id}:p${textBlock}` — a plain user message is its own view
       // message), so the model sees the number it will keep and its own
-      // "highest + 1" reply prefix matches what core assigns next. Skipped
-      // whenever a fold could shift the ordinals (tool-call / result before
-      // it) and for non-user roles.
+      // "highest + 1" reply prefix matches what core assigns next. When it
+      // follows a pending fold (tool-call / results with no closing user
+      // message, in the payload or at the session tail after this pass's
+      // replace) its own text starts after the absorbed assistant text:
+      // `${id}:p${offset + block}`. Non-user roles are never pre-assigned.
       let assignNew = false;
       if (keys === undefined) {
-        if (msg.role !== "user" || followsFold) {
+        if (msg.role !== "user") {
           out.push(raw);
           continue;
         }
@@ -407,7 +438,7 @@ export function previewTagPayloadMessages(
         let blockIndex = 0;
         for (const part of content) {
           if (part !== null && typeof part === "object" && part.type === "text" && typeof part.text === "string") {
-            derived.set(blockIndex, `${msg.id}:p${blockIndex}`);
+            derived.set(blockIndex, `${msg.id}:p${ordinalOffset + blockIndex}`);
             blockIndex += 1;
           }
         }
@@ -439,6 +470,26 @@ export function previewTagPayloadMessages(
     (messages as unknown[]).push(...out);
   } catch {
     // Preview must never break the pre-step chain (fail-open).
+  }
+}
+
+/** The session-tail fold the step's new input will absorb (after replace). */
+function tailFoldAfterPass(
+  agent: Agent,
+  canonicalSessionId: string,
+  before: ReturnType<typeof readDshTranscript>,
+  replaced: boolean,
+): PendingTailFold {
+  try {
+    const view = replaced
+      ? readDshTranscript({
+          session: { events: sessionEvents(agent.session), surface: agent.session.surface, header: {} },
+          canonicalSessionId,
+        })
+      : before;
+    return { pending: endsInPendingFold(view), textCount: pendingFoldTextCount(view) };
+  } catch {
+    return { pending: false, textCount: 0 };
   }
 }
 
@@ -538,15 +589,6 @@ export async function runContextPlaneStep(
         protection,
         heuristicCleanup: deps.heuristicCleanup,
       } satisfies PlanContext);
-      // 首轮 §N§ 预览：本次调用即可见（Pi transform 语义）。必须在
-      // deriveMutationPlan（core tagTranscript 分配标签）之后、且只按 core 的
-      // `${id}:pN` 键只读查询——同一条消息只有一个标签号。
-      previewTagPayloadMessages(
-        db,
-        canonicalSessionId,
-        payload.messages,
-        contentIdsBySource,
-      );
       if (plan !== null) {
         surfaceRewritten = true;
         agentDropsApplied = plan.ops.some((op) => op.kind === "drops");
@@ -557,6 +599,18 @@ export async function runContextPlaneStep(
         };
         await enqueuePlan(state.coordinator, hostView, agent.session, plan);
       }
+      // 首轮 §N§ 预览：本次调用即可见（Pi transform 语义）。必须在
+      // deriveMutationPlan（core tagTranscript 分配标签）之后、且只按 core 的
+      // `${id}:pN` 键只读查询——同一条消息只有一个标签号。放在 surface 替换
+      // 之后：新输入会吸收的尾部折叠（未闭合的 tool-call/结果）以替换后的
+      // surface 为准（替换成功则无折叠，失败/未替换则偏移 = 尾部文本块数）。
+      previewTagPayloadMessages(
+        db,
+        canonicalSessionId,
+        payload.messages,
+        contentIdsBySource,
+        tailFoldAfterPass(agent, canonicalSessionId, view, plan !== null),
+      );
     }
 
     // ctx_reduce 双通道 nudge（Pi parity）：inject `<system-reminder>`，
