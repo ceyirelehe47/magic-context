@@ -1,0 +1,16 @@
+key dsh:<home>:session-0e0055dd-89da-4e44-8343-2bfdf8875650
+tags total 11 message 8 tool 3 bare-id message tags 0
+message_id keys distinct 8 dup keys 0
+1 message active c349b717:p0
+2 message active synth-user-b5964818:p0
+3 tool active chatcmpl-tool-8511d3177df20078
+4 message active f5acf0d4:p0
+5 message active d49089ab:p0
+6 tool active chatcmpl-tool-a3a993db1514c1b3
+7 message active 1ea16e2b:p0
+8 message active 221ebbf8:p0
+9 tool active chatcmpl-tool-808603d4e4b792ff
+10 message active 4e7e7fda:p0
+11 message active 549b5f63:p0
+compartments 2
+compartment rows [{"sequence":0,"start_message":1,"end_message":1,"t":"Empty session-history placeholder block (no work to record)"},{"sequence":1,"start_message":2,"end_message":2,"t":"Empty session-history materialization ping"}]

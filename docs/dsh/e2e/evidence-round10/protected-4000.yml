@@ -1,0 +1,5 @@
+# round 10 item 4: lowest allowed token floor so an old tool result leaves the protection window quickly
+- id: magic-agent
+  config:
+    context:
+      protectedTokens: 4000

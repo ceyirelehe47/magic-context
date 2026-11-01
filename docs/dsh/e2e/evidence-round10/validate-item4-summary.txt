@@ -1,0 +1,7 @@
+# validation at 347a76d3c (item 4 drop fix)
+tc-adapter rc=0
+tc-dsh rc=0
+adapter-api rc=0  14 pass  0 fail 
+dsh-plugin rc=1  382 pass  0 fail 
+contracts rc=0  98 pass  0 fail 
+dsh-plugin: 382 pass / 0 fail / 1 error — the pre-existing unhandled between-tests storage-open error (also round 9)

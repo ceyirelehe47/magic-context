@@ -1,0 +1,58 @@
+# DSH session events (message types), text truncated to 90 chars; seq = DSH event seq; op = surface op
+4 turn/start {'turn': 1}
+8 user/message src=magic-context append '<session-history></session-history>'
+9 user/message src=magic-context append '<session-history-since>(no new content since last materialization)</session-history-since>'
+10 user/message src=user append '§1§ Turn 1. Use the read tool exactly once to read the file LICENSE in the current directo'
+11 user/message src=runtime-context append 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurr'
+17 assistant/message src=model append "§2§ I'll read the LICENSE file."
+17 assistant/message src=model append '[tool-call read]'
+19 tool/result src=tool append '<path><work>/magic-context/packages/dsh-plugin/LICENSE</path>\n<type>file</type>\n<'
+21 user/message src=magic-context replace 17-19 '§2§ I\'ll read the LICENSE file.\n\n[tool: read #chatcmpl-tool-8511d3177df20078]\ninput: {"fil'
+24 assistant/message src=model append '§4§ MIT License.'
+29 turn/start {'turn': 2}
+32 user/message src=user append '§5§ Turn 2. Use the read tool exactly once to read src/agent/outbox.ts. Then reply with on'
+34 assistant/message src=model append '[tool-call read]'
+36 tool/result src=tool append '<path><work>/magic-context/packages/dsh-plugin/src/agent/outbox.ts</path>\n<type>f'
+38 user/message src=magic-context replace 34-36 '[tool: read #chatcmpl-tool-a3a993db1514c1b3]\ninput: {"file_path":"<work>/magic-co'
+41 assistant/message src=model append '§7§ `initializeDshAdapterTables`'
+46 turn/start {'turn': 3}
+49 user/message src=user append '§8§ Turn 3. Use the read tool exactly once to read src/host/meter.ts. Then reply with one '
+51 assistant/message src=model append '[tool-call read]'
+53 tool/result src=tool append '<path><work>/magic-context/packages/dsh-plugin/src/host/meter.ts</path>\n<type>fil'
+55 user/message src=magic-context replace 51-53 '[tool: read #chatcmpl-tool-808603d4e4b792ff]\ninput: {"file_path":"<work>/magic-co'
+58 assistant/message src=model append ''
+63 turn/start {'turn': 4}
+66 user/message src=user append '§10§ Turn 4. Call the ctx_reduce tool exactly once with drop set to the §N§ number shown a'
+68 assistant/message src=model append ''
+73 turn/start {'turn': 5}
+76 user/message src=user append '§11§ Turn 5. Do not call any tools. In one sentence, quote the first line of the LICENSE f'
+78 assistant/message src=model append ''
+83 turn/start {'turn': 6}
+86 user/message src=user append '§12§ Turn 6. Do not call any tools. Reply with the single word OK.'
+88 assistant/message src=model append ''
+93 turn/start {'turn': 7}
+95 user/message src=magic-context replace 86-86 '<!-- +7m -->\n\n§12§ Turn 6. Do not call any tools. Reply with the single word OK.'
+96 user/message src=magic-context replace 10-10 '[dropped §1§]'
+98 user/message src=user append '§13§ Turn 7. Call the ctx_reduce tool exactly once with drop set to the §N§ number shown a'
+100 assistant/message src=model append ''
+105 turn/start {'turn': 8}
+107 user/message src=magic-context replace 21-21 '[dropped §2§]\n\n[tool: read #chatcmpl-tool-8511d3177df20078]\ninput: {"file_path":"/workspac'
+109 user/message src=user append '§14§ Turn 8. Do not call any tools. Reply with the single word DONE.'
+111 assistant/message src=model append ''
+
+# reconstructed surface (seq order)
+[7, 8, 9, 96, 11, 107, 24, 32, 38, 41, 49, 55, 58, 66, 68, 76, 78, 95, 88, 98, 100, 109, 111]
+
+# §N§ prefix ownership (raw assistant events + surface): number -> distinct texts
+1 OK [('surface', '[dropped §1§]')]
+2 OK [('raw-assistant', "I'll read the LICENSE file."), ('surface', '[dropped §2§]\n\n[tool: read #chatcmpl-tool-8511d3177df20078]\n')]
+4 OK [('raw-assistant', 'MIT License.'), ('surface', 'MIT License.')]
+5 OK [('surface', 'Turn 2. Use the read tool exactly once to read src/agent/out')]
+7 OK [('raw-assistant', '`initializeDshAdapterTables`'), ('surface', '`initializeDshAdapterTables`')]
+8 OK [('surface', 'Turn 3. Use the read tool exactly once to read src/host/mete')]
+10 OK [('surface', 'Turn 4. Call the ctx_reduce tool exactly once with drop set ')]
+11 OK [('surface', 'Turn 5. Do not call any tools. In one sentence, quote the fi')]
+13 OK [('surface', 'Turn 7. Call the ctx_reduce tool exactly once with drop set ')]
+14 OK [('surface', 'Turn 8. Do not call any tools. Reply with the single word DO')]
+duplicate numbers: 0
+runtime-context events appended: [11] still on surface as runtime-context: [11]

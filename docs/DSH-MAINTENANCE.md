@@ -450,10 +450,32 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
    layer, or the stock `token-meter` row re-enabled) both the native ring and
    the MC ring show. A preset that is not in `magicPresets` shows no ring at
    all (the native one is disabled profile-wide).
-7. **`tool-result-pruner` is loaded but idle under Magic.** Its only caller in
-   rc.5 is `compaction-basic`, which Magic disables; Magic's own drops/
-   compartments do the pruning. It is kept mounted (and its `tokenMeter`
+7. **`tool-result-pruner` is loaded but idle under Magic; Magic's drops now
+   do land (round 10, 347a76d3c).** Its only caller in rc.5 is
+   `compaction-basic.compactIfNeeded` (pressure ≥ the compaction threshold or a
+   provider overflow), which Magic disables; nothing else calls
+   `pruneSession`, and it only looks at `tool/result` surface nodes, which
+   Magic folds into its own copies anyway. It stays mounted (its `tokenMeter`
    dependency satisfied) so re-enabling native compaction needs no rewiring.
+   Magic's replacement is its own drop pipeline (ctx_reduce, historian
+   compartment drops, heuristic cleanup) — which, until round 10, never
+   landed: the coordinator's surface copy of a tagged message (`mc-op:` source)
+   was read back as a knowledge baseline, so every drop queued after the first
+   tagging pass stayed in `pending_ops` forever (unit test red before; on real
+   rc.5 the historian's compartment drops now replace the surface:
+   `docs/dsh/e2e/evidence-round10/real-item4-*`). Fix: the surface walk expands
+   op copies back into their source events (stable core keys, copy node/seq as
+   coverage, fold boundaries around a copy) and skips ops that re-render the
+   copy's current text (no churn). Old sessions: a copy whose sources include
+   a non-copy Magic message (knowledge, temporal merge) stays a baseline.
+   Remaining gap (real, round 10, 24k window): core's token-floor protection
+   keeps the newest tool results (there: all three, `protectedTagNumbers
+   [3,6,9]`), so two 15 kB reads left the request at 80 % with no output room
+   (`max-tokens` after 1 token) and the model could not call ctx_reduce; the
+   native pruner would have middle-truncated them. Not fixed: doing it right
+   needs a persistent per-tag "pruned" state (core `drop_mode` semantics) so
+   the rebuilt view does not re-render the full output on the next pass; on
+   realistic windows (≥128k) the floor and the tool outputs are far apart.
 8. **Client bundle is plain JS against the rc.5 web boot.** It may only
    `require` the web boot's static modules (`react`, `react/jsx-runtime`,
    `react-dom`, `@deepseek-ai/dsh-client-store`, `…-ui-slots`, …); the test
@@ -537,9 +559,10 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     OUTER pre-step listener after this preview (ahead of the prompt) would
     absorb the fold instead; the knowledge gate is the outer listener but it
     appends to the batch before calling `next`, so the preview sees it;
-    (3) on a session that already runs on replaced
-    surface copies, a pending drop on a legacy bare tag of a folded tool-call
-    assistant text is discarded (no source mapping is left); (4) pre-fix
+    (3) resolved in round 10 by the op-copy expansion
+    (limitation 7): a legacy bare tag of a folded tool-call assistant text
+    keeps its source mapping, so its pending drop is retargeted, not
+    discarded; (4) pre-fix
     sessions were created under the `standard` preset, which the one-shot runner
     cannot resume, so the fold was verified on a copy of the real DB, not
     inside a resumed DSH session.

@@ -23,3 +23,14 @@ redacted (`<work>`, `dsh:<home>:`); message ids are shortened to 8 hex.
 
 Real rc.5: the landed-replace path is the one real runs take (real1 turn 3: the step after the
 `read` call shows the model's `§7§` equal to core's tag). A failed replace cannot be forced live.
+
+## Item 4 — pruner vs Magic drops (fix 347a76d3c)
+
+| File | What it shows |
+|---|---|
+| `unit-item4-drop-red-before-fix.txt` | `drop-after-tag.test.ts` on the old walk: a drop queued after tagging stays `active` (op copies read as baselines); steady-state (no churn) passes on both |
+| `validate-item4-summary.txt` | typecheck:dsh 0 errors; dsh-plugin 382/0 (+1 pre-existing unhandled error); adapter-api 14/0; contracts:dsh 98/0 |
+| `real-item4-summary.md` | what the real session shows (drops land; the protected-tool-result gap) |
+| `real-item4-session-events.txt`, `real-item4-session-events-after.txt` | raw events + surface before / after turns 6-8 (`[dropped §1§]`, `[dropped §2§]` replaces) |
+| `real-item4-session-db.txt`, `real-item4-db-after.txt`, `real-item4-queued.txt` | tag rows before / after; the hand-queued tool drops (pending, protected) |
+| `protected-4000.yml` | the extra patch used |

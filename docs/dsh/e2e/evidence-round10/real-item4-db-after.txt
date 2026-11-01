@@ -1,0 +1,19 @@
+key dsh:<home>:session-0e0055dd-89da-4e44-8343-2bfdf8875650
+tags total 14 message 11 tool 3 bare-id message tags 0
+message_id keys distinct 11 dup keys 0
+1 message dropped c349b717:p0
+2 message dropped synth-user-b5964818:p0
+3 tool active chatcmpl-tool-8511d3177df20078
+4 message active f5acf0d4:p0
+5 message active d49089ab:p0
+6 tool active chatcmpl-tool-a3a993db1514c1b3
+7 message active 1ea16e2b:p0
+8 message active 221ebbf8:p0
+9 tool active chatcmpl-tool-808603d4e4b792ff
+10 message active 4e7e7fda:p0
+11 message active 549b5f63:p0
+12 message active c5bef863:p0
+13 message active 390c6124:p0
+14 message active a5d7dae1:p0
+compartments 5
+compartment rows [{"sequence":0,"start_message":1,"end_message":1,"t":"Empty session-history placeholder block (no work to record)"},{"sequence":1,"start_message":2,"end_message":2,"t":"Empty session-history materialization ping"},{"sequence":2,"start_message":3,"end_message":4,"t":"Read LICENSE once and name the license"},{"sequence":3,"start_message":5,"end_message":6,"t":"Confirmed LICENSE is MIT"},{"sequence":4,"start_message":7,"end_message":9,"t":"Read first exported function from outbox.ts"}]

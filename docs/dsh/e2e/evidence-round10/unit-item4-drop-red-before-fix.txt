@@ -1,0 +1,25 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/drop-after-tag.test.ts:
+ 95 |       expect(surface(session).some((t) => t.includes(`BODY1 BODY1`))).toBe(true);
+ 96 |       queuePendingOp(db, KEY, msg.tag_number, "drop", Date.now());
+ 97 |       queuePendingOp(db, KEY, tool.tag_number, "drop", Date.now());
+ 98 |       await step();
+ 99 |       const after = new Map(tags().map((t) => [t.tag_number, t.status]));
+100 |       expect(after.get(msg.tag_number)).toBe("dropped");
+                                              ^
+error: expect(received).toBe(expected)
+
+Expected: "dropped"
+Received: "active"
+
+      at <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/drop-after-tag.test.ts:100:41)
+      at async scenario (<work>/magic-context/packages/dsh-plugin/src/agent/drop-after-tag.test.ts:62:11)
+      at async <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/drop-after-tag.test.ts:87:11)
+(fail) drops land on messages that were already tagged (op copies are expanded, not baselines) > a queued drop of an old message tag and an old tool tag (outside the token floor) replaces the surface copy [864.73ms]
+(pass) drops land on messages that were already tagged (op copies are expanded, not baselines) > steady state: once tagged, further passes write nothing and keep every number (no churn) [283.19ms]
+
+ 1 pass
+ 1 fail
+ 6 expect() calls
+Ran 2 tests across 1 file. [2.15s]
