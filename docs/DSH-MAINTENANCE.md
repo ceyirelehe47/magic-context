@@ -42,7 +42,7 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 7, 2026-11-01, DSH 0.2.1-rc.5, filtered install above):
+Baseline (round 8 re-run, 2026-11-01, DSH 0.2.1-rc.5, bun 1.4.4, filtered install above):
 `typecheck:dsh` **0 errors**, `adapter-api` **14 pass**, `dsh-plugin`
 **370 pass**, `contracts:dsh` **98 pass**, 0 fail everywhere. The filtered
 install is enough for a clean typecheck; nothing else has to be installed.
