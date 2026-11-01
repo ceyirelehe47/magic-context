@@ -1,0 +1,34 @@
+# DSH session events (message types), text truncated to 90 chars; seq = DSH event seq; op = surface op
+4 turn/start {'turn': 1}
+8 user/message src=magic-context append '<session-history></session-history>'
+9 user/message src=magic-context append '<session-history-since>(no new content since last materialization)</session-history-since>'
+10 user/message src=user append '§1§ Turn 1. Do not call any tools. In about 200 words, explain what a bloom filter is. End'
+11 user/message src=runtime-context append 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurr'
+17 assistant/message src=model append '§2§ A Bloom filter is a compact, probabilistic data structure used to test whether an elem'
+22 turn/start {'turn': 2}
+25 user/message src=user append '§3§ Turn 2. Do not call any tools. In about 150 words, explain counting bloom filters. End'
+27 assistant/message src=model append '§4§ A counting Bloom filter extends the classic Bloom filter by replacing each bit in the '
+32 turn/start {'turn': 3}
+35 user/message src=user append '§5§ Turn 3. Use the read tool exactly once to read the file package.json in the current di'
+37 assistant/message src=model append '[tool-call read]'
+39 tool/result src=tool append '<path><work>/magic-context/packages/dsh-plugin/package.json</path>\n<type>file</ty'
+41 user/message src=magic-context replace 37-39 '[tool: read #call_00_icr5vjg81y3bwrzp0dyh30se]\ninput: {"file_path":"<work>/magic-'
+44 assistant/message src=model append '§7§ The package name is `dsh-magic-context`.'
+49 turn/start {'turn': 4}
+52 user/message src=user append '§8§ Turn 4. Do not call any tools. In two sentences, say when a cuckoo filter beats a bloo'
+54 assistant/message src=model append '§9§ A cuckoo filter beats a Bloom filter when you need to support deletion of items from a'
+
+# reconstructed surface (seq order)
+[7, 8, 9, 10, 11, 17, 25, 27, 35, 41, 44, 52, 54]
+
+# §N§ prefix ownership (raw assistant events + surface): number -> distinct texts
+1 OK [('surface', 'Turn 1. Do not call any tools. In about 200 words, explain w')]
+2 OK [('raw-assistant', 'A Bloom filter is a compact, probabilistic data structure us'), ('surface', 'A Bloom filter is a compact, probabilistic data structure us')]
+3 OK [('surface', 'Turn 2. Do not call any tools. In about 150 words, explain c')]
+4 OK [('raw-assistant', 'A counting Bloom filter extends the classic Bloom filter by '), ('surface', 'A counting Bloom filter extends the classic Bloom filter by ')]
+5 OK [('surface', 'Turn 3. Use the read tool exactly once to read the file pack')]
+7 OK [('raw-assistant', 'The package name is `dsh-magic-context`.'), ('surface', 'The package name is `dsh-magic-context`.')]
+8 OK [('surface', 'Turn 4. Do not call any tools. In two sentences, say when a ')]
+9 OK [('raw-assistant', 'A cuckoo filter beats a Bloom filter when you need to suppor'), ('surface', 'A cuckoo filter beats a Bloom filter when you need to suppor')]
+duplicate numbers: 0
+runtime-context events appended: [11] still on surface as runtime-context: [11]

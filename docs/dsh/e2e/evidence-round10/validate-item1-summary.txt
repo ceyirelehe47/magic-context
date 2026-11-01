@@ -1,0 +1,6 @@
+# validation at 53f3fdd37 (item 1)
+tc-adapter rc=0
+tc-dsh rc=0
+adapter-api rc=0  14 pass  0 fail 
+dsh-plugin rc=0  377 pass  0 fail 
+contracts rc=0  98 pass  0 fail 

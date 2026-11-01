@@ -1,0 +1,40 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/runtime-context-tags.test.ts:
+156 | describe("runtime-context snapshot is a baseline (no tag, no replace)", () => {
+157 |   it("the model's own reply prefix is the number core gives the reply; no number is owned twice across raw + surface", async () => {
+158 |     await withDb(async (db, dir) => {
+159 |       const { session, runtimeIds, replies } = await runTurns(db, dir, 3);
+160 |       const tagRows = rows(db);
+161 |       for (const reply of replies) expect(tagRows.get(`${reply.id}:p0`)).toBe(reply.prefix);
+                                                                               ^
+error: expect(received).toBe(expected)
+
+Expected: 2
+Received: 3
+
+      at <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/runtime-context-tags.test.ts:161:74)
+      at async withDb (<work>/magic-context/packages/dsh-plugin/src/agent/runtime-context-tags.test.ts:69:11)
+      at async <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/runtime-context-tags.test.ts:158:11)
+(fail) runtime-context snapshot is a baseline (no tag, no replace) > the model's own reply prefix is the number core gives the reply; no number is owned twice across raw + surface [843.42ms]
+181 | 
+182 |   it("a snapshot right after tool results does not swallow them: the results stay tagged, the snapshot untouched", async () => {
+183 |     await withDb(async (db, dir) => {
+184 |       const { session, runtimeIds } = await runTurns(db, dir, 3, true);
+185 |       const tagRows = rows(db);
+186 |       for (const id of runtimeIds) expect([...tagRows.keys()].some((k) => k.startsWith(`${id}:`))).toBe(false);
+                                                                                                         ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/runtime-context-tags.test.ts:186:100)
+      at async withDb (<work>/magic-context/packages/dsh-plugin/src/agent/runtime-context-tags.test.ts:69:11)
+      at async <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/runtime-context-tags.test.ts:183:11)
+(fail) runtime-context snapshot is a baseline (no tag, no replace) > a snapshot right after tool results does not swallow them: the results stay tagged, the snapshot untouched [233.64ms]
+
+ 0 pass
+ 2 fail
+ 2 expect() calls
+Ran 2 tests across 1 file. [1.85s]

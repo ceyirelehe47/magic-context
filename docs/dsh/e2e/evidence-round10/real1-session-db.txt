@@ -1,0 +1,13 @@
+key dsh:<home>:session-aea1add3-7326-4c26-b6ba-210ce30ac8dc
+tags total 8 message 7 tool 1 bare-id message tags 0
+message_id keys distinct 7 dup keys 0
+1 message active f00f7f2b:p0
+2 message active 16b51b4d:p0
+3 message active b2cf72a4:p0
+4 message active bc39798f:p0
+5 message active 087bd7ae:p0
+6 tool active call_00_icr5vjg81y3bwrzp0dyh30se
+7 message active f53c1928:p0
+8 message active 0aabc78b:p0
+compartments 1
+compartment rows [{"sequence":0,"start_message":1,"end_message":2,"t":"Empty session-history markers (no new content)"}]
