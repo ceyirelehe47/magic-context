@@ -189,17 +189,20 @@ describe("legacy bare-id §N§ tags are folded once per session", () => {
       expect(new Set(numbers).size).toBe(numbers.length);
       // Every remaining message tag is a core positional key.
       for (const key of rows.keys()) expect(/:p\d+$/.test(key)).toBe(true);
-      // Replaced surface: user1's drop follows `${id}:p0`; the folded
-      // assistant text has no mapping any more, so its drop is discarded
-      // (never applied to a different text).
+      // Replaced surface: since round 10 the op copies are expanded back to
+      // their source events, so BOTH drops keep their mapping: user1's drop
+      // follows `${user1}:p0` and the folded tool-call assistant text's drop
+      // follows its core key `${user2}:p0` (pre-round-10 it was discarded).
+      const assistant1Core = tagRows(db).get(`${ids.user2}:p0`) as number;
       const ops = db.prepare("SELECT tag_id FROM pending_ops WHERE session_id = ?").all(KEY) as Array<{ tag_id: number }>;
       const dropped = db
         .prepare("SELECT tag_number FROM tags WHERE session_id = ? AND status = 'dropped'")
         .all(KEY) as Array<{ tag_number: number }>;
       const touched = new Set([...ops.map((o) => o.tag_id), ...dropped.map((d) => d.tag_number)]);
       expect(touched.has(user1Core)).toBe(true);
+      expect(touched.has(assistant1Core)).toBe(true);
       expect(touched.has(bareAssistant1)).toBe(false);
-      expect(touched.size).toBe(1);
+      expect(touched.size).toBe(2);
     });
   });
 });

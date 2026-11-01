@@ -431,6 +431,22 @@ export const DSH_KNOWLEDGE_KEY = "__dshKnowledgeBaseline";
 export const DSH_SKILL_CATALOG_KEY = "__dshSkillCatalog";
 /** Non-enumerable runtime-context marker attached to view messages. */
 export const DSH_RUNTIME_CONTEXT_KEY = "__dshRuntimeContext";
+/** Non-enumerable current op-copy text attached to rebuilt view messages. */
+export const DSH_SURFACE_TEXT_KEY = "__dshSurfaceText";
+
+/** Non-enumerable marker: the view message was rebuilt from op copies only. */
+export const DSH_OP_COPY_KEY = "__dshOpCopyBacked";
+
+/** True when every surface node of this view message is a Magic op copy. */
+export function isOpCopyBackedMessage(message: RawMessage): boolean {
+  return (message as unknown as Record<string, unknown>)[DSH_OP_COPY_KEY] === true;
+}
+
+/** The op copy's current text when this view message was rebuilt from one. */
+export function currentSurfaceText(message: RawMessage): string | undefined {
+  const value = (message as unknown as Record<string, unknown>)[DSH_SURFACE_TEXT_KEY];
+  return typeof value === "string" ? value : undefined;
+}
 
 /** The surface span of a view message, or null for messages without one. */
 export function messageNodeSpan(message: RawMessage): DshMessageSpan | null {
@@ -459,8 +475,77 @@ interface DshWalkResult {
   readonly knowledgeOrdinals: ReadonlySet<number>;
   readonly skillCatalogOrdinals: ReadonlySet<number>;
   readonly runtimeContextOrdinals: ReadonlySet<number>;
+  /** ordinal → current text of the op copy this message was rebuilt from. */
+  readonly surfaceTexts: ReadonlyMap<number, string>;
+  /** ordinals of messages whose every surface node is an expanded op copy. */
+  readonly opCopyOrdinals: ReadonlySet<number>;
   readonly ordinalToSeq: Map<number, number>;
   readonly seqToOrdinal: Map<number, number>;
+}
+
+interface WalkEntry {
+  readonly event: EventLike;
+  /** Surface node index this entry occupies (an op copy's index for its sources). */
+  readonly nodeIndex: number;
+  /** Live surface seq covering this entry (the op copy's seq for its sources). */
+  readonly surfaceSeq: number;
+  /** Close any pending fold before this entry (op-copy boundary). */
+  boundaryBefore: boolean;
+  /** Seq of the op copy this entry was expanded from. */
+  readonly copySeq?: number;
+}
+
+function uniqueSeqs(seqs: readonly number[]): number[] {
+  const out: number[] = [];
+  for (const seq of seqs) if (!out.includes(seq)) out.push(seq);
+  return out;
+}
+
+const MAX_OP_COPY_DEPTH = 64;
+
+/**
+ * Source events of a Magic op copy (`source.messageId` = `mc-op:<opId>`,
+ * temporal merges excluded — they stay baselines), oldest first, with nested
+ * copies expanded. `null` when the event is not an op copy or a source event
+ * is missing (then the copy stays a baseline, the pre-round-10 behaviour).
+ */
+function expandOpCopy(
+  event: EventLike,
+  eventBySeq: ReadonlyMap<number, EventLike>,
+  depth: number,
+): EventLike[] | null {
+  if (event.type !== "user/message") return null;
+  const data = dataOf(event);
+  const source = data !== null && isRecord(data.source) ? data.source : null;
+  if (source === null || !isMagicSource(source)) return null;
+  const messageId = source.messageId;
+  if (typeof messageId !== "string" || !messageId.startsWith("mc-op:") || messageId.endsWith(":temporal")) return null;
+  const shadowed = (event as { sourceEventSeqs?: unknown }).sourceEventSeqs;
+  if (!Array.isArray(shadowed) || shadowed.length === 0 || depth >= MAX_OP_COPY_DEPTH) return null;
+  const out: EventLike[] = [];
+  for (const seq of [...shadowed].sort((a, b) => Number(a) - Number(b))) {
+    const sourceEvent = typeof seq === "number" ? eventBySeq.get(seq) : undefined;
+    if (sourceEvent === undefined) return null;
+    const nested = expandOpCopy(sourceEvent, eventBySeq, depth + 1);
+    if (nested === null) {
+      // A non-copy Magic message inside a copy (knowledge, temporal) cannot
+      // be rebuilt faithfully: keep the copy as a baseline.
+      const nestedData = dataOf(sourceEvent);
+      if (nestedData !== null && isRecord(nestedData.source) && isMagicSource(nestedData.source)) return null;
+      out.push(sourceEvent);
+    } else {
+      out.push(...nested);
+    }
+  }
+  return out;
+}
+
+/** The single text block of an op copy (what the model currently sees). */
+function opCopyText(event: EventLike): string | undefined {
+  const data = dataOf(event);
+  const content = data !== null && Array.isArray(data.content) ? data.content : [];
+  const texts = content.filter((part) => isRecord(part) && part.type === "text").map((part) => String((part as { text?: unknown }).text ?? ""));
+  return texts.length === 1 ? texts[0] : undefined;
 }
 
 /**
@@ -471,6 +556,7 @@ interface DshWalkResult {
  */
 function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] | null): DshWalkResult {
   const eventBySeq = new Map<number, EventLike>();
+  const boundaryAfter = new Set<number>();
   const toolNameByCallId = new Map<string, string>();
   for (const raw of events) {
     const event = asEvent(raw);
@@ -487,14 +573,47 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
     }
   }
 
-  const ordered: EventLike[] =
-    surfaceNodes !== null
-      ? surfaceNodes
-          .map((seq) => eventBySeq.get(seq))
-          .filter((event): event is EventLike => event !== undefined)
-      : events
-          .map(asEvent)
-          .filter((event): event is EventLike => event !== null);
+  // Surface walk: a Magic op copy (`mc-op:<opId>` replace written by the
+  // coordinator) stands for the events it shadows. It is expanded back into
+  // those source events (recursively) so the view keeps the ORIGINAL message
+  // ids and parts: core keys (`${id}:pN`, tool owner ids) stay stable, and
+  // later drops / cleanup / reasoning ops can still target the message.
+  // Pre-round-10 the copy was read as a knowledge baseline, so nothing that
+  // was ever tagged could be dropped afterwards (queued drops stayed pending
+  // forever). Expanded entries carry the copy's node index / seq (the live
+  // surface coverage the coordinator validates), fold boundaries are forced
+  // on both sides of a copy (its content is self-contained), and the copy's
+  // current text is remembered so an op that would re-render the same text
+  // is skipped (deriveMutationPlan).
+  const ordered: WalkEntry[] = [];
+  const copyText = new Map<number, string>();
+  const expandedCopies = new Set<number>();
+  if (surfaceNodes !== null) {
+    for (let nodeIndex = 0; nodeIndex < surfaceNodes.length; nodeIndex += 1) {
+      const surfaceSeq = surfaceNodes[nodeIndex];
+      const event = eventBySeq.get(surfaceSeq);
+      if (event === undefined) continue;
+      const expanded = expandOpCopy(event, eventBySeq, 0);
+      if (expanded === null) {
+        ordered.push({ event, nodeIndex, surfaceSeq, boundaryBefore: false });
+        continue;
+      }
+      expandedCopies.add(surfaceSeq);
+      const text = opCopyText(event);
+      if (text !== undefined) copyText.set(surfaceSeq, text);
+      expanded.forEach((source, i) => {
+        ordered.push({ event: source, nodeIndex, surfaceSeq, boundaryBefore: i === 0, copySeq: surfaceSeq });
+      });
+      const next = surfaceNodes[nodeIndex + 1];
+      if (next !== undefined) boundaryAfter.add(next);
+    }
+    for (const entry of ordered) if (boundaryAfter.has(entry.surfaceSeq) && entry.copySeq === undefined) entry.boundaryBefore = true;
+  } else {
+    for (const raw of events) {
+      const event = asEvent(raw);
+      if (event !== null) ordered.push({ event, nodeIndex: ordered.length, surfaceSeq: seqOf(event), boundaryBefore: false });
+    }
+  }
 
   const messages: RawMessage[] = [];
   const spans: Array<DshMessageSpan | null> = [];
@@ -506,6 +625,7 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
 
   let pendingParts: unknown[] = [];
   let pendingSeqs: number[] = [];
+  let pendingSurfaceSeqs: number[] = [];
   let pendingStartIndex: number | null = null;
   let pendingFirstId: string | null = null;
   let pendingFirstSeq = -1;
@@ -517,12 +637,13 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
   // assistant `tool_calls` block with no following `role=tool` message and
   // the LLM API rejects the sequence (insufficient tool messages).
   let pendingAssistant:
-    | { nodeIndex: number; seq: number; parts: unknown[]; createdAt: number | null; id: string }
+    | { nodeIndex: number; seq: number; surfaceSeq: number; parts: unknown[]; createdAt: number | null; id: string }
     | null = null;
 
   const resetPending = (): void => {
     pendingParts = [];
     pendingSeqs = [];
+    pendingSurfaceSeqs = [];
     pendingStartIndex = null;
     pendingFirstId = null;
     pendingFirstSeq = -1;
@@ -534,6 +655,7 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
   const pushAssistant = (item: {
     nodeIndex: number;
     seq: number;
+    surfaceSeq: number;
     parts: unknown[];
     createdAt: number | null;
     id: string;
@@ -549,11 +671,12 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
     });
     spans.push(
       surfaceNodes !== null
-        ? { nodeStart: item.nodeIndex, nodeEnd: item.nodeIndex + 1, seqs: [item.seq] }
+        ? { nodeStart: item.nodeIndex, nodeEnd: item.nodeIndex + 1, seqs: [item.surfaceSeq] }
         : null,
     );
     ordinalToSeq.set(ordinal, item.seq);
     if (item.seq >= 0) seqToOrdinal.set(item.seq, ordinal);
+    if (item.surfaceSeq >= 0) seqToOrdinal.set(item.surfaceSeq, ordinal);
   };
 
   const flushSynthetic = (): void => {
@@ -563,6 +686,10 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
       ...(pendingAssistant === null ? [] : [pendingAssistant.seq]),
       ...pendingSeqs,
     ];
+    const surfaceSeqs = uniqueSeqs([
+      ...(pendingAssistant === null ? [] : [pendingAssistant.surfaceSeq]),
+      ...pendingSurfaceSeqs,
+    ]);
     const start = Math.min(
       pendingStartIndex ?? Number.POSITIVE_INFINITY,
       pendingAssistant?.nodeIndex ?? Number.POSITIVE_INFINITY,
@@ -578,16 +705,27 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
     });
     spans.push(
       surfaceNodes !== null
-        ? { nodeStart: start, nodeEnd: start + seqs.length, seqs: [...seqs] }
+        ? { nodeStart: start, nodeEnd: start + surfaceSeqs.length, seqs: surfaceSeqs }
         : null,
     );
     if (pendingFirstSeq >= 0) ordinalToSeq.set(ordinal, pendingFirstSeq);
-    for (const s of seqs) seqToOrdinal.set(s, ordinal);
+    for (const s of [...seqs, ...surfaceSeqs]) seqToOrdinal.set(s, ordinal);
     resetPending();
   };
 
-  for (let nodeIndex = 0; nodeIndex < ordered.length; nodeIndex += 1) {
-    const event = ordered[nodeIndex];
+  for (let entryIndex = 0; entryIndex < ordered.length; entryIndex += 1) {
+    const entry = ordered[entryIndex];
+    const event = entry.event;
+    const nodeIndex = entry.nodeIndex;
+    const surfaceSeq = entry.surfaceSeq;
+    if (entry.boundaryBefore) {
+      // Op-copy boundary: close any pending fold (tail orphan / synthetic).
+      if (pendingAssistant !== null && pendingParts.length === 0) {
+        pushAssistant(pendingAssistant);
+        pendingAssistant = null;
+      }
+      if (pendingParts.length > 0 || pendingAssistant !== null) flushSynthetic();
+    }
     const type = event.type;
     if (type !== "user/message" && type !== "assistant/message" && type !== "tool/result") {
       continue; // log-only events (tool/call, turn/*, request/*, ...) — skipped
@@ -609,6 +747,7 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
         pendingAssistant = {
           nodeIndex,
           seq,
+          surfaceSeq,
           parts,
           createdAt: timeOf(event) ?? null,
           id: String(message.id),
@@ -620,7 +759,7 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
         pushAssistant(pendingAssistant);
         pendingAssistant = null;
       }
-      pushAssistant({ nodeIndex, seq, parts, createdAt: timeOf(event) ?? null, id: String(message.id) });
+      pushAssistant({ nodeIndex, seq, surfaceSeq, parts, createdAt: timeOf(event) ?? null, id: String(message.id) });
       continue;
     }
 
@@ -642,9 +781,10 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
         createdAt: timeOf(event) ?? null,
         version: seq >= 0 ? seq : null,
       });
-      spans.push(surfaceNodes !== null ? { nodeStart: nodeIndex, nodeEnd: nodeIndex + 1, seqs: [seq] } : null);
+      spans.push(surfaceNodes !== null ? { nodeStart: nodeIndex, nodeEnd: nodeIndex + 1, seqs: [surfaceSeq] } : null);
       ordinalToSeq.set(ordinal, seq);
       if (seq >= 0) seqToOrdinal.set(seq, ordinal);
+      if (surfaceSeq >= 0) seqToOrdinal.set(surfaceSeq, ordinal);
       runtimeContextOrdinals.add(ordinal);
       continue;
     }
@@ -683,12 +823,22 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
           ? {
               nodeStart: start,
               nodeEnd: nodeIndex + 1,
-              seqs: [...(pendingAssistant === null ? [] : [pendingAssistant.seq]), ...pendingSeqs, seq],
+              seqs: uniqueSeqs([
+                ...(pendingAssistant === null ? [] : [pendingAssistant.surfaceSeq]),
+                ...pendingSurfaceSeqs,
+                surfaceSeq,
+              ]),
             }
           : null,
       );
       ordinalToSeq.set(ordinal, seq);
-      for (const s of [...(pendingAssistant === null ? [] : [pendingAssistant.seq]), ...pendingSeqs, seq]) {
+      for (const s of [
+        ...(pendingAssistant === null ? [] : [pendingAssistant.seq, pendingAssistant.surfaceSeq]),
+        ...pendingSeqs,
+        ...pendingSurfaceSeqs,
+        seq,
+        surfaceSeq,
+      ]) {
         seqToOrdinal.set(s, ordinal);
       }
       if (knowledge) knowledgeOrdinals.add(ordinal);
@@ -700,6 +850,7 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
     // tool/result — folded into the next user (or synthetic tail user).
     pendingParts.push(...toolResultParts(record, toolNameByCallId));
     pendingSeqs.push(seq);
+    pendingSurfaceSeqs.push(surfaceSeq);
     if (pendingStartIndex === null) pendingStartIndex = nodeIndex;
     if (pendingFirstId === null) pendingFirstId = String(message.id);
     if (pendingFirstSeq < 0) pendingFirstSeq = seq;
@@ -712,7 +863,21 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
     pendingAssistant = null;
   }
   if (pendingParts.length > 0 || pendingAssistant !== null) flushSynthetic();
+  // A view message rebuilt from exactly one op copy: the copy's current text
+  // (what the model sees now) — an op rendering the same text is a no-op.
+  const surfaceTexts = new Map<number, string>();
+  const opCopyOrdinals = new Set<number>();
+  spans.forEach((span, i) => {
+    if (span !== null && span.seqs.length > 0 && span.seqs.every((seq) => expandedCopies.has(seq))) {
+      opCopyOrdinals.add(messages[i].ordinal);
+    }
+    if (span === null || span.seqs.length !== 1) return;
+    const text = copyText.get(span.seqs[0]);
+    if (text !== undefined) surfaceTexts.set(messages[i].ordinal, text);
+  });
   return {
+    surfaceTexts,
+    opCopyOrdinals,
     messages,
     spans,
     knowledgeOrdinals,
@@ -817,6 +982,17 @@ export function readDshTranscript(input: DshTranscriptInput): DshTranscriptView 
     if (walk.runtimeContextOrdinals.has(message.ordinal)) {
       Object.defineProperty(message, DSH_RUNTIME_CONTEXT_KEY, {
         value: true,
+        enumerable: false,
+        configurable: true,
+      });
+    }
+    if (walk.opCopyOrdinals.has(message.ordinal)) {
+      Object.defineProperty(message, DSH_OP_COPY_KEY, { value: true, enumerable: false, configurable: true });
+    }
+    const surfaceText = walk.surfaceTexts.get(message.ordinal);
+    if (surfaceText !== undefined) {
+      Object.defineProperty(message, DSH_SURFACE_TEXT_KEY, {
+        value: surfaceText,
         enumerable: false,
         configurable: true,
       });
@@ -1151,9 +1327,14 @@ export class RecordingTagTarget implements TagTarget {
 
 function buildRecordingTranscript(
   view: DshTranscriptView,
-): { transcript: RecordingTranscript; byMessageId: Map<string, RecordingMessage> } {
+): {
+  transcript: RecordingTranscript;
+  byMessageId: Map<string, RecordingMessage>;
+  rawByRecording: Map<RecordingMessage, RawMessage>;
+} {
   const messages: RecordingMessage[] = [];
   const byMessageId = new Map<string, RecordingMessage>();
+  const rawByRecording = new Map<RecordingMessage, RawMessage>();
   for (const raw of view.messages) {
     // Knowledge-baseline (m0/m1) messages stay out of the tag/drop pipeline:
     // the coordinator's surface replace would give them a NEW event id each
@@ -1176,9 +1357,10 @@ function buildRecordingTranscript(
     );
     for (const part of raw.parts) message.addPart(part);
     messages.push(message);
+    rawByRecording.set(message, raw);
     if (typeof raw.id === "string") byMessageId.set(raw.id, message);
   }
-  return { transcript: new RecordingTranscript(messages), byMessageId };
+  return { transcript: new RecordingTranscript(messages), byMessageId, rawByRecording };
 }
 
 /**
@@ -1193,7 +1375,7 @@ function buildRecordingTranscript(
  */
 export function pendingFoldTextCount(view: DshTranscriptView): number {
   const last = view.messages[view.messages.length - 1];
-  if (last === undefined || !isSyntheticUserMessage(last)) return 0;
+  if (last === undefined || !isSyntheticUserMessage(last) || isOpCopyBackedMessage(last)) return 0;
   let n = 0;
   for (const part of last.parts) if (isRecord(part) && classifyRecordingPart(part) === "text") n += 1;
   return n;
@@ -1202,7 +1384,9 @@ export function pendingFoldTextCount(view: DshTranscriptView): number {
 /** True when the view ends in a synthetic tail (pending tool results). */
 export function endsInPendingFold(view: DshTranscriptView): boolean {
   const last = view.messages[view.messages.length - 1];
-  return last !== undefined && isSyntheticUserMessage(last);
+  // A synthetic tail rebuilt from an op copy is closed (copy boundary): the
+  // next user message does not absorb it.
+  return last !== undefined && isSyntheticUserMessage(last) && !isOpCopyBackedMessage(last);
 }
 
 /**
@@ -1428,7 +1612,7 @@ export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): M
 
   const ops: MutationOp[] = [...planTemporalMarkers(view)];
 
-  const { transcript, byMessageId } = buildRecordingTranscript(view);
+  const { transcript, byMessageId, rawByRecording } = buildRecordingTranscript(view);
   if (transcript.messages.length > 0) {
     const tagger = createTagger();
     tagger.initFromDb(sessionId, db);
@@ -1492,11 +1676,16 @@ export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): M
       if (!message.isDirty()) continue;
       const span = message.span;
       if (span === null || span.seqs.length === 0) continue; // no surface coverage
+      const replacement = message.render();
+      // Rebuilt from an op copy that already shows exactly this text: the
+      // surface is current, no replace (no cache bust, no new event).
+      const raw = rawByRecording.get(message);
+      if (raw !== undefined && currentSurfaceText(raw) === replacement) continue;
       ops.push({
         kind: message.opKind(),
         start: span.nodeStart,
         end: span.nodeEnd,
-        replacement: message.render(),
+        replacement,
         cacheClass: minimalCacheClassForOp(
           { start: span.nodeStart, end: span.nodeEnd },
           view.surfaceNodes.length,
