@@ -1,0 +1,55 @@
+{
+ "0_ring": [
+  {
+   "cls": "ckmc-meter ",
+   "text": "58%"
+  }
+ ],
+ "1_menu_Account menu": [
+  "Settings",
+  "Feedback",
+  "Sign in"
+ ],
+ "1_opened_via": "Account menu",
+ "2_opened": true,
+ "2_dialog_text": "Settings\nGeneral\nModels\nBuilt-in plugins\nAgent presets\nMagic Context\nOpen configuration file\nClose\nPermission\nChoose the default permission mode for new sessions\nWorkspace Write\nLanguage\nEnglish\nAppearance\nLight\nDark\nSystem\nFont size\nOnly affects conversation content\n14\npx\nWork details\nChoose how much detail to show for tool calls\nDetailed\nWhen to Collapse Work Details\nChoose when to automatically collapse work details\nOn completion\nShow coding view\nShows trajectory, code diffs, and all Agent presets\nKeyboard shortcuts\n\nView and edit available shortcuts and input actions\n\nEdit shortcuts\nSend behavior while busy\nWhat Enter and the Send button do while the agent is running; Cmd/Ctrl+Enter uses the other behavior\nQueue\nPerformance & usage\nChoose how much performance and usage information to show\nDetailed\nUpload Session Log when using the official model API\nHelp improve DeepSeek models and products.\nCurrent version: 0.2.1-rc.5",
+ "3_nav_clicked": true,
+ "3_ckmc_cards_in_dialog": 2,
+ "3_section_text": "Magic Context · Status\n\ndsh-magic-context · DeepSeek Harness adapter\n\nRefresh",
+ "4_notice": [],
+ "4_row_meta": "Effective: 65 · magic-context.jsonc — 20–90. Force threshold = max(85, execute + 2).",
+ "4_patch_magic_host": [
+  "- id: magic-host\n  name: dsh-magic-context\n  config:\n    executeThresholdPercentage: 55\n"
+ ],
+ "4_effective": {
+  "value": {
+   "default": 55
+  },
+  "source": "dsh"
+ },
+ "4_thresholds": {
+  "executePercentage": 55,
+  "forcePercentage": 85,
+  "emergencyPercentage": 95,
+  "mode": "percentage",
+  "matchedKey": "default"
+ },
+ "5_notice": [],
+ "5_patch_magic_host": [
+  "- id: magic-host\n  name: dsh-magic-context\n  config:\n    executeThresholdPercentage: 55\n"
+ ],
+ "5_effective": {
+  "value": {
+   "default": 55
+  },
+  "source": "dsh"
+ },
+ "5_thresholds": {
+  "executePercentage": 55,
+  "forcePercentage": 85,
+  "emergencyPercentage": 95,
+  "mode": "percentage",
+  "matchedKey": "default"
+ },
+ "console_errors": []
+}

@@ -1,0 +1,2 @@
+# 2026-11-01T08:24:29Z profile webtest cordis.patch.yml after the UI 'Inherit' save
+magic-host rows: 0
