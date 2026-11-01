@@ -292,6 +292,16 @@ the same (`openBundle("dsh-magic-context")` → Plugins → our bundle, where
 `pluginNavigation` is missing the link turns into the text hint
 "Open Settings → Magic Context".
 
+Verified live on rc.5 (round 8, `evidence-round8/settings-section.json`,
+`r8-settings-*.png`): Account menu → **Settings** opens the modal; its nav
+lists General, Models, Built-in plugins, Agent presets, **Magic Context**.
+The Magic Context entry renders the status card and the editable form;
+Execute threshold → Override → `55` → Save wrote the `magic-host` row
+(effective 55, source `dsh`, revision 1), and Inherit → Save removed it
+again. While an agent turn was running on the (heavily loaded) test sandbox
+the Save button stayed on "Saving…" for more than 3 s although the row was
+already written; it completed on its own.
+
 Verified live on rc.5 (round 8, `docs/dsh/e2e/evidence-round8/settings-live.json`):
 `updateSettings set executeThresholdPercentage=50` wrote
 `- id: magic-host / config: { executeThresholdPercentage: 50 }` into the
@@ -459,7 +469,8 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     change is live for the agent immediately, but the ring reads the
     `magicContextPressure` projection, which is recomputed per step: after
     setting 50 % the ring stayed grey at 54 % until the next step (then
-    yellow at 56 %), and after `unset` it stayed yellow until the next step.
+    yellow at 56 %), and after `unset` it stayed yellow until the next step
+    (then grey at 58 % against 65 %).
     The popover's threshold rows come from `magicContext/context` and update
     as soon as it is reopened.
 11. **Duplicate `§N§` prefixes seen twice on real rc.5, not root-caused.**
