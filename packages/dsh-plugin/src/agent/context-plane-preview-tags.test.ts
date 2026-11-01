@@ -188,4 +188,127 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
       expect(new Set(shown).size).toBe(shown.length);
     });
   });
+
+  it("tags the step's new input (not yet in the session) under the key core will use, so the model's next number is right", async () => {
+    await withDb(async (db, dir) => {
+      const { session, payload } = buildConversation();
+      const deps: ContextPlaneDeps = {
+        host: {
+          ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }),
+          canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}`,
+        },
+        config: {},
+        log: () => {},
+      };
+      const state = createContextPlaneState();
+      const run = (messages: unknown[]) =>
+        runContextPlaneStep(
+          state,
+          deps,
+          { agent: { id: session.id, session } as never, messages: messages as never },
+          async () => ({ reject: false, messages: [] }),
+        );
+      await run([...payload]);
+
+      // Real rc.5 order: the new prompt and the runtime-context snapshot are
+      // in the payload but appended to the session log only after the
+      // pre-step.
+      const prompt = createUserMessage({ content: [{ type: "text", text: "turn four prompt" }], source: { kind: "user" } });
+      const runtime = createUserMessage({
+        content: [{ type: "text", text: "Current runtime context." }],
+        source: { kind: "runtime-context" } as never,
+      });
+      const historyNow = session.surface.nodes
+        .map((seq) => sessionEventAt(session, seq))
+        .map((event) => (event ? deriveEventMessage(event) : undefined))
+        .filter((m) => m !== undefined) as unknown[];
+      const payload2 = [...historyNow, prompt, runtime];
+      await run(payload2);
+      const rowsOf = () =>
+        new Map(
+          (
+            db
+              .prepare("SELECT message_id, tag_number FROM tags WHERE session_id = ? AND type = 'message'")
+              .all(KEY) as Array<{ message_id: string; tag_number: number }>
+          ).map((row) => [row.message_id, row.tag_number]),
+        );
+      const rows = rowsOf();
+      const promptTag = rows.get(`${prompt.id}:p0`);
+      const runtimeTag = rows.get(`${runtime.id}:p0`);
+      expect(promptTag).toBeDefined();
+      expect(runtimeTag).toBe((promptTag as number) + 1);
+      expect([...rows.keys()].filter((k) => !/:p\d+$/.test(k))).toEqual([]);
+      const shown = textsOf(payload2);
+      expect(shown).toContain(`\u00a7${promptTag}\u00a7 turn four prompt`);
+      expect(shown).toContain(`\u00a7${runtimeTag}\u00a7 Current runtime context.`);
+      const numbers = shown.flatMap(tagNumbersIn);
+      expect(new Set(numbers).size).toBe(numbers.length);
+      const highest = Math.max(...numbers);
+      expect(highest).toBe(runtimeTag as number);
+
+      // Once appended, core binds the SAME numbers (no second allocation), and
+      // the model's "highest + 1" reply gets exactly that number.
+      session.append("user/message", prompt as never, { surfaceOp: "append" });
+      session.append("user/message", runtime as never, { surfaceOp: "append" });
+      const reply = createAssistantMessage({
+        content: [{ type: "text", text: `\u00a7${highest + 1}\u00a7 reply four` }],
+        provider: "deepseek",
+        model: "deepseek-chat",
+        source: { kind: "model" },
+      });
+      session.append("assistant/message", { turn: 4, step: 1, message: reply } as never, { surfaceOp: "append" });
+      const payload3 = session.surface.nodes
+        .map((seq) => sessionEventAt(session, seq))
+        .map((event) => (event ? deriveEventMessage(event) : undefined))
+        .filter((m) => m !== undefined) as unknown[];
+      await run(payload3);
+      const after = rowsOf();
+      expect(after.get(`${prompt.id}:p0`)).toBe(promptTag);
+      expect(after.get(`${runtime.id}:p0`)).toBe(runtimeTag);
+      expect(after.get(`${reply.id}:p0`)).toBe(highest + 1);
+      const surfaceNumbers = surfaceTexts(session).flatMap(tagNumbersIn);
+      expect(new Set(surfaceNumbers).size).toBe(surfaceNumbers.length);
+    });
+  });
+
+  it("does not pre-assign a new user message that follows an unfolded tool call (ordinals unknown)", async () => {
+    await withDb(async (db, dir) => {
+      const { session, payload } = buildConversation();
+      const deps: ContextPlaneDeps = {
+        host: {
+          ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }),
+          canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}`,
+        },
+        config: {},
+        log: () => {},
+      };
+      const state = createContextPlaneState();
+      const callAssistant = createAssistantMessage({
+        content: [
+          { type: "text", text: "checking" },
+          { type: "tool-call", id: "call-9", name: "read_file", arguments: "{}" },
+        ],
+        provider: "deepseek",
+        model: "deepseek-chat",
+        source: { kind: "model" },
+      });
+      const result = createToolResultMessage({ callId: "call-9", content: [{ type: "text", text: "ok" }], isError: false });
+      const steer = createUserMessage({ content: [{ type: "text", text: "steer" }], source: { kind: "user" } });
+      const messages = [...payload, callAssistant, result, steer];
+      await runContextPlaneStep(
+        state,
+        deps,
+        { agent: { id: session.id, session } as never, messages: messages as never },
+        async () => ({ reject: false, messages: [] }),
+      );
+      const keys = (
+        db.prepare("SELECT message_id FROM tags WHERE session_id = ? AND type = 'message'").all(KEY) as Array<{
+          message_id: string;
+        }>
+      ).map((r) => r.message_id);
+      expect(keys.some((k) => k.startsWith(`${steer.id}:`))).toBe(false);
+      expect(textsOf(messages)).toContain("steer");
+    });
+  });
 });
+

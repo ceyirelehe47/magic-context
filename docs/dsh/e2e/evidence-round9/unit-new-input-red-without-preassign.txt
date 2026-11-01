@@ -1,0 +1,24 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/context-plane-preview-tags.test.ts:
+233 |           ).map((row) => [row.message_id, row.tag_number]),
+234 |         );
+235 |       const rows = rowsOf();
+236 |       const promptTag = rows.get(`${prompt.id}:p0`);
+237 |       const runtimeTag = rows.get(`${runtime.id}:p0`);
+238 |       expect(promptTag).toBeDefined();
+                              ^
+error: expect(received).toBeDefined()
+
+Received: undefined
+
+      at <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:238:25)
+      at async withDb (<work>/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:104:11)
+      at async <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:193:11)
+(fail) first-call §N§ preview uses the core tag key (one tag per message) > tags the step's new input (not yet in the session) under the key core will use, so the model's next number is right [1164.24ms]
+
+ 0 pass
+ 2 filtered out
+ 1 fail
+ 1 expect() calls
+Ran 1 test across 1 file. [2.53s]

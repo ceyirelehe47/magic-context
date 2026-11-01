@@ -333,9 +333,11 @@ function maybeFireHistorian(
  * frozen messages with the `§N§ ` prefix of the tag the plan derivation
  * (core `tagTranscript`) assigned to that text.
  *
- * READ-ONLY on the tag table: the number is looked up under the core content
- * key (`${viewMessageId}:p${textOrdinal}`, see `textTagContentIdsBySource`),
- * never assigned here. Pre-fix this function assigned its own tag under the
+ * Tags are looked up under the core content key
+ * (`${viewMessageId}:p${textOrdinal}`, see `textTagContentIdsBySource`). The
+ * only allocation here is for a plain user message that is not in the view
+ * yet (the step's new input), under the exact key core will use for it —
+ * never under a bare id. Pre-fix this function assigned its own tag under the
  * BARE source message id while `tagTranscript` assigned another under
  * `:p0`, so one message owned two tag numbers and the preview number could
  * collide with what a different message showed after the surface replace
@@ -355,13 +357,25 @@ export function previewTagPayloadMessages(
     const tagger = createTagger();
     tagger.initFromDb(sessionId, db);
     const out: unknown[] = [];
+    // Whether a tool-call assistant / tool result precedes the current
+    // payload position without a closing user message: core folds that
+    // assistant text (and the results) INTO the next user message, so that
+    // message's text ordinals are not knowable from the payload alone.
+    let foldPending = false;
     for (const raw of messages) {
       const msg = raw as {
         id?: unknown;
+        role?: unknown;
         content?: Array<{ type?: unknown; text?: unknown }>;
         source?: { kind?: unknown };
       };
       const sourceKind = msg.source?.kind;
+      const content = Array.isArray(msg.content) ? msg.content : [];
+      const hasToolCall = content.some((part) => part !== null && typeof part === "object" && part.type === "tool-call");
+      const followsFold = foldPending;
+      if (msg.role === "assistant") foldPending = hasToolCall;
+      else if (msg.role === "tool") foldPending = true;
+      else if (msg.role === "user" && !isMagicSource(msg.source)) foldPending = false;
       if (
         isMagicSource(msg.source) ||
         sourceKind === "skill-catalog" ||
@@ -371,21 +385,46 @@ export function previewTagPayloadMessages(
         out.push(raw);
         continue;
       }
-      const keys = contentIdsBySource.get(msg.id);
+      let keys: ReadonlyMap<number, string> | undefined = contentIdsBySource.get(msg.id);
+      // Not in the session view yet: the step's NEW user input (the prompt,
+      // the runtime-context snapshot) is appended to the log only after the
+      // pre-step. Pre-assign the SAME key core will use once it is in the
+      // view (`${id}:p${textBlock}` — a plain user message is its own view
+      // message), so the model sees the number it will keep and its own
+      // "highest + 1" reply prefix matches what core assigns next. Skipped
+      // whenever a fold could shift the ordinals (tool-call / result before
+      // it) and for non-user roles.
+      let assignNew = false;
       if (keys === undefined) {
-        out.push(raw);
-        continue;
+        if (msg.role !== "user" || followsFold) {
+          out.push(raw);
+          continue;
+        }
+        const derived = new Map<number, string>();
+        let blockIndex = 0;
+        for (const part of content) {
+          if (part !== null && typeof part === "object" && part.type === "text" && typeof part.text === "string") {
+            derived.set(blockIndex, `${msg.id}:p${blockIndex}`);
+            blockIndex += 1;
+          }
+        }
+        keys = derived;
+        assignNew = true;
       }
+      const resolvedKeys = keys;
       let textBlockIndex = 0;
       let changed = false;
       const newContent = msg.content.map((part) => {
         if (part === null || typeof part !== "object" || part.type !== "text" || typeof part.text !== "string") {
           return part;
         }
-        const contentId = keys.get(textBlockIndex);
+        const contentId = resolvedKeys.get(textBlockIndex);
         textBlockIndex += 1;
         if (contentId === undefined) return part;
-        const tag = tagger.getTag(sessionId, contentId, "message");
+        let tag = tagger.getTag(sessionId, contentId, "message");
+        if ((tag === undefined || tag <= 0) && assignNew && part.text.trim().length > 0) {
+          tag = tagger.assignTag(sessionId, contentId, "message", Buffer.byteLength(part.text), db);
+        }
         if (tag === undefined || tag <= 0) return part;
         if (part.text.startsWith(`\u00a7${tag}\u00a7 `)) return part;
         changed = true;
