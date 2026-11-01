@@ -1,0 +1,6 @@
+preset-standard: compaction-basic=disabled, magic rows=['magic-compaction', 'magic-agent']
+preset-ptc: compaction-basic=active, magic rows=[]
+preset-minimal: compaction-basic=disabled, magic rows=['magic-compaction', 'magic-agent']
+preset-cordis: compaction-basic=disabled, magic rows=['magic-compaction', 'magic-agent']
+top-level: ['token-meter', 'magic-host', 'magic-remote', 'magic-meter']; token-meter disabled=True
+magic-meter config: {'magicPresets': ['cordis', 'minimal', 'standard']}

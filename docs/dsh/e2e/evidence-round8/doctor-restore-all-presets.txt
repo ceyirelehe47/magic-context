@@ -1,0 +1,22 @@
+$ dsh-magic-context doctor --profile webtest --all-presets
+[ok  ] DSH version
+       <work>/e2e/dsh/node_modules/@deepseek-ai/dsh (via env) → 0.2.1-rc.5 (matches the compat contract 0.2.1-rc.5).
+[ok  ] Bundle install state — profile webtest
+       dsh-magic-context is in dsh.profile.bundles and resolvable in node_modules.
+[ok  ] Profile patch layer — profile webtest
+       <work>/e2e/home/profiles/webtest/cordis.patch.yml: managed block up to date; layout preset; stock <work>/e2e/dsh/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml re-scanned OK.
+[ok  ] Magic per preset — profile webtest
+       web agent presets:
+         - cordis: enabled
+         - magic-standard: disabled
+         - minimal: enabled
+         - ptc: enabled
+         - standard: enabled
+         - composer indicator: Magic Context meter (stock token-meter row disabled → magic-meter)
+[ok  ] Shared DB
+       <work>/e2e/xdg/data/cortexkit/magic-context/context.db: opened; schema v95 (adapter supports up to v95).
+[ok  ] Liveness markers
+       5 marker(s) found, all from dead processes (stale, harmless).
+[ok  ] Config loading
+       <work>/e2e/xdg/config/cortexkit/magic-context.jsonc → loadOutcome=ok (user: ok, project: ok)
+rc=0

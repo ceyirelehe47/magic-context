@@ -1,0 +1,21 @@
+$ dsh-magic-context setup --profile webtest --all-presets
+[ok  ] DSH home
+       <work>/e2e/home
+[ok  ] DSH install
+       <work>/e2e/dsh/node_modules/@deepseek-ai/dsh (0.2.1-rc.5, found via env)
+[ok  ] Stock layout contract scan
+       profile webtest: layout preset (web agent presets); <work>/e2e/dsh/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml matches the expected rows.
+[ok  ] Preset selection
+       Magic enabled in: cordis, minimal, ptc, standard (was: cordis, minimal, standard); available: cordis, magic-standard, minimal, ptc, standard
+[ok  ] Profile bundle
+       dsh-magic-context is in dsh.profile.bundles and resolvable.
+[ok  ] Profile patch layer
+       wrote the managed block into <work>/e2e/home/profiles/webtest/cordis.patch.yml (Magic enabled in agent preset(s) cordis, minimal, ptc, standard; token-meter → magic-meter).
+[ok  ] Magic Context user config
+       <work>/e2e/xdg/config/cortexkit/magic-context.jsonc exists and carries the recommended keys; not overwritten.
+
+Next steps:
+  - Check the composed tree: dsh --profile webtest --dump-config | grep magic-
+  - New sessions of the patched stock presets run Magic Context; existing sessions keep their composition until restarted.
+  - Verify with: dsh-magic-context doctor --profile webtest
+rc=0
