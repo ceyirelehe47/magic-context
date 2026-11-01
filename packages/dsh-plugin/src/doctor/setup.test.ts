@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseJsonc } from "@magic-context/core/shared/jsonc-parser";
-import { runDshSetup, parseEntryListYaml, RECOMMENDED_CONFIG_KEYS } from "./setup";
+import { defaultMagicConfigJsonc, runDshSetup, parseEntryListYaml, RECOMMENDED_CONFIG_KEYS } from "./setup";
 import { MAGIC_CONTEXT_PACKAGE } from "./env";
 import { fakeDshInstall, fakeDshProfile, SHIPPED_PROFILE_PATCH } from "./fake-dsh";
 import {
@@ -264,5 +264,14 @@ describe("mergeManagedBlock", () => {
 
   it("refuses a flow-style non-empty list", () => {
     expect(() => mergeManagedBlock("[{id: x}]\n", "- id: a\n")).toThrow();
+  });
+});
+
+describe("generated magic-context.jsonc header", () => {
+  it("documents the DSH settings override precedence instead of a read-only card", () => {
+    const text = defaultMagicConfigJsonc();
+    expect(text).not.toContain("read-only");
+    expect(text).toContain("DSH override > this jsonc > core default");
+    expect(parseJsonc(text)).toMatchObject({ enabled: true });
   });
 });
