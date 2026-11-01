@@ -1,0 +1,582 @@
+{
+ "0_settings_before": {
+  "ok": true,
+  "value": {
+   "namespace": "magic-host",
+   "live": {},
+   "effective": {
+    "enabled": {
+     "value": true,
+     "source": "jsonc"
+    },
+    "historianModel": {
+     "source": "default"
+    },
+    "historianAwaitAtTurnEndMs": {
+     "value": 0,
+     "source": "default"
+    },
+    "executeThreshold": {
+     "value": 65,
+     "source": "jsonc"
+    },
+    "protectedTokens": {
+     "source": "default"
+    }
+   },
+   "thresholds": {
+    "executePercentage": 65,
+    "forcePercentage": 85,
+    "emergencyPercentage": 95,
+    "mode": "percentage"
+   },
+   "jsonc": {
+    "path": "<work>/e2e/xdg/config/cortexkit/magic-context.jsonc",
+    "exists": true,
+    "loaded": true
+   },
+   "bounds": {
+    "executeThresholdPercentage": {
+     "min": 20,
+     "max": 90
+    },
+    "protectedTokens": {
+     "min": 4000,
+     "max": 1000000
+    },
+    "historianAwaitAtTurnEndMs": {
+     "min": 0,
+     "max": 60000
+    }
+   },
+   "fields": [
+    "enabled",
+    "historianModel",
+    "historianAwaitAtTurnEndMs",
+    "executeThresholdPercentage",
+    "executeThresholdByModel",
+    "protectedTokens"
+   ],
+   "precedence": "DSH override (set here) > magic-context.jsonc (project > user) > core default; unset = inherit jsonc. The jsonc file is never written.",
+   "available": true,
+   "writable": true,
+   "revision": 0,
+   "user": {}
+  }
+ },
+ "0_patch_magic_host_before": [],
+ "session_path": "/",
+ "1_ring_before": [
+  {
+   "cls": "ckmc-meter ",
+   "text": "54%",
+   "aria": "Magic Context: 54% of context used",
+   "color": "rgb(129, 133, 140)"
+  }
+ ],
+ "2_update_set50": {
+  "ok": true,
+  "value": {
+   "ok": true,
+   "view": {
+    "namespace": "magic-host",
+    "live": {
+     "executeThresholdPercentage": 50
+    },
+    "effective": {
+     "enabled": {
+      "value": true,
+      "source": "jsonc"
+     },
+     "historianModel": {
+      "source": "default"
+     },
+     "historianAwaitAtTurnEndMs": {
+      "value": 0,
+      "source": "default"
+     },
+     "executeThreshold": {
+      "value": {
+       "default": 50
+      },
+      "source": "dsh"
+     },
+     "protectedTokens": {
+      "source": "default"
+     }
+    },
+    "thresholds": {
+     "executePercentage": 50,
+     "forcePercentage": 85,
+     "emergencyPercentage": 95,
+     "mode": "percentage",
+     "matchedKey": "default"
+    },
+    "jsonc": {
+     "path": "<work>/e2e/xdg/config/cortexkit/magic-context.jsonc",
+     "exists": true,
+     "loaded": true
+    },
+    "bounds": {
+     "executeThresholdPercentage": {
+      "min": 20,
+      "max": 90
+     },
+     "protectedTokens": {
+      "min": 4000,
+      "max": 1000000
+     },
+     "historianAwaitAtTurnEndMs": {
+      "min": 0,
+      "max": 60000
+     }
+    },
+    "fields": [
+     "enabled",
+     "historianModel",
+     "historianAwaitAtTurnEndMs",
+     "executeThresholdPercentage",
+     "executeThresholdByModel",
+     "protectedTokens"
+    ],
+    "precedence": "DSH override (set here) > magic-context.jsonc (project > user) > core default; unset = inherit jsonc. The jsonc file is never written.",
+    "available": true,
+    "writable": true,
+    "revision": 1,
+    "user": {
+     "executeThresholdPercentage": 50
+    }
+   }
+  }
+ },
+ "2_patch_magic_host_after_set50": [
+  "- id: magic-host\n  name: dsh-magic-context\n  config:\n    executeThresholdPercentage: 50\n"
+ ],
+ "2_settings_after_set50": {
+  "ok": true,
+  "value": {
+   "namespace": "magic-host",
+   "live": {
+    "executeThresholdPercentage": 50
+   },
+   "effective": {
+    "enabled": {
+     "value": true,
+     "source": "jsonc"
+    },
+    "historianModel": {
+     "source": "default"
+    },
+    "historianAwaitAtTurnEndMs": {
+     "value": 0,
+     "source": "default"
+    },
+    "executeThreshold": {
+     "value": {
+      "default": 50
+     },
+     "source": "dsh"
+    },
+    "protectedTokens": {
+     "source": "default"
+    }
+   },
+   "thresholds": {
+    "executePercentage": 50,
+    "forcePercentage": 85,
+    "emergencyPercentage": 95,
+    "mode": "percentage",
+    "matchedKey": "default"
+   },
+   "jsonc": {
+    "path": "<work>/e2e/xdg/config/cortexkit/magic-context.jsonc",
+    "exists": true,
+    "loaded": true
+   },
+   "bounds": {
+    "executeThresholdPercentage": {
+     "min": 20,
+     "max": 90
+    },
+    "protectedTokens": {
+     "min": 4000,
+     "max": 1000000
+    },
+    "historianAwaitAtTurnEndMs": {
+     "min": 0,
+     "max": 60000
+    }
+   },
+   "fields": [
+    "enabled",
+    "historianModel",
+    "historianAwaitAtTurnEndMs",
+    "executeThresholdPercentage",
+    "executeThresholdByModel",
+    "protectedTokens"
+   ],
+   "precedence": "DSH override (set here) > magic-context.jsonc (project > user) > core default; unset = inherit jsonc. The jsonc file is never written.",
+   "available": true,
+   "writable": true,
+   "revision": 1,
+   "user": {
+    "executeThresholdPercentage": 50
+   }
+  }
+ },
+ "3_conflict_stale_revision": {
+  "ok": true,
+  "value": {
+   "ok": false,
+   "code": "conflict",
+   "message": "the settings changed since this page read them; reloaded — review and save again",
+   "expected": 0,
+   "actual": 1,
+   "view": {
+    "namespace": "magic-host",
+    "live": {
+     "executeThresholdPercentage": 50
+    },
+    "effective": {
+     "enabled": {
+      "value": true,
+      "source": "jsonc"
+     },
+     "historianModel": {
+      "source": "default"
+     },
+     "historianAwaitAtTurnEndMs": {
+      "value": 0,
+      "source": "default"
+     },
+     "executeThreshold": {
+      "value": {
+       "default": 50
+      },
+      "source": "dsh"
+     },
+     "protectedTokens": {
+      "source": "default"
+     }
+    },
+    "thresholds": {
+     "executePercentage": 50,
+     "forcePercentage": 85,
+     "emergencyPercentage": 95,
+     "mode": "percentage",
+     "matchedKey": "default"
+    },
+    "jsonc": {
+     "path": "<work>/e2e/xdg/config/cortexkit/magic-context.jsonc",
+     "exists": true,
+     "loaded": true
+    },
+    "bounds": {
+     "executeThresholdPercentage": {
+      "min": 20,
+      "max": 90
+     },
+     "protectedTokens": {
+      "min": 4000,
+      "max": 1000000
+     },
+     "historianAwaitAtTurnEndMs": {
+      "min": 0,
+      "max": 60000
+     }
+    },
+    "fields": [
+     "enabled",
+     "historianModel",
+     "historianAwaitAtTurnEndMs",
+     "executeThresholdPercentage",
+     "executeThresholdByModel",
+     "protectedTokens"
+    ],
+    "precedence": "DSH override (set here) > magic-context.jsonc (project > user) > core default; unset = inherit jsonc. The jsonc file is never written.",
+    "available": true,
+    "writable": true,
+    "revision": 1,
+    "user": {
+     "executeThresholdPercentage": 50
+    }
+   }
+  }
+ },
+ "4_invalid_out_of_bounds_5": {
+  "ok": true,
+  "value": {
+   "ok": false,
+   "code": "invalid",
+   "message": "executeThresholdPercentage must be in [20, 90]"
+  }
+ },
+ "4_invalid_unknown_field": {
+  "ok": true,
+  "value": {
+   "ok": false,
+   "code": "invalid",
+   "message": "field notAField is not editable"
+  }
+ },
+ "4_settings_after_rejects": {
+  "enabled": {
+   "value": true,
+   "source": "jsonc"
+  },
+  "historianModel": {
+   "source": "default"
+  },
+  "historianAwaitAtTurnEndMs": {
+   "value": 0,
+   "source": "default"
+  },
+  "executeThreshold": {
+   "value": {
+    "default": 50
+   },
+   "source": "dsh"
+  },
+  "protectedTokens": {
+   "source": "default"
+  }
+ },
+ "4_patch_after_rejects": [
+  "- id: magic-host\n  name: dsh-magic-context\n  config:\n    executeThresholdPercentage: 50\n"
+ ],
+ "5_ring_after_set_before_step": [
+  {
+   "cls": "ckmc-meter ",
+   "text": "54%",
+   "aria": "Magic Context: 54% of context used",
+   "color": "rgb(129, 133, 140)"
+  }
+ ],
+ "5_ring_after_step": [
+  {
+   "cls": "ckmc-meter ckmc-warn",
+   "text": "56%",
+   "aria": "Magic Context: 56% of context used",
+   "color": "rgb(229, 165, 10)"
+  }
+ ],
+ "sessionId": "session-96b69888-e8e3-4ace-a65f-bad9a2da83cd",
+ "6_context_threshold50": {
+  "ok": true,
+  "value": {
+   "sessionId": "session-96b69888-e8e3-4ace-a65f-bad9a2da83cd",
+   "enabled": true,
+   "storage": "ok",
+   "thresholds": {
+    "executePercentage": 50,
+    "forcePercentage": 85,
+    "emergencyPercentage": 95,
+    "mode": "percentage",
+    "matchedKey": "default"
+   },
+   "compartments": 1,
+   "historian": {
+    "inProgress": false,
+    "failureCount": 0,
+    "state": "idle",
+    "lastCompartmentAt": 1793516298148
+   },
+   "pending": {
+    "drops": 0,
+    "outbox": 0
+   },
+   "tags": {
+    "active": 6,
+    "dropped": 0
+   },
+   "knowledge": {
+    "m0Tokens": 9,
+    "m1Tokens": 23,
+    "memoryBlocks": 0
+   },
+   "nudge": {
+    "notePending": true
+   },
+   "lastContextPercentage": 54
+  }
+ },
+ "6_popover_text": "Context\n56%\n13.5K / 24K\nUsed\n13.5K (56%)\nWindow\n24K · opencode-go/deepseek-v4.1-flash\nExecute threshold\n50% · 12K\nForce threshold\n85% · 20.4K\nEmergency wall\n95%\nSystem prompt\n≈2.9K\nTools\n≈10.1K\nConversation\n≈836\nCompartments\n1\nHistorian\nidle\nPending drops\n0\nMemory / knowledge injected\n≈32 (m0 9 · m1 23)\nNudge\nnone · note nudge pending\nMagic Context settings →",
+ "7_unset": {
+  "ok": true,
+  "value": {
+   "ok": true,
+   "view": {
+    "namespace": "magic-host",
+    "live": {},
+    "effective": {
+     "enabled": {
+      "value": true,
+      "source": "jsonc"
+     },
+     "historianModel": {
+      "source": "default"
+     },
+     "historianAwaitAtTurnEndMs": {
+      "value": 0,
+      "source": "default"
+     },
+     "executeThreshold": {
+      "value": 65,
+      "source": "jsonc"
+     },
+     "protectedTokens": {
+      "source": "default"
+     }
+    },
+    "thresholds": {
+     "executePercentage": 65,
+     "forcePercentage": 85,
+     "emergencyPercentage": 95,
+     "mode": "percentage"
+    },
+    "jsonc": {
+     "path": "<work>/e2e/xdg/config/cortexkit/magic-context.jsonc",
+     "exists": true,
+     "loaded": true
+    },
+    "bounds": {
+     "executeThresholdPercentage": {
+      "min": 20,
+      "max": 90
+     },
+     "protectedTokens": {
+      "min": 4000,
+      "max": 1000000
+     },
+     "historianAwaitAtTurnEndMs": {
+      "min": 0,
+      "max": 60000
+     }
+    },
+    "fields": [
+     "enabled",
+     "historianModel",
+     "historianAwaitAtTurnEndMs",
+     "executeThresholdPercentage",
+     "executeThresholdByModel",
+     "protectedTokens"
+    ],
+    "precedence": "DSH override (set here) > magic-context.jsonc (project > user) > core default; unset = inherit jsonc. The jsonc file is never written.",
+    "available": true,
+    "writable": true,
+    "revision": 2,
+    "user": {}
+   }
+  }
+ },
+ "7_patch_after_unset": [],
+ "7_settings_after_unset": {
+  "namespace": "magic-host",
+  "live": {},
+  "effective": {
+   "enabled": {
+    "value": true,
+    "source": "jsonc"
+   },
+   "historianModel": {
+    "source": "default"
+   },
+   "historianAwaitAtTurnEndMs": {
+    "value": 0,
+    "source": "default"
+   },
+   "executeThreshold": {
+    "value": 65,
+    "source": "jsonc"
+   },
+   "protectedTokens": {
+    "source": "default"
+   }
+  },
+  "thresholds": {
+   "executePercentage": 65,
+   "forcePercentage": 85,
+   "emergencyPercentage": 95,
+   "mode": "percentage"
+  },
+  "jsonc": {
+   "path": "<work>/e2e/xdg/config/cortexkit/magic-context.jsonc",
+   "exists": true,
+   "loaded": true
+  },
+  "bounds": {
+   "executeThresholdPercentage": {
+    "min": 20,
+    "max": 90
+   },
+   "protectedTokens": {
+    "min": 4000,
+    "max": 1000000
+   },
+   "historianAwaitAtTurnEndMs": {
+    "min": 0,
+    "max": 60000
+   }
+  },
+  "fields": [
+   "enabled",
+   "historianModel",
+   "historianAwaitAtTurnEndMs",
+   "executeThresholdPercentage",
+   "executeThresholdByModel",
+   "protectedTokens"
+  ],
+  "precedence": "DSH override (set here) > magic-context.jsonc (project > user) > core default; unset = inherit jsonc. The jsonc file is never written.",
+  "available": true,
+  "writable": true,
+  "revision": 2,
+  "user": {}
+ },
+ "7_context_after_unset": {
+  "ok": true,
+  "value": {
+   "sessionId": "session-96b69888-e8e3-4ace-a65f-bad9a2da83cd",
+   "enabled": true,
+   "storage": "ok",
+   "thresholds": {
+    "executePercentage": 65,
+    "forcePercentage": 85,
+    "emergencyPercentage": 95,
+    "mode": "percentage"
+   },
+   "compartments": 1,
+   "historian": {
+    "inProgress": false,
+    "failureCount": 0,
+    "state": "idle",
+    "lastCompartmentAt": 1793516298148
+   },
+   "pending": {
+    "drops": 0,
+    "outbox": 0
+   },
+   "tags": {
+    "active": 6,
+    "dropped": 0
+   },
+   "knowledge": {
+    "m0Tokens": 9,
+    "m1Tokens": 23,
+    "memoryBlocks": 0
+   },
+   "nudge": {
+    "notePending": true
+   },
+   "lastContextPercentage": 54
+  }
+ },
+ "7_ring_after_unset": [
+  {
+   "cls": "ckmc-meter ckmc-warn",
+   "text": "56%",
+   "aria": "Magic Context: 56% of context used",
+   "color": "rgb(229, 165, 10)"
+  }
+ ],
+ "console_errors": []
+}
