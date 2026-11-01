@@ -1,0 +1,93 @@
+[
+ {
+  "ns": "magic-host",
+  "autoGenerate": false,
+  "schema": {
+   "uid": 9447,
+   "refs": {
+    "9439": {
+     "type": "boolean",
+     "meta": {
+      "description": "Magic Context on/off for this profile (unset = jsonc `enabled`). Live: pauses per-step work."
+     }
+    },
+    "9440": {
+     "type": "string",
+     "meta": {
+      "description": "Historian model `provider/model` (unset = jsonc `historian.model`)."
+     }
+    },
+    "9441": {
+     "type": "number",
+     "meta": {
+      "step": 1,
+      "min": 0,
+      "max": 60000,
+      "description": "Await in-flight historian passes at turn end (ms; unset = env / 0)."
+     }
+    },
+    "9442": {
+     "type": "number",
+     "meta": {
+      "min": 20,
+      "max": 90,
+      "description": "Execute threshold % (unset = jsonc `execute_threshold_percentage`)."
+     }
+    },
+    "9443": {
+     "type": "number",
+     "meta": {
+      "min": 20,
+      "max": 90
+     }
+    },
+    "9444": {
+     "type": "string",
+     "meta": {}
+    },
+    "9445": {
+     "type": "dict",
+     "meta": {
+      "default": {},
+      "description": "Per-model execute threshold % (`provider/model` \u2192 %); merged over jsonc per-model keys."
+     },
+     "inner": 9443,
+     "sKey": 9444
+    },
+    "9446": {
+     "type": "number",
+     "meta": {
+      "step": 1,
+      "min": 4000,
+      "max": 1000000,
+      "description": "Protected token floor (unset = jsonc `protected_tokens` / derived default)."
+     }
+    },
+    "9447": {
+     "type": "object",
+     "meta": {
+      "default": {}
+     },
+     "dict": {
+      "enabled": 9439,
+      "historianModel": 9440,
+      "historianAwaitAtTurnEndMs": 9441,
+      "executeThresholdPercentage": 9442,
+      "executeThresholdByModel": 9445,
+      "protectedTokens": 9446
+     }
+    }
+   }
+  },
+  "value": {
+   "executeThresholdByModel": {}
+  },
+  "base": {
+   "executeThresholdByModel": {}
+  },
+  "user": {},
+  "applies": "live",
+  "secrets": [],
+  "revision": 0
+ }
+]

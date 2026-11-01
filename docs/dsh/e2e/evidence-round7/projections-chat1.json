@@ -1,0 +1,103 @@
+{
+ "agentPreset": {
+  "ver": 1,
+  "seq": 46,
+  "val": "standard"
+ },
+ "tokenUsage": {
+  "ver": 2,
+  "seq": 46,
+  "val": {
+   "totals": {
+    "uncachedInputTokens": 14201,
+    "outputTokens": 620,
+    "cacheReadTokens": 25984,
+    "cacheWriteTokens": 0
+   },
+   "last": {
+    "turn": 1,
+    "step": 3,
+    "buckets": {
+     "uncachedInputTokens": 568,
+     "outputTokens": 136,
+     "cacheReadTokens": 13184,
+     "cacheWriteTokens": 0
+    }
+   }
+  }
+ },
+ "magicContextPressure": {
+  "ver": 1005,
+  "seq": 46,
+  "val": {
+   "inner": {
+    "surfaceTokens": 4264,
+    "contextWindow": 24000,
+    "pressureTokens": 13752,
+    "sampledSurfaceTokens": 4122
+   },
+   "provider": "opencode-go",
+   "model": "deepseek-v4.1-flash",
+   "agentPreset": "standard"
+  }
+ },
+ "contextBreakdown": {
+  "ver": 6,
+  "seq": 46,
+  "val": {
+   "systems": [
+    {
+     "seq": 7,
+     "tokens": 2865
+    }
+   ],
+   "surfaceTokens": 4264,
+   "breakdown": {
+    "systemTokens": 2865,
+    "toolsTokens": 10056,
+    "messageTokens": 1399
+   }
+  }
+ },
+ "modelSelection": {
+  "ver": 2,
+  "seq": 46,
+  "val": {
+   "lastUsed": {
+    "provider": "opencode-go",
+    "model": "deepseek-v4.1-flash"
+   },
+   "pending": null
+  }
+ },
+ "_rowKeys": [
+  "agentPreset",
+  "contextBreakdown",
+  "goal",
+  "harnessDevLegacyPrompt",
+  "imageLimits",
+  "inbox",
+  "llmRetry",
+  "magicContextPressure",
+  "modelSelection",
+  "permissions",
+  "plan",
+  "sandboxMode",
+  "sessionListMetadata",
+  "sessionStats",
+  "subagent",
+  "subagentCatalog",
+  "subagentModelSelectionPolicy",
+  "subagentTiming",
+  "timeContext",
+  "title",
+  "titleInput",
+  "todos",
+  "tokenUsage",
+  "turnBoundary",
+  "turnOutline",
+  "userQuestions",
+  "workingDirectory"
+ ],
+ "_hasNativeContextPressure": false
+}
