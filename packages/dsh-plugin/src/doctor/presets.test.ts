@@ -189,3 +189,70 @@ describe("selection helpers", () => {
     expect(scanPresetRow({ id: "preset-x", config: { plugins: [{ id: "persona" }] } })).toContain("compaction group row missing");
   });
 });
+
+describe("DSH settings writer vs the managed block (round 7, seen on real 0.2.1-rc.5)", () => {
+  const ANCHOR = /# dsh-magic-context: edit anchor[^\n]*\n- id: magic-host\n/;
+
+  it("a row DSH appended INSIDE the block is a warn (not stale); setup moves it out and keeps it", async () => {
+    await withWeb(async ({ dshHome, installDir, dir, root }) => {
+      const opts = { dshHome, dshInstallDir: installDir, env: env(root) };
+      expect((await runDshSetup(["--preset", "standard"], opts)).exitCode).toBe(0);
+      const path = join(dir, "cordis.patch.yml");
+      // Reproduce the pre-anchor file + what dsh-config-editor did on the
+      // web preview-notice ack: `document.add` before the trailing end marker.
+      const before = readFileSync(path, "utf8").replace(ANCHOR, "");
+      const foreignRow =
+        '- id: ui-settings-general\n  name: "@deepseek-ai/dsh-client-ui-settings-general"\n  config:\n    welcomeNoticeVersion: 2026-09-28.1\n\n';
+      const polluted = before.replace("# <<< dsh-magic-context <<<", `${foreignRow}# <<< dsh-magic-context <<<`);
+      await Bun.write(path, polluted);
+
+      const doctor = await runDshDoctor([], { dshHome, dshInstallDir: installDir, directory: root, env: env(root) });
+      const wiring = doctor.checks.find((check) => check.id === "profile-wiring.web");
+      expect(wiring?.status).toBe("warn");
+      expect(wiring?.detail).toContain("ui-settings-general");
+
+      expect((await runDshSetup([], opts)).exitCode).toBe(0);
+      const fixed = readFileSync(path, "utf8");
+      expect(readManagedBlock(fixed)).not.toContain("ui-settings-general");
+      const rows = parseEntryListYaml(fixed);
+      expect(rows.find((row) => row.id === "ui-settings-general")).toEqual({
+        id: "ui-settings-general",
+        name: "@deepseek-ai/dsh-client-ui-settings-general",
+        config: { welcomeNoticeVersion: "2026-09-28.1" },
+      });
+      const after = await runDshDoctor([], { dshHome, dshInstallDir: installDir, directory: root, env: env(root) });
+      expect(after.checks.find((check) => check.id === "profile-wiring.web")?.status).toBe("ok");
+    });
+  });
+
+  it("a block re-serialised by DSH (different quoting) is still up to date", async () => {
+    await withWeb(async ({ dshHome, installDir, dir, root }) => {
+      expect((await runDshSetup(["--preset", "standard"], { dshHome, dshInstallDir: installDir, env: env(root) })).exitCode).toBe(0);
+      const path = join(dir, "cordis.patch.yml");
+      const text = readFileSync(path, "utf8");
+      const requoted = text.replace(/'(@deepseek-ai\/[^']+)'/g, '"$1"');
+      expect(requoted).not.toBe(text);
+      await Bun.write(path, requoted);
+      const doctor = await runDshDoctor([], { dshHome, dshInstallDir: installDir, directory: root, env: env(root) });
+      const wiring = doctor.checks.find((check) => check.id === "profile-wiring.web");
+      expect(wiring?.status).toBe("ok");
+      expect(wiring?.detail).toContain("re-serialised");
+    });
+  });
+
+  it("a missing edit anchor is a warn; setup restores it; disabling Magic removes it with the block", async () => {
+    await withWeb(async ({ dshHome, installDir, dir, root }) => {
+      const opts = { dshHome, dshInstallDir: installDir, env: env(root) };
+      expect((await runDshSetup(["--preset", "standard"], opts)).exitCode).toBe(0);
+      const path = join(dir, "cordis.patch.yml");
+      expect(readFileSync(path, "utf8")).toMatch(ANCHOR);
+      await Bun.write(path, readFileSync(path, "utf8").replace(ANCHOR, ""));
+      const doctor = await runDshDoctor([], { dshHome, dshInstallDir: installDir, directory: root, env: env(root) });
+      expect(doctor.checks.find((check) => check.id === "profile-wiring.web")?.status).toBe("warn");
+      await runDshSetup([], opts);
+      expect(readFileSync(path, "utf8")).toMatch(ANCHOR);
+      await runDshSetup(["--disable-preset", "standard"], opts);
+      expect(parseEntryListYaml(readFileSync(path, "utf8"))).toEqual([]);
+    });
+  });
+});

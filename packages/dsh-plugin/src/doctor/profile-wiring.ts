@@ -4,12 +4,14 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { load as yamlLoad, dump as yamlDump } from "js-yaml";
 import { entryListSchema } from "@deepseek-ai/cordis-plugin-include";
 import { readJsoncFile } from "@magic-context/core/shared/jsonc-parser";
 import {
   BASE_BUNDLE,
   FLAT_PRESET_NAME,
+  SELECTION_MARKER,
   MAGIC_PRESET_ID,
   WEB_APP_BUNDLE,
   buildMagicEntries,
@@ -86,6 +88,42 @@ export function applySelectionChange(
 export function parseEntryListYaml(text: string): Record<string, unknown>[] {
   const parsed = yamlLoad(text, { schema: entryListSchema });
   return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
+}
+
+/** How an on-disk managed block relates to the planned rows. */
+export interface ManagedBlockComparison {
+  /** Byte-equal to the rendered plan. */
+  readonly textEqual: boolean;
+  /** The block's own rows (foreign rows removed) equal the plan semantically. */
+  readonly upToDate: boolean;
+  /** Rows inside the block that setup never writes (appended by DSH's settings writer). */
+  readonly foreign: Record<string, unknown>[];
+}
+
+/**
+ * Compare a managed block with the planned body SEMANTICALLY: DSH's settings
+ * writer re-serialises the whole file (quoting, folding) and may append foreign
+ * rows inside the block, neither of which makes the Magic wiring stale.
+ */
+export function compareManagedBlock(block: string, planBody: string): ManagedBlockComparison {
+  if (block === planBody) return { textEqual: true, upToDate: true, foreign: [] };
+  // The selection marker is a comment: the YAML rows cannot carry it.
+  const markerOf = (text: string) => text.split("\n").find((line) => line.startsWith(SELECTION_MARKER));
+  if (markerOf(block) !== markerOf(planBody)) return { textEqual: false, upToDate: false, foreign: [] };
+  let rows: Record<string, unknown>[];
+  let planRows: Record<string, unknown>[];
+  try {
+    rows = parseEntryListYaml(block);
+    planRows = parseEntryListYaml(planBody);
+  } catch {
+    return { textEqual: false, upToDate: false, foreign: [] };
+  }
+  const owned = new Set(planRows.map((row) => row.id).filter((id): id is string => typeof id === "string"));
+  const foreign = rows.filter(
+    (row) => row !== null && typeof row === "object" && !("insert" in row) && typeof row.id === "string" && !owned.has(row.id),
+  );
+  const own = rows.filter((row) => !foreign.includes(row));
+  return { textEqual: false, upToDate: isDeepStrictEqual(own, planRows), foreign };
 }
 
 export function dumpEntryListYaml(entries: readonly unknown[]): string {

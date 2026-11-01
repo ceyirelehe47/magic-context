@@ -24,6 +24,8 @@ import {
   readJsoncFile,
 } from "@magic-context/core/shared/jsonc-parser";
 import {
+  finishManagedLayer,
+  hasItemAfterManagedBlock,
   mergeManagedBlock,
   readManagedBlock,
   removeManagedBlock,
@@ -42,6 +44,7 @@ import {
 } from "./env";
 import { listProfiles } from "./doctor";
 import {
+  compareManagedBlock,
   dumpEntryListYaml,
   parseEntryListYaml,
   planProfileWiring,
@@ -304,10 +307,25 @@ export async function runDshSetup(
   if (!failed && plan !== undefined && plan.blockBody !== undefined) {
     try {
       const existing = existsSync(plan.patchPath) ? readFileSync(plan.patchPath, "utf8") : undefined;
-      if (existing !== undefined && readManagedBlock(existing) === plan.blockBody) {
+      const currentBlock = existing === undefined ? undefined : readManagedBlock(existing);
+      const comparison = currentBlock === undefined ? undefined : compareManagedBlock(currentBlock, plan.blockBody);
+      if (
+        existing !== undefined &&
+        comparison !== undefined &&
+        comparison.upToDate &&
+        comparison.foreign.length === 0 &&
+        hasItemAfterManagedBlock(existing)
+      ) {
         steps.push({ status: "ok", title: "Profile patch layer", detail: `${plan.patchPath} already up to date (unchanged).` });
       } else {
-        const merged = mergeManagedBlock(existing, plan.blockBody);
+        // Rows DSH's settings writer appended INSIDE the block are moved out
+        // (right after the end marker), never dropped; an edit anchor keeps
+        // later settings edits outside the block.
+        const foreign = comparison?.foreign ?? [];
+        const merged = finishManagedLayer(
+          mergeManagedBlock(existing, plan.blockBody),
+          foreign.length > 0 ? dumpEntryListYaml(foreign) : undefined,
+        );
         // Round-trip parse: never leave a profile layer the loader cannot read.
         parseEntryListYaml(merged);
         if (dryRun) {

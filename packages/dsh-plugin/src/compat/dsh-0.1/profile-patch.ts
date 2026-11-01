@@ -314,9 +314,66 @@ export function removeManagedBlock(existing: string): string {
   const begin = existing.indexOf(MANAGED_BEGIN);
   const end = existing.indexOf(MANAGED_END);
   if (begin < 0 || end <= begin) return existing;
-  const rest = (existing.slice(0, begin) + existing.slice(end + MANAGED_END.length).replace(/^\n/, "")).replace(/\n*$/, "\n");
+  // The edit anchor goes with the block; an anchor the settings page has since
+  // filled (`config:` lines below it) is the user's and stays (comment dropped).
+  const after = existing
+    .slice(end + MANAGED_END.length)
+    .replace(/^\n/, "")
+    .replace(`${EDIT_ANCHOR_COMMENT}\n${EDIT_ANCHOR_ROW}\n`, (match, offset: number, whole: string) =>
+      /^[ \t]+\S/.test(whole.slice(offset + match.length)) ? `${EDIT_ANCHOR_ROW}\n` : "",
+    )
+    .replace(`${EDIT_ANCHOR_COMMENT}\n`, "");
+  const rest = (existing.slice(0, begin) + after).replace(/\n*$/, "\n");
   const yamlLines = rest.split("\n").filter((line) => line.trim() !== "" && !line.trimStart().startsWith("#"));
   return yamlLines.length === 0 ? `${rest.replace(/\n*$/, "\n")}[]\n` : rest;
+}
+
+/**
+ * Edit anchor kept AFTER the managed block.
+ *
+ * DSH's own settings writer (`@deepseek-ai/dsh-config-editor`, behind
+ * `settings.mutate`) round-trips the profile `cordis.patch.yml` through the
+ * `yaml` Document API: an edit of a row that is not in the file is
+ * `document.add`ed to the END of the sequence — before a trailing comment. With
+ * the managed block last in the file, that put foreign rows (e.g. the web
+ * preview-notice ack `ui-settings-general`, or our own `magic-host` settings)
+ * INSIDE the block (verified on 0.2.1-rc.5, round 7). A YAML item after the end
+ * marker keeps every later append outside: an id-only `magic-host` row is a
+ * no-op for the loader and is also the row the editor fills when the Magic
+ * Context settings page saves (it matches `findLastIndex` on id with no name).
+ */
+export const EDIT_ANCHOR_COMMENT =
+  "# dsh-magic-context: edit anchor — keeps DSH settings edits outside the managed block above (no-op row).";
+export const EDIT_ANCHOR_ROW = "- id: magic-host";
+
+/** True when at least one YAML list item follows the managed block. */
+export function hasItemAfterManagedBlock(text: string): boolean {
+  const end = text.indexOf(MANAGED_END);
+  if (end < 0) return true;
+  return text
+    .slice(end + MANAGED_END.length)
+    .split("\n")
+    .some((line) => line.startsWith("-"));
+}
+
+/**
+ * Place `afterBlock` (already-rendered YAML list items, e.g. foreign rows moved
+ * out of the block) right after the end marker, then make sure an item follows
+ * the block (edit anchor).
+ */
+export function finishManagedLayer(text: string, afterBlock?: string): string {
+  const end = text.indexOf(MANAGED_END);
+  if (end < 0) return text;
+  const cut = end + MANAGED_END.length;
+  let next = text;
+  if (afterBlock !== undefined && afterBlock.trim() !== "") {
+    const tail = text.slice(cut).replace(/^\n/, "");
+    next = `${text.slice(0, cut)}\n${afterBlock.trimEnd()}\n${tail}`;
+  }
+  if (!hasItemAfterManagedBlock(next)) {
+    next = `${next.replace(/\n*$/, "\n")}${EDIT_ANCHOR_COMMENT}\n${EDIT_ANCHOR_ROW}\n`;
+  }
+  return next;
 }
 
 /** Extract the managed block body (undefined when absent). */

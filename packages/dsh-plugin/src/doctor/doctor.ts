@@ -39,10 +39,11 @@ import {
   resolveDshHome,
   stringFlag,
 } from "./env";
-import { parseEntryListYaml, planProfileWiring } from "./profile-wiring";
+import { compareManagedBlock, parseEntryListYaml, planProfileWiring } from "./profile-wiring";
 import {
   MAGIC_METER_ROW,
   STOCK_TOKEN_METER_ROW_ID,
+  hasItemAfterManagedBlock,
   readManagedBlock,
 } from "../compat/dsh-0.1/profile-patch";
 import { selectionChangeOf } from "./setup";
@@ -386,12 +387,27 @@ export async function runDshDoctor(
         detail = hand
           ? `${plan.patchPath}: Magic rows present but not in the setup-managed block (hand-written layer).`
           : `${plan.patchPath}: no Magic rows — compaction-basic still active, the Magic agent plane is not mounted in any preset.`;
-      } else if (block !== plan.blockBody) {
-        status = "fail";
-        detail = `${plan.patchPath}: managed block is stale (differs from the rows derived from ${plan.scannedFile} for presets ${plan.selection.join(", ")}).`;
       } else {
-        detail =
-          `${plan.patchPath}: managed block up to date; layout ${plan.layout}; stock ${plan.scannedFile} re-scanned OK.`;
+        const comparison = plan.blockBody === undefined ? undefined : compareManagedBlock(block, plan.blockBody);
+        if (comparison === undefined || !comparison.upToDate) {
+          status = "fail";
+          detail = `${plan.patchPath}: managed block is stale (differs from the rows derived from ${plan.scannedFile} for presets ${plan.selection.join(", ")}).`;
+        } else if (comparison.foreign.length > 0) {
+          status = "warn";
+          detail =
+            `${plan.patchPath}: Magic rows up to date, but ${comparison.foreign.length} foreign row(s) ` +
+            `(${comparison.foreign.map((row) => String(row.id)).join(", ")}) were written INSIDE the managed block ` +
+            "(DSH settings edits append at the end of the file); they still apply.";
+        } else if (!hasItemAfterManagedBlock(text)) {
+          status = "warn";
+          detail =
+            `${plan.patchPath}: managed block up to date, but nothing follows it — the next DSH settings edit ` +
+            "would be appended inside the block (no edit anchor).";
+        } else {
+          detail =
+            `${plan.patchPath}: managed block up to date${comparison.textEqual ? "" : " (re-serialised by DSH settings; same rows)"}; ` +
+            `layout ${plan.layout}; stock ${plan.scannedFile} re-scanned OK.`;
+        }
       }
       checks.push({
         id: `profile-wiring.${name}`,

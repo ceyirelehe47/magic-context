@@ -94,6 +94,8 @@ describe("dsh-magic-context setup (DSH 0.2 profile layer)", () => {
             { id: "magic-meter", name: "dsh-magic-context/meter", config: { flat: true } },
           ],
         },
+        // edit anchor after the block (keeps DSH settings edits outside it)
+        { id: "magic-host" },
       ]);
       expect(readManagedBlock(patchText)?.startsWith("# magic-presets: root\n")).toBe(true);
 
@@ -123,8 +125,9 @@ describe("dsh-magic-context setup (DSH 0.2 profile layer)", () => {
       });
       expect(report.exitCode).toBe(0);
       const rows = parseEntryListYaml(readFileSync(join(dir, "cordis.patch.yml"), "utf8"));
-      expect(rows).toHaveLength(2);
+      expect(rows).toHaveLength(3);
       expect(rows[0]).toEqual({ id: "token-meter", disabled: true });
+      expect(rows[2]).toEqual({ id: "magic-host" });
       const inserted = rows[1].insert as Row[];
       expect(inserted[1]).toEqual({ id: "magic-meter", name: "dsh-magic-context/meter", config: { magicPresets: ["magic-standard"] } });
       const preset = inserted[0];
