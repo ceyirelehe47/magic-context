@@ -1,0 +1,22 @@
+# DSH session events (user/assistant only), text truncated to 90 chars; seq = DSH event seq
+4 turn/start {'turn': 1}
+6 step/start {'turn': 1, 'step': 1}
+8 user/message src=magic-context '<session-history></session-history>'
+9 user/message src=magic-context '<session-history-since>(no new content since last materialization)</session-history-since>'
+10 user/message src=user '§1§ Turn 1. Do not call any tools. In about 250 words, explain what a bloom filter is. End'
+11 user/message src=runtime-context 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurr'
+17 assistant/message src=model '§2§ A Bloom filter is a probabilistic data structure for answering one question very cheap'
+22 turn/start {'turn': 2}
+24 user/message src=magic-context '§3§ A Bloom filter is a probabilistic data structure for answering one question very cheap'
+25 user/message src=magic-context '§2§ Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n'
+26 step/start {'turn': 2, 'step': 1}
+27 user/message src=user '§4§ Turn 2. Do not call any tools. In about 200 words, explain counting bloom filters. End'
+28 user/message src=runtime-context 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurr'
+30 assistant/message src=model '§5§ A counting Bloom filter fixes the main weakness of the basic version: the inability to'
+35 turn/start {'turn': 3}
+37 user/message src=magic-context '§6§ A counting Bloom filter fixes the main weakness of the basic version: the inability to'
+38 user/message src=magic-context '§5§ Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n'
+39 step/start {'turn': 3, 'step': 1}
+40 user/message src=user '§7§ Turn 3. Do not call any tools. In two sentences, say when a cuckoo filter beats a bloo'
+41 user/message src=runtime-context 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurr'
+43 assistant/message src=model '§8§ Cuckoo filters win when you need to delete specific items, since a plain Bloom filter '

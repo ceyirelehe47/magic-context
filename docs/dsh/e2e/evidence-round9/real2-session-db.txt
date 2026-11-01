@@ -1,0 +1,12 @@
+key dsh:<home>:session-4f04bf6d-1c75-444b-aef7-9381509d36b0
+tags total 7 message 7 tool 0 bare-id message tags 0
+message_id keys distinct 7 dup keys 0
+1 message active e1e5b703:p0
+2 message active 21991cd0:p0
+3 message active 2c1b639d:p0
+4 message active 7dc1c236:p0
+5 message active 0a3a4f33:p0
+6 message active 7dc1eea0:p0
+7 message active 8fecc437:p0
+compartments 2
+compartment rows [{"sequence":0,"start_message":1,"end_message":2,"t":"Session-history control markers only (no new content)"},{"sequence":1,"start_message":3,"end_message":3,"t":"Turn 1 benchmark prompt: explain bloom filters, no tools all"}]

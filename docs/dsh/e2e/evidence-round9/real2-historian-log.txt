@@ -1,0 +1,4 @@
+e2e/logs/run-4.log:[magic-context] historian trigger: pct=45 threshold=12 budget=5000 window=24000 fires=true
+e2e/logs/run-5.log:[magic-context] historian trigger: pct=45 threshold=12 budget=5000 window=24000 fires=true
+e2e/logs/run-5.log:[magic-context] historian trigger: pct=47 threshold=12 budget=5000 window=24000 fires=true
+e2e/logs/run-6.log:[magic-context] historian trigger: pct=47 threshold=12 budget=5000 window=24000 fires=true

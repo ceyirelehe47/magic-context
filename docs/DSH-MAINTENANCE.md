@@ -498,16 +498,25 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     `docs/dsh/e2e/evidence-round9/unit-*-red-*.txt`) and real rc.5 (a new
     session through two historian compartments: every message tag a unique
     `:p0` key, no bare rows, the model lists six distinct numbers; the fold
-    on a copy of the real pre-fix DB removes all 9 bare rows in 4 sessions).
-    Remaining: (1) the model-written prefix stays as typed in the RAW
-    assistant event (the surface copy carries the core number), so a UI that
-    renders raw events can still show a wrong guess, e.g. after an unfolded
-    tool call where the new input is not pre-tagged; (2) a pending drop on a
-    legacy bare tag of a folded tool-call assistant text is discarded when the
-    session is already on replaced surface copies (no source mapping left);
-    (3) legacy sessions created under the `standard` preset could not be
-    resumed headless (one-shot runner refuses that preset), so the fold was
-    verified on a DB copy, not inside a resumed DSH session.
+    on a copy of the real pre-fix DB removes all 9 bare rows in 4 sessions;
+    a second real session on 7471bfd42 shows the new prompt tagged on its
+    first call and 7 unique tags across two compartments).
+    Remaining: (1) the model writes its own "highest + 1" prefix, and it stays
+    as typed in the RAW assistant event (the surface copy carries the core
+    number). The runtime-context snapshot is added to the request AFTER the
+    pre-step, so it cannot be pre-tagged; it gets the next number on the
+    following pass, which is the number the model already used for its reply
+    (real run 2: raw reply `§2§` and runtime-context copy `§2§`; `§5§`/`§5§`).
+    What the model sees on the surface stays unique. A UI that renders raw
+    assistant events can still show that pair. One option: leave runtime-context
+    snapshots out of tagging, like the knowledge baseline;
+    (2) after an unfolded tool call the step's new input is not pre-tagged
+    (its ordinals are unknown); (3) on a session that already runs on replaced
+    surface copies, a pending drop on a legacy bare tag of a folded tool-call
+    assistant text is discarded (no source mapping is left); (4) pre-fix
+    sessions were created under the `standard` preset, which the one-shot runner
+    cannot resume, so the fold was verified on a copy of the real DB, not
+    inside a resumed DSH session.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

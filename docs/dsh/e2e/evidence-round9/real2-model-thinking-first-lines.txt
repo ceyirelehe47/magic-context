@@ -1,0 +1,3 @@
+"thinking","text":"The user asks a straightforward explanation, no tools. Need to start reply with §1§? Wait, the instruction says start each reply with §N§ where N is one more than highest tag visible. The user message is §1§. So my reply
+"thinking","text":"The user asks for ~200 words on counting Bloom filters, no tools. Start with §4§? Wait, tag numbering: highest tag visible is §4§ (the user message). So my reply starts with §5§.\n\nLet me write ~200 words, end with TURN
+"thinking","text":"The user asks me to list every §N§ tag number I can currently see in this conversation with the first three words of the text it is attached to. Let me carefully enumerate the tags.\n\nTags visible on my desk:\n- §1§ Tur

@@ -1,0 +1,15 @@
+§8§ Cuckoo filters win when you need to delete specific items, since a plain Bloom filter cannot remove an entry without risking false negatives. They also win at low target false-positive rates (roughly under 1–3 percent), where storing short cuckoo fingerprints takes less space per item than the bit array a Bloom filter would need for the same accuracy, and lookups touch a single bucket rather than k scattered bits.
+
+Tags visible, with the first three words of each attached text:
+
+- §1§ — "Turn 1. Do"
+- §2§ — "Current runtime context."
+- §3§ — "A Bloom filter"
+- §4§ — "Turn 2. Do"
+- §5§ — "Current runtime context."
+- §6§ — "A counting Bloom"
+- §7§ — "Turn 3. Do"
+
+(The untagged runtime-context block following tag 7 carries no §N§ tag, so it is not listed.)
+
+TURN3-DONE
