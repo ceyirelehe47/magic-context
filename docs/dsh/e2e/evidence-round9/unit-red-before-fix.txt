@@ -1,0 +1,52 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/context-plane-preview-tags.test.ts:
+136 |         .prepare("SELECT message_id, tag_number FROM tags WHERE session_id = ? AND type = 'message'")
+137 |         .all(KEY) as Array<{ message_id: string; tag_number: number }>;
+138 |       expect(rows.length).toBeGreaterThan(0);
+139 |       // 1. Only core positional keys — no bare-id rows.
+140 |       const bare = rows.filter((row) => !/:p\d+$/.test(row.message_id));
+141 |       expect(bare).toEqual([]);
+                         ^
+error: expect(received).toEqual(expected)
+
+- []
++ [
++   {
++     "message_id": "119e4cb9-e077-4c74-ab37-94bcc3072361",
++     "tag_number": 1,
++   },
++   {
++     "message_id": "857e3b18-4836-412d-ad22-db13207ac009",
++     "tag_number": 2,
++   },
++   {
++     "message_id": "d6baf8f7-e8f3-4ea8-b2a4-507f73cefc78",
++     "tag_number": 3,
++   },
++   {
++     "message_id": "51d0f43d-134c-4d53-a0a0-ca6e76b4d6e7",
++     "tag_number": 4,
++   },
++   {
++     "message_id": "da7946b1-8aea-43df-86b9-6709ca677201",
++     "tag_number": 5,
++   },
++   {
++     "message_id": "da137c18-6697-49ef-bb90-f8dcab549e69",
++     "tag_number": 6,
++   },
++ ]
+
+- Expected  - 1
++ Received  + 26
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:141:20)
+      at async withDb (/workspace/work/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:104:11)
+      at async <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/context-plane-preview-tags.test.ts:117:11)
+(fail) first-call §N§ preview uses the core tag key (one tag per message) > never allocates a bare-id tag and shows the same number the surface shows [1876.26ms]
+
+ 0 pass
+ 1 fail
+ 2 expect() calls
+Ran 1 test across 1 file. [4.71s]

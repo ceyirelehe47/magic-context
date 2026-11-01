@@ -32,6 +32,7 @@ import {
 import {
   deriveMutationPlan,
   readDshTranscript,
+  textTagContentIdsBySource,
   type PlanContext,
 } from "./transcript";
 import { updateSessionMeta } from "@magic-context/core/features/magic-context/storage";
@@ -324,16 +325,27 @@ function maybeFireHistorian(
 /**
  * First-call §N§ preview (Pi transform parity): the pre-step message list is
  * deep-frozen and the surface CAS replace only lands on the NEXT pass, so the
- * very first LLM call would otherwise see untagged messages. Assign tags via
- * the shared tagger (idempotent — later passes reuse the same tag numbers by
- * message id) and rebuild the frozen messages with the `§N§ ` prefix.
- * Never throws (fail-open); Magic-sourced messages (mc-kb / hints) are skipped.
+ * very first LLM call would otherwise see untagged messages. Rebuild the
+ * frozen messages with the `§N§ ` prefix of the tag the plan derivation
+ * (core `tagTranscript`) assigned to that text.
+ *
+ * READ-ONLY on the tag table: the number is looked up under the core content
+ * key (`${viewMessageId}:p${textOrdinal}`, see `textTagContentIdsBySource`),
+ * never assigned here. Pre-fix this function assigned its own tag under the
+ * BARE source message id while `tagTranscript` assigned another under
+ * `:p0`, so one message owned two tag numbers and the preview number could
+ * collide with what a different message showed after the surface replace
+ * (the round 7/8 duplicate `§N§` observation).
+ *
+ * Text with no tag under its core key (blank assistant framing, knowledge /
+ * skill-catalog baselines, Magic-sourced copies) passes through unchanged.
+ * Never throws (fail-open).
  */
-function previewTagPayloadMessages(
+export function previewTagPayloadMessages(
   db: Database,
   sessionId: string,
   messages: readonly unknown[],
-  log?: (message: string) => void,
+  contentIdsBySource: ReadonlyMap<string, ReadonlyMap<number, string>>,
 ): void {
   try {
     const tagger = createTagger();
@@ -346,30 +358,36 @@ function previewTagPayloadMessages(
         source?: { kind?: unknown };
       };
       const sourceKind = msg.source?.kind;
-      if (isMagicSource(msg.source) || sourceKind === "skill-catalog") {
+      if (
+        isMagicSource(msg.source) ||
+        sourceKind === "skill-catalog" ||
+        typeof msg.id !== "string" ||
+        !Array.isArray(msg.content)
+      ) {
         out.push(raw);
         continue;
       }
-      const textPart = Array.isArray(msg.content)
-        ? msg.content.find((part) => part !== null && typeof part === "object" && part.type === "text")
-        : undefined;
-      if (typeof msg.id !== "string" || msg.id.length === 0 || textPart === undefined) {
+      const keys = contentIdsBySource.get(msg.id);
+      if (keys === undefined) {
         out.push(raw);
         continue;
       }
-      if (tagger.getTag(sessionId, msg.id, "message") !== undefined) {
-        out.push(raw);
-        continue;
-      }
-      const text = typeof textPart.text === "string" ? textPart.text : "";
-      const tag = tagger.assignTag(sessionId, msg.id, "message", Buffer.byteLength(text), db);
-      if (tag === undefined || tag <= 0) {
-        out.push(raw);
-        continue;
-      }
-      const newPart = { ...textPart, text: `\u00a7${tag}\u00a7 ${text}` };
-      const newContent = (msg.content ?? []).map((part) => (part === textPart ? newPart : part));
-      out.push({ ...msg, content: newContent });
+      let textBlockIndex = 0;
+      let changed = false;
+      const newContent = msg.content.map((part) => {
+        if (part === null || typeof part !== "object" || part.type !== "text" || typeof part.text !== "string") {
+          return part;
+        }
+        const contentId = keys.get(textBlockIndex);
+        textBlockIndex += 1;
+        if (contentId === undefined) return part;
+        const tag = tagger.getTag(sessionId, contentId, "message");
+        if (tag === undefined || tag <= 0) return part;
+        if (part.text.startsWith(`\u00a7${tag}\u00a7 `)) return part;
+        changed = true;
+        return { ...part, text: `\u00a7${tag}\u00a7 ${part.text}` };
+      });
+      out.push(changed ? { ...msg, content: newContent } : raw);
     }
     (messages as unknown[]).length = 0;
     (messages as unknown[]).push(...out);
@@ -445,8 +463,6 @@ export async function runContextPlaneStep(
     let agentDropsApplied = false;
 
     if (deps.config?.enabled !== false) {
-      // 首轮 §N§ 预览：本次调用即可见（Pi transform 语义）；幂等。
-      previewTagPayloadMessages(db, canonicalSessionId, payload.messages, deps.log);
       const view = readDshTranscript({
         session: {
           events: sessionEvents(agent.session),
@@ -460,6 +476,15 @@ export async function runContextPlaneStep(
         protection,
         heuristicCleanup: deps.heuristicCleanup,
       } satisfies PlanContext);
+      // 首轮 §N§ 预览：本次调用即可见（Pi transform 语义）。必须在
+      // deriveMutationPlan（core tagTranscript 分配标签）之后、且只按 core 的
+      // `${id}:pN` 键只读查询——同一条消息只有一个标签号。
+      previewTagPayloadMessages(
+        db,
+        canonicalSessionId,
+        payload.messages,
+        textTagContentIdsBySource(view),
+      );
       if (plan !== null) {
         surfaceRewritten = true;
         agentDropsApplied = plan.ops.some((op) => op.kind === "drops");

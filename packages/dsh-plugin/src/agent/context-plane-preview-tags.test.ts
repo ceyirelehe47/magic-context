@@ -1,0 +1,191 @@
+import { describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Session, SessionId } from "@deepseek-ai/dsh-session";
+import {
+  createAssistantMessage,
+  createToolResultMessage,
+  createUserMessage,
+  deriveEventMessage,
+  sessionEventAt,
+} from "../compat/dsh-0.1/session";
+import { createTestDb } from "../test-utils";
+import type { Database } from "@magic-context/core/shared/sqlite";
+import { createContextPlaneState, runContextPlaneStep, type ContextPlaneDeps } from "./context-plane";
+
+/**
+ * Regression for the round 7/8 duplicate `§N§` observation (DSH-MAINTENANCE
+ * known limitation 11): the first-call payload preview assigned a tag under
+ * the BARE message id while core `tagTranscript` assigned another under
+ * `${id}:p0`, so one message owned two tag numbers and the number the model
+ * saw on the first call differed from the one on the surface afterwards.
+ */
+
+const SESSION = "sess-preview";
+const KEY = `dsh:a1b2c3d4:${SESSION}`;
+
+function buildConversation() {
+  const session = Session.create(SessionId(SESSION));
+  const payload: unknown[] = [];
+  const push = (type: "user/message" | "assistant/message" | "tool/result", message: unknown) => {
+    session.append(
+      type,
+      type === "user/message" ? (message as never) : ({ turn: 1, step: 1, message } as never),
+      { surfaceOp: "append" },
+    );
+    payload.push(message);
+  };
+  const user1 = createUserMessage({ content: [{ type: "text", text: "hello" }], source: { kind: "user" } });
+  push("user/message", user1);
+  const assistant1 = createAssistantMessage({
+    content: [
+      { type: "text", text: "let me check" },
+      { type: "tool-call", id: "call-1", name: "read_file", arguments: '{"path":"a.ts"}' },
+    ],
+    provider: "deepseek",
+    model: "deepseek-chat",
+    source: { kind: "model" },
+  });
+  push("assistant/message", assistant1);
+  const tool1 = createToolResultMessage({
+    callId: "call-1",
+    content: [{ type: "text", text: "file contents" }],
+    isError: false,
+  });
+  push("tool/result", tool1);
+  const user2 = createUserMessage({ content: [{ type: "text", text: "thanks" }], source: { kind: "user" } });
+  push("user/message", user2);
+  const assistant2 = createAssistantMessage({
+    content: [{ type: "text", text: "done" }],
+    provider: "deepseek",
+    model: "deepseek-chat",
+    source: { kind: "model" },
+  });
+  push("assistant/message", assistant2);
+  const user3 = createUserMessage({
+    content: [{ type: "text", text: "turn three question" }],
+    source: { kind: "user" },
+  });
+  push("user/message", user3);
+  return { session, payload, ids: { user1: user1.id, assistant1: assistant1.id, user2: user2.id, assistant2: assistant2.id, user3: user3.id } };
+}
+
+function tagNumbersIn(text: string): number[] {
+  return [...text.matchAll(/\u00a7(\d+)\u00a7/g)].map((m) => Number(m[1]));
+}
+
+function textsOf(messages: readonly unknown[]): string[] {
+  const out: string[] = [];
+  for (const raw of messages) {
+    const content = (raw as { content?: Array<{ type?: string; text?: string }> }).content ?? [];
+    for (const part of content) {
+      if (part.type === "text" && typeof part.text === "string") out.push(part.text);
+    }
+  }
+  return out;
+}
+
+function surfaceTexts(session: Session): string[] {
+  const out: string[] = [];
+  for (const seq of session.surface.nodes) {
+    const event = sessionEventAt(session, seq);
+    const message = event ? deriveEventMessage(event) : undefined;
+    if (message) out.push(...textsOf([message]));
+  }
+  return out;
+}
+
+async function withDb(fn: (db: Database, dir: string) => Promise<void>): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), "dsh-magic-preview-"));
+  let db: Database | undefined;
+  try {
+    db = await createTestDb(join(dir, "context.db"));
+    await fn(db, dir);
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // already closed
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("first-call §N§ preview uses the core tag key (one tag per message)", () => {
+  it("never allocates a bare-id tag and shows the same number the surface shows", async () => {
+    await withDb(async (db, dir) => {
+      const { session, payload, ids } = buildConversation();
+      const deps: ContextPlaneDeps = {
+        host: {
+          ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }),
+          canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}`,
+        },
+        config: {},
+        log: () => {},
+      };
+      const state = createContextPlaneState();
+      await runContextPlaneStep(
+        state,
+        deps,
+        { agent: { id: session.id, session } as never, messages: payload as never },
+        async () => ({ reject: false, messages: [] }),
+      );
+
+      const rows = db
+        .prepare("SELECT message_id, tag_number FROM tags WHERE session_id = ? AND type = 'message'")
+        .all(KEY) as Array<{ message_id: string; tag_number: number }>;
+      expect(rows.length).toBeGreaterThan(0);
+      // 1. Only core positional keys — no bare-id rows.
+      const bare = rows.filter((row) => !/:p\d+$/.test(row.message_id));
+      expect(bare).toEqual([]);
+      const tagOf = new Map(rows.map((row) => [row.message_id, row.tag_number]));
+
+      // 2. Preview numbers equal the core key's tag (incl. the folded
+      //    tool-call assistant text, which core keys under the next user).
+      const previewTexts = textsOf(payload);
+      const expected: Array<[string, string]> = [
+        [`${ids.user1}:p0`, "hello"],
+        [`${ids.user2}:p0`, "let me check"],
+        [`${ids.user2}:p1`, "thanks"],
+        [`${ids.assistant2}:p0`, "done"],
+        [`${ids.user3}:p0`, "turn three question"],
+      ];
+      for (const [key, text] of expected) {
+        const tag = tagOf.get(key);
+        expect(tag).toBeDefined();
+        expect(previewTexts).toContain(`\u00a7${tag}\u00a7 ${text}`);
+      }
+
+      // 3. No number is shown on two different texts in the preview.
+      const previewNumbers = previewTexts.flatMap(tagNumbersIn);
+      expect(new Set(previewNumbers).size).toBe(previewNumbers.length);
+
+      // 4. The surface copies written by the plan carry the SAME numbers.
+      const surfaceNumbers = new Set(surfaceTexts(session).flatMap(tagNumbersIn));
+      for (const n of previewNumbers) expect(surfaceNumbers.has(n)).toBe(true);
+
+      // 5. A second pass (now on the replaced surface) allocates nothing new
+      //    and never shows a number twice.
+      const before = rows.length;
+      const payload2 = session.surface.nodes
+        .map((seq) => sessionEventAt(session, seq))
+        .map((event) => (event ? deriveEventMessage(event) : undefined))
+        .filter((m) => m !== undefined) as unknown[];
+      await runContextPlaneStep(
+        state,
+        deps,
+        { agent: { id: session.id, session } as never, messages: payload2 as never },
+        async () => ({ reject: false, messages: [] }),
+      );
+      const after = (
+        db.prepare("SELECT COUNT(*) AS n FROM tags WHERE session_id = ? AND type = 'message'").get(KEY) as {
+          n: number;
+        }
+      ).n;
+      expect(after).toBe(before);
+      const shown = textsOf(payload2).flatMap(tagNumbersIn);
+      expect(new Set(shown).size).toBe(shown.length);
+    });
+  });
+});

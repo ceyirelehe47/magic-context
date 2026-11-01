@@ -252,13 +252,36 @@ function parseToolArguments(raw: unknown): Record<string, unknown> {
   }
 }
 
+/**
+ * Where a view text part came from: the DSH source message id and the index of
+ * the block among that message's `{type:"text"}` blocks. Kept in a WeakMap (not
+ * on the part) so the parts — and therefore the view's `inputDigest` and every
+ * rendered replacement — stay byte-identical.
+ *
+ * Needed because the view folds messages (a tool-call assistant's text lands
+ * in the following user / synthetic user message), so the core text tag key
+ * `${viewMessageId}:p${textOrdinal}` cannot be derived from a source message
+ * alone. See {@link textTagContentIdsBySource}.
+ */
+const TEXT_PART_ORIGIN = new WeakMap<object, { sourceId: string; blockIndex: number }>();
+
+function textPart(text: string, sourceId: unknown, blockIndex: number): Record<string, unknown> {
+  const part = { type: "text", text };
+  if (typeof sourceId === "string" && sourceId.length > 0) {
+    TEXT_PART_ORIGIN.set(part, { sourceId, blockIndex });
+  }
+  return part;
+}
+
 /** User content blocks → `{type:"text", text}` parts; image/other blocks dropped (§9.9). */
-function userTextParts(content: unknown): unknown[] {
+function userTextParts(content: unknown, sourceId?: unknown): unknown[] {
   if (!Array.isArray(content)) return [];
   const parts: unknown[] = [];
+  let blockIndex = 0;
   for (const block of content) {
     if (!isRecord(block) || block.type !== "text" || typeof block.text !== "string") continue;
-    parts.push({ type: "text", text: block.text });
+    parts.push(textPart(block.text, sourceId, blockIndex));
+    blockIndex += 1;
   }
   return parts;
 }
@@ -278,10 +301,12 @@ function assistantParts(
   const content = message.content;
   if (!Array.isArray(content)) return [];
   const parts: unknown[] = [];
+  let textBlockIndex = 0;
   for (const block of content) {
     if (!isRecord(block)) continue;
     if (block.type === "text" && typeof block.text === "string") {
-      parts.push({ type: "text", text: block.text });
+      parts.push(textPart(block.text, message.id, textBlockIndex));
+      textBlockIndex += 1;
     } else if (block.type === "tool-call" && typeof block.id === "string") {
       const name = typeof block.name === "string" ? block.name : "unknown";
       if (typeof block.name === "string" && block.name.length > 0) {
@@ -593,7 +618,7 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
         parts: [
           ...(pendingAssistant?.parts ?? []),
           ...pendingParts,
-          ...userTextParts(record.content),
+          ...userTextParts(record.content, record.id),
         ],
         createdAt: timeOf(event) ?? null,
         version: seq >= 0 ? seq : null,
@@ -1083,6 +1108,44 @@ function buildRecordingTranscript(
     if (typeof raw.id === "string") byMessageId.set(raw.id, message);
   }
   return { transcript: new RecordingTranscript(messages), byMessageId };
+}
+
+/**
+ * The core text tag key of every taggable source text block in the view:
+ * `sourceMessageId → (textBlockIndex → "${viewMessageId}:p${textOrdinal}")`.
+ *
+ * This is exactly the contentId `tagTranscript` (core) passes to the tagger
+ * for that text (positional `:pN` over the VIEW message's text parts, after
+ * folding), and the same knowledge-baseline / skill-catalog exclusions as
+ * {@link buildRecordingTranscript}. Callers that show a §N§ number outside
+ * the plan (the first-call payload preview) must look tags up under these keys
+ * — never under the bare source id, which core never uses for text and which
+ * would allocate a second, different tag number for the same message.
+ */
+export function textTagContentIdsBySource(
+  view: DshTranscriptView,
+): Map<string, Map<number, string>> {
+  const out = new Map<string, Map<number, string>>();
+  for (const raw of view.messages) {
+    if (isKnowledgeBaselineMessage(raw)) continue;
+    if (isSkillCatalogBaselineMessage(raw)) continue;
+    if (typeof raw.id !== "string" || raw.id.length === 0) continue;
+    let textOrdinal = 0;
+    for (const part of raw.parts) {
+      if (!isRecord(part) || classifyRecordingPart(part) !== "text") continue;
+      const origin = TEXT_PART_ORIGIN.get(part);
+      if (origin !== undefined) {
+        let byBlock = out.get(origin.sourceId);
+        if (byBlock === undefined) {
+          byBlock = new Map();
+          out.set(origin.sourceId, byBlock);
+        }
+        byBlock.set(origin.blockIndex, `${raw.id}:p${textOrdinal}`);
+      }
+      textOrdinal += 1;
+    }
+  }
+  return out;
 }
 
 /**
