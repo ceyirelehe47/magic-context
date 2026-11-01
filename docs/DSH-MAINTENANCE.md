@@ -473,19 +473,41 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     (then grey at 58 % against 65 %).
     The popover's threshold rows come from `magicContext/context` and update
     as soon as it is reopened.
-11. **Duplicate `§N§` prefixes seen twice on real rc.5, not root-caused.**
-    Round 7 showed a repeated `§10§`; round 8 reproduced the pattern in a
-    resumed session (~2 h idle, historian wrote its first compartment during
-    the step): the turn-1 assistant reply and the new turn-2 user prompt both
-    render `§2§` (`turnOutline`: `§2§ Hello from round 7 …` /
-    `§2§ Round 8 threshold check …`; next reply `§7§ OK`). The model answered
-    correctly. Tag numbers are UNIQUE per session in the DB, so this is
-    most likely an identity issue of the surface-replace copies (each replace
-    gives the message a new event id and the prefix is re-read from the
-    text) rather than a double allocation — inferred from the code, not
-    confirmed. Next step: dump the session's `tags` rows and the surface
-    `user/message` sources around the compartment write with
-    `scripts/e2e/inspect-db.ts`.
+11. **Duplicate `§N§` prefixes — root-caused and fixed in round 9
+    (10181d774, befdcea2e, 7471bfd42).** Root cause: the first-call payload
+    preview in `agent/context-plane.ts` allocated its own tag under the BARE
+    DSH message id (`tagger.assignTag(sessionId, msg.id, …)`), before and
+    independently of core `tagTranscript`, which keys text tags
+    `${viewMessageId}:p${n}`. One message therefore owned two numbers (round 9
+    pre-fix DB: bare `b43756fb`=1 / `b43756fb:p0`=3, bare `3717b6de`=2 /
+    `3717b6de:p0`=8), the model saw the bare number on the first call and the
+    `:p0` number afterwards, and its own "highest + 1" reply prefix landed on
+    a number the next message received (the round 7/8 `§2§` / `§10§` pairs).
+    Fix: (a) the preview runs after the plan derivation and only reads the
+    core key, mapped per source text block by `textTagContentIdsBySource`
+    (handles the tool-call assistant text folded into the next user message);
+    (b) the step's new input (prompt, runtime-context snapshot), which rc.5
+    appends to the log only after the pre-step, is pre-assigned under the
+    exact key core will use (`${id}:pN`), so the model's next number is right;
+    skipped after an unfolded tool call/result, where the ordinals are not
+    knowable; (c) old DBs: bare-id `message` rows are folded once per session
+    per process (`agent/legacy-tag-cleanup.ts`): row deleted, a still-pending
+    drop moved onto the core tag of the same text or discarded when there is
+    none; dropped status is not propagated; the counter never goes back.
+    Verified: unit tests (red on the old code, see
+    `docs/dsh/e2e/evidence-round9/unit-*-red-*.txt`) and real rc.5 (a new
+    session through two historian compartments: every message tag a unique
+    `:p0` key, no bare rows, the model lists six distinct numbers; the fold
+    on a copy of the real pre-fix DB removes all 9 bare rows in 4 sessions).
+    Remaining: (1) the model-written prefix stays as typed in the RAW
+    assistant event (the surface copy carries the core number), so a UI that
+    renders raw events can still show a wrong guess, e.g. after an unfolded
+    tool call where the new input is not pre-tagged; (2) a pending drop on a
+    legacy bare tag of a folded tool-call assistant text is discarded when the
+    session is already on replaced surface copies (no source mapping left);
+    (3) legacy sessions created under the `standard` preset could not be
+    resumed headless (one-shot runner refuses that preset), so the fold was
+    verified on a DB copy, not inside a resumed DSH session.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
