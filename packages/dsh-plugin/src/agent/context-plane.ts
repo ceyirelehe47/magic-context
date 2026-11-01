@@ -37,6 +37,7 @@ import {
 } from "./transcript";
 import { updateSessionMeta } from "@magic-context/core/features/magic-context/storage";
 import { checkDshCompartmentTrigger } from "./historian";
+import { foldLegacyBareMessageTags } from "./legacy-tag-cleanup";
 import { maybeNudgeChannels, scanSessionMetrics } from "./nudge";
 import { createTagger } from "@magic-context/core/features/magic-context/tagger";
 import { markNoteNudgeDelivered, onNoteTrigger, peekNoteNudgeText } from "@magic-context/core/hooks/magic-context/note-nudger";
@@ -144,6 +145,8 @@ export interface ContextPlaneState {
   readonly reconciled: Set<string>;
   /** Adapter tables already ensured for this process (idempotent init). */
   tablesInitialized: boolean;
+  /** sessionId → legacy bare-id §N§ tags already folded this process. */
+  readonly legacyTagsFolded: Set<string>;
 }
 
 export function createContextPlaneState(): ContextPlaneState {
@@ -151,6 +154,7 @@ export function createContextPlaneState(): ContextPlaneState {
     coordinator: createCoordinatorState(),
     reconciled: new Set(),
     tablesInitialized: false,
+    legacyTagsFolded: new Set(),
   };
 }
 
@@ -471,6 +475,22 @@ export async function runContextPlaneStep(
         },
         canonicalSessionId,
       });
+      const contentIdsBySource = textTagContentIdsBySource(view);
+      // 旧数据兼容：一次性折叠修复前预览写下的裸 id 标签（每进程每会话一次，
+      // 在 plan 之前，使被迁移的 pending drop 本轮即生效）。
+      if (!state.legacyTagsFolded.has(canonicalSessionId)) {
+        state.legacyTagsFolded.add(canonicalSessionId);
+        try {
+          const folded = foldLegacyBareMessageTags(db, canonicalSessionId, contentIdsBySource);
+          if (folded.removed.length > 0) {
+            deps.log?.(
+              `[magic-context] folded ${folded.removed.length} legacy bare-id §N§ tag(s) (retargeted ${folded.retargeted.length} pending op(s), discarded ${folded.discardedOps})`,
+            );
+          }
+        } catch {
+          // fail-open: legacy rows are inert for the plan; retry next process.
+        }
+      }
       const plan = deriveMutationPlan(view, {
         db,
         protection,
@@ -483,7 +503,7 @@ export async function runContextPlaneStep(
         db,
         canonicalSessionId,
         payload.messages,
-        textTagContentIdsBySource(view),
+        contentIdsBySource,
       );
       if (plan !== null) {
         surfaceRewritten = true;

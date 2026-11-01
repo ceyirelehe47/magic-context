@@ -1,0 +1,32 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/legacy-tag-cleanup.test.ts:
+182 |       const user1Core = tagRows(db).get(`${ids.user1}:p0`) as number;
+183 | 
+184 |       // New process (fresh state) → fold runs; tags never shown twice after.
+185 |       await step(createContextPlaneState(), deps, session, [...payload]);
+186 |       const rows = tagRows(db);
+187 |       expect([...rows.keys()].filter((k) => !k.includes(":"))).toEqual([]);
+                                                                     ^
+error: expect(received).toEqual(expected)
+
+- []
++ [
++   "bac46e85-3c96-4d69-bd36-521a7787bb39",
++   "44f81a44-797e-4cd3-8d8a-622cb203b8a1",
++   "db2d7a2d-1173-4448-bdd5-8c9058eec921",
++ ]
+
+- Expected  - 1
++ Received  + 5
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/legacy-tag-cleanup.test.ts:187:64)
+      at async withDb (/workspace/work/magic-context/packages/dsh-plugin/src/agent/legacy-tag-cleanup.test.ts:67:11)
+      at async <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/legacy-tag-cleanup.test.ts:172:11)
+(fail) legacy bare-id §N§ tags are folded once per session > the context plane runs the fold on the first pass of a process [599.11ms]
+
+ 0 pass
+ 1 filtered out
+ 1 fail
+ 5 expect() calls
+Ran 1 test across 1 file. [1412.00ms]
