@@ -120,8 +120,8 @@ function resolveUserConfigDirectory(options: CreatePromptSurfaceRuntimeOptions):
             options.directory ?? process.cwd(),
             options.harness === "omp"
                 ? "pi"
-                : options.harness === "opencode2"
-                  ? "opencode"
+                : options.harness === "opencode2" || options.harness === "dsh"
+                  ? "opencode" // DSH has no legacy config of its own; preserves pre-union runtime behavior
                   : options.harness,
         ).user.find((source) => existsSync(source.path));
         if (legacy) return dirname(legacy.path);

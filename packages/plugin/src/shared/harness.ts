@@ -15,12 +15,15 @@
  *   needed
  * - OpenCode 2 plugin: calls `setHarness("opencode2")` before opening the database
  * - Pi-compatible plugin: resolves the host and calls `setHarness("pi" | "omp")` before opening the database
+ * - DeepSeek Harness (DSH) adapter: calls `setHarness("dsh")` (via the
+ *   adapter-api `setDshHarness`) before opening the database. DSH owns no
+ *   OpenCode store and keeps its history in DSH session logs.
  *
  * NEVER read this from configuration or session state — it is a
  * boot-time constant per plugin instance. Cross-harness leakage is a
  * correctness bug, not a feature.
  */
-export type HarnessId = "opencode" | "opencode2" | "pi" | "omp";
+export type HarnessId = "opencode" | "opencode2" | "pi" | "omp" | "dsh";
 
 let currentHarness: HarnessId = "opencode";
 let harnessLocked = false;

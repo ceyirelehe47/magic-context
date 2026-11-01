@@ -6,6 +6,9 @@ import {
   setDshHarness,
   DSH_HARNESS,
 } from "./harness";
+import { join } from "node:path";
+import { getHarness, harnessOwnsOpenCodeStore, type HarnessId } from "@magic-context/core/shared/harness";
+import { getMagicContextTempDir } from "@magic-context/core/shared/data-path";
 
 describe("harness identity boundary", () => {
   it("locks the harness to 'dsh'", () => {
@@ -21,6 +24,15 @@ describe("harness identity boundary", () => {
 
   it("DSH_HARNESS is the exact runtime string", () => {
     expect(DSH_HARNESS).toBe("dsh");
+  });
+
+  it("is a first-class core HarnessId (no cast) with DSH-specific core branches", () => {
+    const id: HarnessId = DSH_HARNESS;
+    expect(getHarness()).toBe(id);
+    // DSH owns no OpenCode store (history lives in DSH session logs).
+    expect(harnessOwnsOpenCodeStore("dsh")).toBe(false);
+    // Per-harness temp/log/historian dirs keep the pre-existing `dsh` subtree.
+    expect(getMagicContextTempDir("dsh").endsWith(join("dsh", "magic-context"))).toBe(true);
   });
 });
 

@@ -1,13 +1,12 @@
 /**
  * Harness identity boundary for the DSH adapter.
  *
- * Magic Context's core declares a CLOSED `HarnessId = "opencode" | "pi"`
- * (packages/plugin/src/shared/harness.ts). The DSH port must not modify core
- * (project constraint), so this module is the single place that:
- *  1. declares the DSH harness identity as a runtime string "dsh";
- *  2. crosses the closed-union type boundary with an explicit, documented cast
- *     (runtime values are plain strings; the core persists them into TEXT
- *     columns and never runtime-switches on the unknown branch);
+ * Core's `HarnessId` (packages/plugin/src/shared/harness.ts) includes `"dsh"`
+ * since round 10 (type-only: the runtime value was already `"dsh"` through a
+ * cast here, so every row the DSH adapter ever wrote already carries
+ * `harness = 'dsh'` — no migration). This module:
+ *  1. declares the DSH harness identity as the runtime string "dsh";
+ *  2. locks it with core `setHarness` (no cast any more);
  *  3. derives the canonical Magic session key for a DSH session:
  *     `dsh:<home-hash>:<dsh-session-id>` (PLAN §2 SQLite row note), which is
  *     INVERTIBLE — the DSH-native session id is recoverable by parsing, so no
@@ -16,21 +15,17 @@
  * Call sites must invoke `setDshHarness()` before the first database write,
  * exactly like the Pi adapter calls `setHarness("pi")`.
  */
-import { setHarness, getHarness } from "@magic-context/core/shared/harness";
+import { setHarness, getHarness, type HarnessId } from "@magic-context/core/shared/harness";
 
 /** DSH harness identity as persisted into the shared SQLite `harness` column. */
 export const DSH_HARNESS = "dsh" as const;
 
-/**
- * Narrow the closed core union to the DSH string. This is the ONLY place the
- * type boundary is crossed; core code compiled against `HarnessId` never sees
- * the widening, and at runtime the value is an ordinary string.
- */
-export type DshHarnessId = "dsh";
+/** The DSH member of core's `HarnessId` union. */
+export type DshHarnessId = Extract<HarnessId, "dsh">;
 
 /** Lock the harness identity to "dsh" (idempotent; throws on a different value). */
 export function setDshHarness(): void {
-  setHarness(DSH_HARNESS as Parameters<typeof setHarness>[0]);
+  setHarness(DSH_HARNESS);
 }
 
 /** Current harness identity (runtime string). */
