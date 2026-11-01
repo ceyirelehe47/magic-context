@@ -44,7 +44,10 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		var react = require("react");
 		var jsxRuntime = require("react/jsx-runtime");
-		var clientRuntime = require("@deepseek-ai/dsh-client-runtime/client");
+		// `createSnapshotStore` lives in the framework's static module
+		// `@deepseek-ai/dsh-client-store` (0.2.1-rc.5 web boot `staticModules`);
+		// there is no `@deepseek-ai/dsh-client-runtime` package at 0.2.x.
+		var clientStore = require("@deepseek-ai/dsh-client-store");
 		var reactDom = null;
 		try {
 			reactDom = require("react-dom");
@@ -244,7 +247,7 @@ window.__ModuleLoader__.load({
 		/** Status snapshot store (hooks seat of the slot contract). */
 		function StatusController(connection) {
 			this.connection = connection;
-			this.store = clientRuntime.createSnapshotStore({ state: "idle", status: null, error: null });
+			this.store = clientStore.createSnapshotStore({ state: "idle", status: null, error: null });
 			this.refresh = this.refresh.bind(this);
 		}
 		StatusController.prototype.refresh = function (args) {

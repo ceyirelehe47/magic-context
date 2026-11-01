@@ -28,7 +28,7 @@ function loadClient() {
     required.push(id);
     if (id === "react") return React;
     if (id === "react/jsx-runtime") return JsxRuntime;
-    if (id === "@deepseek-ai/dsh-client-runtime/client") {
+    if (id === "@deepseek-ai/dsh-client-store") {
       return {
         createSnapshotStore: (initial: unknown) => {
           let value = initial;
@@ -54,6 +54,34 @@ const view = {
 };
 
 describe("client bundle", () => {
+  // `staticModules` of the 0.2.1-rc.5 web boot (dsh-web-frontend index-*.js
+  // `OZ()`): the only ids a third-party client bundle can `require`. A require
+  // outside this set throws inside the factory and the whole bundle is lost
+  // (round 7: `@deepseek-ai/dsh-client-runtime/client` does not exist at 0.2).
+  const WEB_STATIC_MODULES = new Set([
+    "react",
+    "react/jsx-runtime",
+    "react-dom",
+    "react-dom/client",
+    "@deepseek-ai/cordis",
+    "zod",
+    "@tanstack/react-virtual",
+    "@deepseek-ai/dsh-client-store",
+    "@deepseek-ai/dsh-client-ui-slots",
+    "@deepseek-ai/dsh-client-ui-primitives",
+    "@deepseek-ai/dsh-client-ui-dockkit",
+  ]);
+  it("only requires modules the rc.5 web boot provides statically", () => {
+    const { required } = loadClient();
+    expect(required.filter((id) => !WEB_STATIC_MODULES.has(id))).toEqual([]);
+    expect(required).toContain("@deepseek-ai/dsh-client-store");
+  });
+
+  it("declares only installed client inject targets (no dsh-client-runtime)", () => {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf8"));
+    expect(pkg.dsh.client.inject).not.toContain("@deepseek-ai/dsh-client-runtime");
+  });
+
   it("never requires @deepseek-ai/dsh-client-ui-primitives and registers its four slots", () => {
     const { mod, required } = loadClient();
     expect(required.some((id) => id.includes("ui-primitives"))).toBe(false);
