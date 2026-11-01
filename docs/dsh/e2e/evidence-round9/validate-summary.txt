@@ -1,6 +1,3 @@
-typecheck: tc-adapter rc=0, tc-dsh rc=0 (0 errors)
-tc-adapter rc=0
-tc-dsh rc=0
-adapter-api rc=0  14 pass  0 fail 
-dsh-plugin rc=0  373 pass  0 fail 
-contracts rc=0  98 pass  0 fail 
+HEAD 7471bfd42 (code) — typecheck: tc-adapter rc=0, tc-dsh rc=0 (0 errors)
+adapter-api 14 pass 0 fail; contracts:dsh 98 pass 0 fail
+dsh-plugin 375 pass 0 fail (= 370 baseline + 1 from 10181d774 + 2 legacy fold + 2 new-input preview); first full run also reported 1 unhandled 'disk I/O error' opening a test DB in host bootstrap (environment, JuiceFS); not reproduced in 2 isolated reruns of src/host+src/compat and 1 full rerun

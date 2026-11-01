@@ -1,0 +1,26 @@
+(pass) compat/dsh-0.1 session seams on DSH 0.2 > sessionEvents still accepts plain test doubles with an events array [1.63ms]
+(pass) compat/dsh-0.1 session seams on DSH 0.2 > Magic sources use the merge-extensible magic-context kind and recognise legacy kind:plugin [0.66ms]
+(pass) compat/dsh-0.1 session seams on DSH 0.2 > replaceSurfaceRange lands a branded startSeq/endSeq replace [1.45ms]
+(pass) compat/dsh-0.1 session seams on DSH 0.2 > promptTokensOf = input + cacheRead + cacheWrite of one call [0.19ms]
+
+# Unhandled error between tests
+-------------------------------
+2881 |             return opened;
+2882 |         } catch (error) {
+2883 |             if (db) closeQuietly(db);
+2884 |             const detail = getErrorMessage(error);
+2885 |             log(`[magic-context] storage fatal: failed to open ${dbPath}: ${detail}`);
+2886 |             throw new Error(
+                             ^
+error: [magic-context] storage unavailable: disk I/O error. Magic Context is disabled for this run; check log for details.
+      at <anonymous> (<work>/magic-context/packages/plugin/src/features/magic-context/storage-db.ts:2886:23)
+      at async openDatabaseAsync (<work>/magic-context/packages/plugin/src/features/magic-context/storage-db.ts:2905:22)
+      at async bootstrapDshStorage (<work>/magic-context/packages/dsh-plugin/src/host/bootstrap.ts:107:22)
+-------------------------------
+
+
+ 375 pass
+ 0 fail
+ 1 error
+ 1367 expect() calls
+Ran 375 tests across 41 files. [53.73s]
