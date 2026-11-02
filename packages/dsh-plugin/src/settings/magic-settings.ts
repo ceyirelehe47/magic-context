@@ -298,11 +298,16 @@ export function resolveEffectiveSettings(
           : { default: DEFAULT_EXECUTE_THRESHOLD };
     if (base.default === undefined) base.default = DEFAULT_EXECUTE_THRESHOLD;
     if (overrides.executeThresholdPercentage !== undefined) base.default = overrides.executeThresholdPercentage;
-    for (const [key, value] of Object.entries(byModel ?? {})) {
+    const dshKeys = byModel ?? {};
+    for (const [key, value] of Object.entries(dshKeys)) {
       base[key] = value;
-      // Accept both DSH-native and canonical spellings of the model key.
+      // Accept both DSH-native and canonical spellings of the model key. The
+      // canonical alias carries the DSH value even over a jsonc key of the same
+      // model (resolveThresholds tries the canonical spelling first, so a jsonc
+      // `deepseek/…` key would otherwise beat a DSH `deepseek-official/…`
+      // override); only an explicit DSH canonical key outranks the alias.
       const canonical = dshModelRefToCanonical(key);
-      if (canonical !== key && base[canonical] === undefined) base[canonical] = value;
+      if (canonical !== key && !Object.hasOwn(dshKeys, canonical)) base[canonical] = value;
     }
     executeThreshold = { value: base, source: "dsh" };
   }
