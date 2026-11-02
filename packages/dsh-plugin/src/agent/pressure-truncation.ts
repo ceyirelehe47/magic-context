@@ -135,7 +135,17 @@ export function truncateOutput(original: string, headChars: number, tailChars: n
   const omitted = tailStart - headEnd;
   const firstLine = lineOf(original, headEnd) + (original.charCodeAt(headEnd) === 10 ? 1 : 0);
   const lastLine = lineOf(original, tailStart) - 1;
-  const lines = lastLine >= firstLine ? ` (output lines ${firstLine}-${lastLine})` : "";
+  // A numbered listing (`N: …`, the DSH read tool) reports ITS numbers, so the
+  // model can re-read exactly the omitted range.
+  const omittedText = original.slice(headEnd, tailStart).replace(/^\n/, "");
+  const numbered = /^(\d+): /.exec(omittedText);
+  const lastNumbered = /(?:^|\n)(\d+): [^\n]*\n?$/.exec(omittedText);
+  const lines =
+    numbered !== null && lastNumbered !== null && Number(lastNumbered[1]) >= Number(numbered[1])
+      ? ` (numbered lines ${numbered[1]}-${lastNumbered[1]})`
+      : lastLine >= firstLine
+        ? ` (output lines ${firstLine}-${lastLine})`
+        : "";
   return (
     original.slice(0, headEnd) +
     `\n[… \u00a7${tagNumber}\u00a7 ${PRESSURE_TRUNCATION_MARKER} under context pressure: ${omitted} of ${original.length} characters omitted${lines}. ` +

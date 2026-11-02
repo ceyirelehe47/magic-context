@@ -229,6 +229,12 @@ describe("truncateOutput (pure)", () => {
     expect(a.startsWith("1: p line 1 ")).toBe(true);
     expect(a.endsWith("400: p line 400 " + "x".repeat(32))).toBe(true);
     expect(a).toContain("\u00a77\u00a7 truncated by Magic Context");
+    // numbered listing: the marker names the omitted line numbers of the listing
+    const m = /numbered lines (\d+)-(\d+)/.exec(a)!;
+    expect(a).toContain(`\n${Number(m[1]) - 1}: p line ${Number(m[1]) - 1} `);
+    expect(a).not.toContain(`\n${m[1]}: p line ${m[1]} `);
+    expect(a).not.toContain(`\n${m[2]}: p line ${m[2]} `);
+    expect(a).toContain(`\n${Number(m[2]) + 1}: p line ${Number(m[2]) + 1} `);
     expect(truncateOutput("short", 1440, 480, 7)).toBe("short");
     const emoji = "😀".repeat(3000);
     const e = truncateOutput(emoji, 1001, 501, 1);
