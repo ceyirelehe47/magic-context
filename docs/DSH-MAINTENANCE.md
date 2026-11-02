@@ -42,9 +42,9 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 8 re-run, 2026-11-01, DSH 0.2.1-rc.5, bun 1.4.4, filtered install above):
-`typecheck:dsh` **0 errors**, `adapter-api` **14 pass**, `dsh-plugin`
-**370 pass**, `contracts:dsh` **98 pass**, 0 fail everywhere. The filtered
+Baseline (round 13, 2026-11-02, DSH 0.2.1-rc.5, bun 1.4.4, filtered install above):
+`typecheck:dsh` **0 errors**, `adapter-api` **15 pass**, `dsh-plugin`
+**425 pass**, `contracts:dsh` **98 pass**, 0 fail everywhere. The filtered
 install is enough for a clean typecheck; nothing else has to be installed.
 
 ## Syncing with upstream
@@ -71,8 +71,9 @@ git remote add upstream https://github.com/cortexkit/magic-context.git
 git fetch upstream --tags
 git checkout -b dsh-sync/vX.Y.Z dsh-integration
 git rebase --onto vX.Y.Z $(git merge-base dsh-integration vX.Y.Z)
-# conflicts can only be in root package.json / bun.lock (the DSH layer touches
-# nothing else outside packages/adapter-api, packages/dsh-plugin, docs/, .github/)
+# conflicts can only be in the files listed under "上游 core 改动清单" below:
+# root package.json / bun.lock / README.md and three small core files in
+# packages/plugin (everything else is new: adapter-api, dsh-plugin, docs/, upstream-sync.yml)
 bun install --lockfile-only   # regenerate bun.lock if root/workspace deps moved
 bun run typecheck:dsh && bun run test:dsh && bun run contracts:dsh
 ```
@@ -102,7 +103,103 @@ All `@deepseek-ai/*` vocabulary is supposed to live behind
    pins every DSH interface shape the adapter relies on; a failing
    `Assert<…>` line names the exact contract that moved;
 3. fix the compat layer first, then call sites;
-4. `bun run test:dsh`, then a real-DSH smoke (see `docs/dsh/e2e/README.md`).
+4. `bun run test:dsh`, then a real-DSH smoke (see "E2E scripts (real DSH, Linux)" below; `docs/dsh/e2e/README.md` is the historical 0.1 harness).
+
+## 下游发行版（downstream distribution）
+
+`dsh-integration` 不是一次性移植，而是持续吸收官方 Magic Context 发布的下游发行版：
+core 原样来自上游 release tag，DSH 层（`packages/adapter-api`、`packages/dsh-plugin`、
+`docs/dsh`）叠加在上面。
+
+### 版本命名
+
+- 发行版版本：`<upstream>-dsh.N`，例如 `0.49.34-dsh.1`。`<upstream>` 是 core 所基于的
+  上游 tag（去掉 `v`），`N` 在同一上游版本上的每次 DSH 发布递增，换上游版本时重置为 1。
+  DSH 基线（当前 0.2.1-rc.5）写进发布说明，不进版本号。
+- git tag 用 `dsh/<upstream>-dsh.N`（例如 `dsh/0.49.34-dsh.1`）。**不要用 `v*` 或
+  `dashboard-v*`**：fork 里保留着上游的 `release.yml`（`push: tags: v*`）和
+  `dashboard-release.yml`（`dashboard-v*`），这类 tag 一推就会在 fork 上跑上游的发布流程。
+- `packages/dsh-plugin/package.json` 目前仍是 `0.2.0`；第一次正式打 `-dsh.N` 发行版时
+  把它改成同一个版本号（`0.49.34-dsh.1` 是合法 semver 预发布号），与 tag 保持一致。
+
+### 同步节奏
+
+- 上游：`upstream-sync.yml` 每周一 03:17 UTC 自动检查最新 `vX.Y.Z`；上游发布后也可以
+  手动触发（`workflow_dispatch`，可指定 `tag`）。只同步正式 release tag，不跟上游
+  `master`。
+- DSH：只在 DSH 发布新版本时升级（见上文「DSH upgrades」），与上游同步分开做，
+  一次只动一边，出问题时容易定位。
+- 上游连续发布多个补丁时，可以直接同步到最新的那个，不必逐个跟。
+
+### `dsh-sync/<tag>` 分支的验收流程
+
+1. **CI 门**：`upstream-sync.yml` 在 `dsh-sync/<tag>` 上跑过 filtered install →
+   `typecheck:dsh` → `test:dsh` → `contracts:dsh`，全部通过才会推送该分支；
+   失败时会在 fork 里开或更新标记为 `dsh-sync` 的 issue，分支不会推送。
+2. **冲突面核对**：`git diff --stat <tag> dsh-sync/<tag> -- . ':!packages/dsh-plugin'
+   ':!packages/adapter-api' ':!docs/dsh'` 的结果应仍只有下面清单里的文件。
+   出现新文件就说明 rebase 时把 DSH 改动带进了 core，或者上游改了我们改过的地方，
+   需要人工审一遍。
+3. **测试基线**：数字不能低于上一次的基线（见上文 Baseline）；有测试被删或被跳过，
+   必须在提交信息里说明理由。
+4. **真实 DSH 冒烟**（`packages/dsh-plugin/scripts/e2e/`，Linux）：`bootstrap.sh` →
+   `bun run build` → `install-profile.sh` → `setup --profile test` → `doctor` →
+   `run-headless.sh` 至少跑三轮：普通回合（§N§ 连续不重复）、`ctx_reduce` drop
+   落地、historian 压缩发布。用 `inspect-db.ts` 核对 `harness='dsh'` 行。结束后确认
+   没有残留的 `dsh` 进程。
+5. **合入**：以上都通过后，把 `dsh-integration` 快进（rebase 策略下是
+   `reset --hard origin/dsh-sync/<tag>` 再 `push --force-with-lease`，命令见该 workflow
+   的输出），然后打 `dsh/<upstream>-dsh.1` tag，并写发布说明（上游版本、DSH 基线、
+   测试数字、已知限制的变化）。
+
+### 上游 core 改动清单（冲突面）
+
+对比上游 tag `v0.49.34`（`git diff --numstat v0.49.34 dsh-integration`，排除
+`packages/dsh-plugin`、`packages/adapter-api`、`docs/dsh`）：
+
+| 文件 | 改动 | 说明 |
+|---|---|---|
+| `packages/plugin/src/shared/harness.ts` | +4 / −1 | `HarnessId` 增加 `"dsh"`（加注释） |
+| `packages/plugin/src/features/magic-context/subagent-token-capture.ts` | +2 / −0 | `hostLabel` 的 `dsh` 分支（`"DeepSeek Harness"`），`switch` 穷尽性要求 |
+| `packages/plugin/src/shared/prompt-surface-runtime.ts` | +2 / −2 | `dsh` 和 `opencode2` 一样回落到 `opencode` 的旧配置目录 |
+| `package.json`（根） | +3 / −0 | `typecheck:dsh`、`test:dsh`、`contracts:dsh` 脚本 |
+| `bun.lock` | +151 / −3 | 新 workspace 包与 `@deepseek-ai/*` 依赖；冲突时用 `bun install --lockfile-only` 重新生成，不要手工合并 |
+| `README.md`（根） | +27 / −0 | DSH 安装说明的折叠块 |
+| `.github/workflows/upstream-sync.yml` | 新文件 | 只在 fork 上运行 |
+| `docs/DSH-MAINTENANCE.md` | 新文件 | 本文档 |
+
+真正的 core 代码改动只有前三项，共 8 行增、3 行删。新增 core 改动之前，先确认能否
+放进 DSH 层；如果必须改 core，就在这张表里补一行。
+
+### fork 上会运行的上游 workflow
+
+把 fork 的默认分支设为 `dsh-integration` 之后：
+
+- `ci.yml` 的 `schedule`（每天 03:17 UTC）会在 fork 上跑。定时任务总是使用默认分支上的
+  workflow 文件，也就是 `dsh-integration` 里的上游 `ci.yml`：二十来个 OpenCode/Rust/
+  dashboard 任务，与 DSH 无关，耗 Actions 额度，而且容易因为缺少上游的 secrets 而报红。
+- `smoke-opencode-linux.yml` 没有定时触发，但会在 fork 的 `pull_request`，以及向
+  `master`/`main`/`train/**` 推送时运行（例如在 GitHub 上点「Sync fork」更新 fork 的
+  `master`）。
+- `release.yml`（`v*` tag）、`dashboard-release.yml`（`dashboard-v*` tag）会在推送
+  对应 tag 时运行，所以发行版 tag 必须用 `dsh/…`（见上文）。
+
+**推荐做法**：在 fork 的 Actions 页面（Actions → 选中该 workflow → 右上角 `…` →
+*Disable workflow*）禁用 `CI` 和 `Smoke (opencode bring-up on Linux)`，需要的话把发布类
+workflow 一起禁用。**不要修改上游的 workflow 文件**：每次改动都会在下一次同步时变成
+额外的冲突面。禁用是仓库设置，不在 git 里，同步不会影响它。`upstream-sync (DSH)`
+保持启用。
+
+### S6 已知限制：`dsh_pressure_truncations` 不会被清理
+
+压力截断的决定按 `(session_id, tag_number)` 持久化在 `dsh_pressure_truncations`
+（见下文 Known limitations 中的压力截断一条），之后每一轮都按这些行逐字节重放。
+目前没有任何代码删除这些行：会话删除、tag 被 drop、historian 压缩把对应内容移出
+surface 之后，行都会留在共享 SQLite 里（dropped 的 tag 只是不再重放）。每行只有几个
+整数和一个 sha256，增长量与「被截断过的 tag 数」成正比，正确性不受影响，但库会单调
+增长。修复方向：在会话清理路径（core 的 `pending_session_cleanup`）或 adapter 启动时，
+删除会话已不存在、或 tag 已 dropped 的行。修复前，需要的话可以手动
+`DELETE FROM dsh_pressure_truncations WHERE session_id = ?`。
 
 ## `setup` / `doctor` (0.2 profile layer)
 
@@ -641,10 +738,17 @@ the client requires `@deepseek-ai/dsh-client-store` (the nonexistent
 2. **Worker tool allowlist.** DSH 0.2 dropped `toolFilter`/`persona` from
    `SubagentStartRequest`. The worker restricts tools from an `agent/created`
    listener matched on `header.origin === "subagent"` and
-   `header.parentSession === parent`, and fails closed if it cannot. Not
-   exercised against a real DSH runtime; the worker is not used by any
-   production path yet. DSH's own `ChildComposition.toolFilter`
-   (`applyChildComposition`) may be the cleaner route.
+   `header.parentSession === parent`, and fails closed if it cannot.
+   Exercised on real rc.5 in round 13 through the env-gated
+   `ctx_worker_selftest` (`docs/dsh/e2e/evidence-round13/`): the child's
+   request carries only `glob/grep/read`, `tools.get(name, child)` is
+   undefined for `bash/write/edit/ctx_*` (the executor's `resolveExecution`
+   path → `UNKNOWN_TOOL`), a 1.5 s timeout disposes the child (`turn/end
+   aborted{parent}`), and the child writes no Magic rows. A forced call of a
+   masked tool was not observed (the model never sees its schema). The worker
+   is still not used by any production path. DSH's own
+   `ChildComposition.toolFilter` (`applyChildComposition`) may be the cleaner
+   route.
 3. **Removed upstream, removed here:** `/ctx-aug` (sidekick),
    `/ctx-session-upgrade`, `runManagedUpgrade`, `runMigration`. `/ctx-recomp
    --upgrade` answers with the core deprecation text.
