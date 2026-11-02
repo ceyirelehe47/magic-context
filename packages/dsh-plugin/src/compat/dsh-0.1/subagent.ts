@@ -44,6 +44,24 @@ export const MAGIC_WORKER_READONLY_TOOLS: readonly string[] = [
   "fs_search",
 ];
 
+/**
+ * DSH `request.maxDepth` is an ABSOLUTE cap on the child's delegation depth
+ * (`resolveChildDepth`: child = parent + 1, must be <= maxDepth). Pinning a
+ * worker to "no further spawning" therefore means maxDepth = parent + 1; a
+ * literal 0 rejects every worker ("subagent depth 1 exceeds maxDepth 0",
+ * observed on real rc.5).
+ */
+export function workerMaxDepth(parent: Agent): number {
+  // Mirrors rc.5 `delegationDepthOf` (max of the session header's persisted
+  // depth and the runtime option) but tolerates a parent without either.
+  const p = parent as unknown as {
+    options?: { subagentDepth?: unknown };
+    session?: { header?: { delegationDepth?: unknown } };
+  };
+  const num = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
+  return Math.max(num(p.session?.header?.delegationDepth), num(p.options?.subagentDepth)) + 1;
+}
+
 /** Default local provider registered by DSH's subagent tooling. */
 export const MAGIC_WORKER_PROVIDER = "spawn";
 

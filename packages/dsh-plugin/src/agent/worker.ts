@@ -27,6 +27,7 @@ import {
   magicWorkerActivation,
   childVisibleToolNames,
   restrictChildTools,
+  workerMaxDepth,
   subagentsOf,
 } from "../compat/dsh-0.1/subagent";
 
@@ -91,7 +92,7 @@ export async function runMagicWorker(
     const spec = magicWorkerActivation(deps.parent, {
       label: deps.label,
       prompt: [textBlock(deps.prompt)],
-      maxDepth: 0, // workers can never spawn further (recursion cap)
+      maxDepth: workerMaxDepth(deps.parent), // child depth only: workers can never spawn further
       signal: deps.signal,
       systemPrompt: deps.systemPrompt,
     });

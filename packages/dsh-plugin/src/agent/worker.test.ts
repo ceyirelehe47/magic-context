@@ -87,7 +87,9 @@ describe("magic worker (PLAN §5.13 minimal worker)", () => {
     };
     expect(spec.provider).toBe("spawn");
     expect(spec.delivery).toBe("caller");
-    expect(spec.request.maxDepth).toBe(0);
+    // DSH maxDepth is an absolute cap on the CHILD's depth: parent(0) + 1.
+    // A literal 0 made every real rc.5 worker fail ("depth 1 exceeds maxDepth 0").
+    expect(spec.request.maxDepth).toBe(1);
     // persona removed in DSH 0.2: the system prompt rides in front of the task.
     expect(spec.request.prompt[0]?.text).toContain("be terse");
     expect(spec.request.prompt.at(-1)?.text).toBe("do the thing");
