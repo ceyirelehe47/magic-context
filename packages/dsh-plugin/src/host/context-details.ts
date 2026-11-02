@@ -10,6 +10,7 @@
  */
 type Database = { prepare(sql: string): { get(...params: unknown[]): unknown } };
 import type { EffectiveMagicSettings, MagicThresholds } from "../settings/magic-settings";
+import { countPressureTruncations } from "../agent/pressure-truncation";
 
 export interface MagicSessionContextDetails {
   readonly sessionId: string;
@@ -34,7 +35,12 @@ export interface MagicSessionContextDetails {
     /** DSH outbox surface rewrites not yet committed. */
     readonly outbox: number;
   };
-  readonly tags: { readonly active: number; readonly dropped: number };
+  readonly tags: {
+    readonly active: number;
+    readonly dropped: number;
+    /** Tool results head/tail-truncated under context pressure (agent/pressure-truncation). */
+    readonly truncated: number;
+  };
   readonly knowledge: {
     /** Heuristic tokens (chars / 4, the token-meter density) of the cached m[0]. */
     readonly m0Tokens: number;
@@ -90,7 +96,7 @@ export function readSessionContextDetails(input: ContextDetailsInput): MagicSess
       ...(input.effective.historianModel.value !== undefined ? { model: input.effective.historianModel.value } : {}),
     },
     pending: { drops: 0, outbox: 0 },
-    tags: { active: 0, dropped: 0 },
+    tags: { active: 0, dropped: 0, truncated: 0 },
     knowledge: { m0Tokens: 0, m1Tokens: 0, memoryBlocks: 0 },
     nudge: { notePending: false },
   };
@@ -172,6 +178,7 @@ export function readSessionContextDetails(input: ContextDetailsInput): MagicSess
     tags: {
       active: count("SELECT COUNT(*) AS n FROM tags WHERE session_id = ? AND status = 'active'", sid),
       dropped: count("SELECT COUNT(*) AS n FROM tags WHERE session_id = ? AND status = 'dropped'", sid),
+      truncated: countPressureTruncations(db, sid),
     },
     knowledge: {
       m0Tokens: heuristicTokens(meta.cached_m0_bytes),

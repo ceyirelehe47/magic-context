@@ -43,7 +43,7 @@ describe("magicContext/context details", () => {
     // failure (1500) predates the newest compartment (2000) → idle, not failed.
     expect(out.historian).toMatchObject({ state: "idle", failureCount: 1, lastCompartmentAt: 2000, lastError: "boom" });
     expect(out.pending).toEqual({ drops: 2, outbox: 1 });
-    expect(out.tags).toEqual({ active: 1, dropped: 1 });
+    expect(out.tags).toEqual({ active: 1, dropped: 1, truncated: 0 });
     expect(out.knowledge).toEqual({ m0Tokens: 100, m1Tokens: 10, memoryBlocks: 3 });
     expect(out.nudge).toEqual({ band: "soft", level: "gentle", lastTokens: 42000, channel2: "armed", notePending: true });
     expect(out.protectedTokens).toBe(9000);

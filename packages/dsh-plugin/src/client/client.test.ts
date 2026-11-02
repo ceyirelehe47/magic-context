@@ -163,3 +163,34 @@ describe("client bundle", () => {
     expect(await t.callRemote(undefined, "settings", {})).toMatchObject({ ok: false });
   });
 });
+
+describe("indicator refresh after Save (round 11)", () => {
+  const t = () => loadClient().mod.__test as Record<string, any>;
+  it("withLiveThresholds: a fresher context read recolours the ring until the projection moves", () => {
+    const { withLiveThresholds, meterTone } = t();
+    const projection = { percent: 54, managed: true, enabled: true, executePercentage: 65, forcePercentage: 85, emergencyPercentage: 95, contextWindow: 24000 };
+    expect(meterTone(projection)).toBe("");
+    const live = { base: projection, details: { enabled: true, thresholds: { executePercentage: 50, forcePercentage: 85, emergencyPercentage: 95 } } };
+    const shown = withLiveThresholds(projection, live);
+    expect(shown.executePercentage).toBe(50);
+    expect(shown.executeTokens).toBe(12000);
+    expect(meterTone(shown)).toBe("ckmc-warn");
+    // the next step's projection is authoritative again
+    const nextStep = { ...projection, percent: 56, executePercentage: 50 };
+    expect(withLiveThresholds(nextStep, live)).toBe(nextStep);
+    // disabling from the page greys the ring immediately
+    const off = withLiveThresholds(projection, { base: projection, details: { enabled: false, thresholds: live.details.thresholds } });
+    expect(meterTone(off)).toBe("");
+    // no live read / malformed read → projection unchanged
+    expect(withLiveThresholds(projection, null)).toBe(projection);
+    expect(withLiveThresholds(projection, { base: projection, details: {} })).toBe(projection);
+  });
+  it("Save bumps a shared settings epoch; watchdog timings are bounded", () => {
+    const { settingsEpoch, bumpSettingsEpoch, SAVE_SLOW_MS, SAVE_GIVE_UP_MS } = t();
+    const before = settingsEpoch.getSnapshot().epoch;
+    bumpSettingsEpoch();
+    expect(settingsEpoch.getSnapshot().epoch).toBe(before + 1);
+    expect(SAVE_SLOW_MS).toBeLessThan(SAVE_GIVE_UP_MS);
+    expect(SAVE_GIVE_UP_MS).toBeLessThanOrEqual(30000);
+  });
+});

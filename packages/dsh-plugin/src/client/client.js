@@ -70,6 +70,9 @@ window.__ModuleLoader__.load({
 			save: ["Save", "保存"],
 			saving: ["Saving…", "保存中…"],
 			saved: ["Saved — applied live.", "已保存，已在线生效。"],
+			truncatedTools: ["Truncated tool results", "已截断的工具结果"],
+			savingSlow: ["Still saving — DSH applies profile edits between agent steps; this can take a moment while a turn is running.", "仍在保存——DSH 在智能体步骤之间写入配置，正在运行的回合可能让它稍慢。"],
+			savingGaveUp: ["Saving is taking unusually long. Reloaded the current values: if your change is not shown yet it is still queued and will apply when DSH finishes the write; your edits are kept.", "保存耗时异常。已重新读取当前值：若尚未显示你的修改，它仍在排队，DSH 写入完成后即生效；你的编辑已保留。"],
 			reset: ["Discard changes", "放弃修改"],
 			inherit: ["Inherit", "继承"],
 			override: ["Override", "覆盖"],
@@ -242,6 +245,52 @@ window.__ModuleLoader__.load({
 
 		function errorText(result) {
 			return result && result.error && result.error.message !== void 0 ? result.error.message : "unknown";
+		}
+
+		/**
+		 * Settings epoch: bumped after every successful save so the composer
+		 * indicator (a different slot component) re-reads `magicContext/context`
+		 * at once instead of waiting for the next `magicContextPressure`
+		 * projection update (recomputed per agent step only).
+		 */
+		var settingsEpoch = clientStore.createSnapshotStore({ epoch: 0 });
+		function bumpSettingsEpoch() {
+			try { settingsEpoch.set({ epoch: settingsEpoch.getSnapshot().epoch + 1 }); } catch (_error) { /* indicator refresh is best-effort */ }
+		}
+		function useSettingsEpoch() {
+			var state = react.useState(settingsEpoch.getSnapshot());
+			var setState = state[1];
+			react.useEffect(function () {
+				setState(settingsEpoch.getSnapshot());
+				return settingsEpoch.subscribe(function () { setState(settingsEpoch.getSnapshot()); });
+			}, []);
+			return state[0];
+		}
+		/** Save watchdog timings (ms): "still saving" hint, then stop waiting and reload. */
+		var SAVE_SLOW_MS = 3000;
+		var SAVE_GIVE_UP_MS = 20000;
+
+		/**
+		 * The reading the ring shows: the projection, with the thresholds /
+		 * enabled flag of a fresher `magicContext/context` read while the
+		 * projection has not moved since that read was started (`live.base`).
+		 * Once the projection updates (next step) it is authoritative again.
+		 */
+		function withLiveThresholds(pressure, live) {
+			if (!pressure || !live || live.base !== pressure || !live.details || !live.details.thresholds) return pressure;
+			var t = live.details.thresholds;
+			var next = Object.assign({}, pressure);
+			if (typeof t.executePercentage === "number") next.executePercentage = t.executePercentage;
+			if (typeof t.forcePercentage === "number") next.forcePercentage = t.forcePercentage;
+			if (typeof t.emergencyPercentage === "number") next.emergencyPercentage = t.emergencyPercentage;
+			if (typeof live.details.enabled === "boolean") next.enabled = live.details.enabled;
+			if (typeof t.executePercentage === "number" && typeof pressure.contextWindow === "number") {
+				next.executeTokens = Math.round(pressure.contextWindow * t.executePercentage / 100);
+			}
+			if (typeof t.forcePercentage === "number" && typeof pressure.contextWindow === "number") {
+				next.forceTokens = Math.round(pressure.contextWindow * t.forcePercentage / 100);
+			}
+			return next;
 		}
 
 		/** Status snapshot store (hooks seat of the slot contract). */
@@ -445,6 +494,7 @@ window.__ModuleLoader__.load({
 			var notice = noticeState[0], setNotice = noticeState[1];
 			var savingState = react.useState(false);
 			var saving = savingState[0], setSaving = savingState[1];
+			var saveSeq = react.useRef(0);
 
 			var load = react.useCallback(function (keepDraft) {
 				setVs(function (prev) { return { state: prev.view ? "ready" : "loading", view: prev.view, error: null }; });
@@ -505,18 +555,44 @@ window.__ModuleLoader__.load({
 			};
 			var save = function () {
 				if (plan.invalid.length > 0 || plan.ops.length === 0) return;
+				var seq = saveSeq.current + 1;
+				saveSeq.current = seq;
 				setSaving(true);
 				setNotice(null);
-				callRemote(connection, "updateSettings", { ops: plan.ops, expectedRevision: view.revision }).then(function (result) {
+				// Watchdog: DSH serializes profile writes with the running turn,
+				// so the reply can lag (round 8: >3 s although the row was
+				// already written). Say so after SAVE_SLOW_MS; after
+				// SAVE_GIVE_UP_MS stop blocking the form and reload the real
+				// state (the draft is kept). A late reply still lands below.
+				var slowTimer = setTimeout(function () {
+					if (saveSeq.current === seq) setNotice({ tone: "info", text: L("savingSlow") });
+				}, SAVE_SLOW_MS);
+				var giveUpTimer = setTimeout(function () {
+					if (saveSeq.current !== seq) return;
+					saveSeq.current = seq + 1;
 					setSaving(false);
-					if (result.ok !== true) { setNotice({ tone: "err", text: L("unavailable") + ": " + errorText(result) }); return; }
+					setNotice({ tone: "err", text: L("savingGaveUp") });
+					load(true);
+				}, SAVE_GIVE_UP_MS);
+				callRemote(connection, "updateSettings", { ops: plan.ops, expectedRevision: view.revision }).then(function (result) {
+					clearTimeout(slowTimer);
+					clearTimeout(giveUpTimer);
+					var current = saveSeq.current === seq;
+					if (current) setSaving(false);
+					if (result.ok !== true) {
+						if (current) setNotice({ tone: "err", text: L("unavailable") + ": " + errorText(result) });
+						return;
+					}
 					var value = result.value;
 					if (value.ok === true) {
 						setVs({ state: "ready", view: value.view, error: null });
 						setDraft(draftFromView(value.view));
 						setNotice({ tone: "ok", text: L("saved") });
+						// Thresholds / enabled changed: refresh the composer ring now.
+						bumpSettingsEpoch();
 						return;
 					}
+					if (!current) return;
 					if (value.view) setVs({ state: "ready", view: value.view, error: null });
 					setNotice({ tone: "err", text: value.code === "conflict" ? L("conflict") : (value.code === "invalid" ? L("invalid") + ": " : "") + value.message });
 				});
@@ -745,6 +821,7 @@ window.__ModuleLoader__.load({
 							jsx(KV, { k: L("historian"), v: historianState + (d.historian.lastError && d.historian.state === "failed" ? " · " + d.historian.lastError : "") }, "h"),
 							jsx(KV, { k: L("pendingDrops"), v: String(d.pending.drops) }, "pd"),
 							d.pending.outbox > 0 ? jsx(KV, { k: L("pendingOutbox"), v: String(d.pending.outbox) }, "po") : null,
+							d.tags && d.tags.truncated > 0 ? jsx(KV, { k: L("truncatedTools"), v: String(d.tags.truncated) }, "tt") : null,
 							jsx(KV, { k: L("knowledge"), v: L("approx") + formatTokens(d.knowledge.m0Tokens + d.knowledge.m1Tokens) + " (m0 " + formatTokens(d.knowledge.m0Tokens) + " · m1 " + formatTokens(d.knowledge.m1Tokens) + ")" }, "k"),
 							jsx(KV, { k: L("nudge"), v: nudgeText }, "n")
 						] }) : null,
@@ -754,7 +831,11 @@ window.__ModuleLoader__.load({
 		}
 
 		function MagicMeterDock(props) {
-			var pressure = props.useProjection("magicContextPressure");
+			var projected = props.useProjection("magicContextPressure");
+			var epoch = useSettingsEpoch().epoch;
+			var liveState = react.useState(null);
+			var live = liveState[0], setLive = liveState[1];
+			var pressure = withLiveThresholds(projected, live);
 			var breakdown = props.useProjection("contextBreakdown");
 			var openState = react.useState(false);
 			var open = openState[0], setOpen = openState[1];
@@ -766,6 +847,22 @@ window.__ModuleLoader__.load({
 			var panelRef = react.useRef(null);
 			var available = pressure !== void 0 && pressure !== null && typeof pressure.percent === "number";
 			useDismiss(open && available, setOpen, [rootRef, panelRef]);
+			// After a Save (epoch bump) re-read the thresholds at once: the
+			// projection itself only moves on the next agent step.
+			react.useEffect(function () {
+				if (epoch === 0 || !available || projected.managed !== true) return;
+				var cancelled = false;
+				var base = projected;
+				callRemote(props.connection, "context", {
+					sessionId: props.sessionId,
+					model: base.provider && base.model ? base.provider + "/" + base.model : void 0,
+					contextWindow: base.contextWindow
+				}).then(function (result) {
+					if (cancelled || result.ok !== true) return;
+					setLive({ base: base, details: result.value });
+				});
+				return function () { cancelled = true; };
+			}, [epoch]);
 			react.useEffect(function () {
 				if (!open || !available || pressure.managed !== true) return;
 				var cancelled = false;
@@ -780,7 +877,7 @@ window.__ModuleLoader__.load({
 					else setDetails({ details: null, error: errorText(result) });
 				});
 				return function () { cancelled = true; };
-			}, [open, available, props.sessionId]);
+			}, [open, available, props.sessionId, epoch]);
 			if (!available) return null;
 			var percent = pressure.percent;
 			var tone = meterTone(pressure);
@@ -879,7 +976,7 @@ window.__ModuleLoader__.load({
 		exports.inject = ["slots", "connection"];
 		exports.apply = apply;
 		/* test seams (pure helpers; no DOM) */
-		exports.__test = { opsFromDraft: opsFromDraft, draftFromView: draftFromView, parseField: parseField, meterTone: meterTone, callRemote: callRemote };
+		exports.__test = { opsFromDraft: opsFromDraft, draftFromView: draftFromView, parseField: parseField, meterTone: meterTone, callRemote: callRemote, withLiveThresholds: withLiveThresholds, settingsEpoch: settingsEpoch, bumpSettingsEpoch: bumpSettingsEpoch, SAVE_SLOW_MS: SAVE_SLOW_MS, SAVE_GIVE_UP_MS: SAVE_GIVE_UP_MS };
 		return module.exports;
 	}
 });
