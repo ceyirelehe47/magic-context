@@ -24,7 +24,9 @@
  *     byte-identically by every later pass (and after a restart) — so the
  *     rebuilt view never re-renders the full output and the coordinator sees
  *     the surface already current (no op, no new event, no cache bust);
- *   - a tag is truncated at most once (rows are never re-decided);
+ *   - a tag is truncated at most once per output (rows are never re-decided
+ *     while their digest matches; a stale-digest row is replaced by the next
+ *     decision instead of pinning the tag);
  *   - one batch per pressure sample: a new batch needs a NEWER usage-bearing
  *     assistant message than the previous batch's basis (no trickle);
  *   - a dropped tag (ctx_reduce / historian / cleanup) is never replayed —
@@ -34,6 +36,14 @@
 import { createHash } from "node:crypto";
 import type { Database } from "@magic-context/core/shared/sqlite";
 import { estimateTokens } from "@magic-context/core/hooks/magic-context/read-session-formatting";
+
+/**
+ * Cap on the output reserve, mirroring core's window geometry
+ * (`OPENCODE_OUTPUT_CAP` in shared/window-geometry: usable = window −
+ * min(maxTokens, 32 000)). An uncapped 64k `maxTokens` would otherwise put a
+ * 100k window over the force band at ~30 % input.
+ */
+export const PRESSURE_OUTPUT_RESERVE_CAP = 32_000;
 
 /** Inputs for one pass's decision. Absent = replay only. */
 export interface PressureTruncationInput {
@@ -182,14 +192,20 @@ export function applyPressureTruncation(
   const skipped: number[] = [];
   const truncated = new Set<number>();
   for (const row of rows) {
-    truncated.add(row.tag_number);
     const candidate = byTag.get(row.tag_number);
-    if (candidate === undefined) continue; // dropped / off the surface
+    if (candidate === undefined) {
+      truncated.add(row.tag_number); // dropped / off the surface
+      continue;
+    }
     const original = candidate.part.getText() ?? "";
     if (sha(original) !== row.original_sha) {
+      // The output under the tag changed: never truncate unrelated content
+      // with the old decision, but do not pin the tag either — it is
+      // eligible for a NEW decision (latch permitting), which replaces the row.
       skipped.push(row.tag_number);
       continue;
     }
+    truncated.add(row.tag_number);
     candidate.part.setToolOutput(truncateOutput(original, row.head_chars, row.tail_chars, row.tag_number));
     replayed.push(row.tag_number);
   }
@@ -198,7 +214,8 @@ export function applyPressureTruncation(
   if (input === undefined) return { decided, replayed, skipped };
   const window = input.contextWindow;
   if (!(window > 0) || !(input.projectedTokens > 0)) return { decided, replayed, skipped };
-  const effective = input.projectedTokens + Math.max(0, input.outputReserveTokens);
+  const effective =
+    input.projectedTokens + Math.min(PRESSURE_OUTPUT_RESERVE_CAP, Math.max(0, input.outputReserveTokens));
   if (effective * 100 < input.forcePercentage * window) return { decided, replayed, skipped };
   const latestBasis = rows.reduce((max, row) => Math.max(max, row.basis_usage_seq), -Infinity);
   if (rows.length > 0 && input.usageSeq <= latestBasis) return { decided, replayed, skipped };
@@ -231,7 +248,7 @@ export function applyPressureTruncation(
   }
   if (chosen.length === 0) return { decided, replayed, skipped };
   const insert = db.prepare(
-    `INSERT OR IGNORE INTO dsh_pressure_truncations
+    `INSERT OR REPLACE INTO dsh_pressure_truncations
        (session_id, tag_number, head_chars, tail_chars, original_chars, original_sha, basis_usage_seq, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
@@ -247,7 +264,7 @@ export function applyPressureTruncation(
   }
   log?.(
     `[magic-context] pressure truncation: ${decided.length} tool result(s) [${decided.join(",")}] ` +
-      `(input ${Math.round(input.projectedTokens)} + reserve ${input.outputReserveTokens} of ${window} ≥ force ${input.forcePercentage}%; est. after ≈${Math.round(remaining)})`,
+      `(input ${Math.round(input.projectedTokens)} + reserve ${Math.min(PRESSURE_OUTPUT_RESERVE_CAP, input.outputReserveTokens)} of ${window} ≥ force ${input.forcePercentage}%; est. after ≈${Math.round(remaining)})`,
   );
   return { decided, replayed, skipped };
 }
