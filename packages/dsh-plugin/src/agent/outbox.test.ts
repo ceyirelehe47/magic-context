@@ -69,6 +69,7 @@ describe("dsh outbox (saga records + recovery)", () => {
         "dsh_context_compaction_marker",
         "dsh_context_outbox",
         "dsh_feedback_signals",
+        "dsh_pressure_truncations",
       ]);
       const meta = db.query("SELECT value FROM dsh_adapter_meta WHERE key = ?").get(ADAPTER_META_KEY) as
         | { value: string }
