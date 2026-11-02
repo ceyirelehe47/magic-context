@@ -73,3 +73,21 @@ describe("magicContext/context details", () => {
     expect(empty).toMatchObject({ compartments: 0, pending: { drops: 0, outbox: 0 }, historian: { state: "never" } });
   });
 });
+
+// Round 15 scan: a process killed mid-historian (headless one-shot exit after
+// the drain timeout, crash, sandbox restart) leaves
+// session_meta.compartment_in_progress = 1; the popover then showed the
+// historian "running" forever. The flag only counts while a compartment
+// lease is live (the pass holds it; it expires when the holder died).
+describe("historian running state requires a live compartment lease", () => {
+  it("a stale in-progress flag without a live lease is not "running"; with a live lease it is", () => {
+    const d = db();
+    d.exec(`CREATE TABLE compartment_state_lease (session_id TEXT PRIMARY KEY, holder_id TEXT, owner_pid INTEGER, acquired_at INTEGER, expires_at INTEGER)`);
+    d.prepare(`INSERT INTO session_meta (session_id, compartment_in_progress, historian_failure_count) VALUES ('dsh:h:s1', 1, 0)`).run();
+    expect(readSessionContextDetails(input(d)).historian.state).not.toBe("running");
+    d.prepare(`INSERT INTO compartment_state_lease VALUES ('dsh:h:s1', 'x', 1, ?, ?)`).run(Date.now() - 1000, Date.now() - 1);
+    expect(readSessionContextDetails(input(d)).historian.state).not.toBe("running"); // expired
+    d.exec(`UPDATE compartment_state_lease SET expires_at = ${Date.now() + 60_000}`);
+    expect(readSessionContextDetails(input(d)).historian.state).toBe("running");
+  });
+});

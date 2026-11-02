@@ -138,7 +138,17 @@ export function readSessionContextDetails(input: ContextDetailsInput): MagicSess
     ) ??
     {};
 
-  const inProgress = Number(meta.compartment_in_progress ?? 0) > 0;
+  // The flag alone is not proof: a process killed mid-pass leaves it set
+  // forever. It counts only while a compartment lease is live (the pass holds
+  // one; it expires once the holder is gone). No lease table (older schema)
+  // → trust the flag.
+  const liveLease = one<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM compartment_state_lease WHERE session_id = ? AND expires_at > ?",
+    sid,
+    Date.now(),
+  );
+  const inProgress =
+    Number(meta.compartment_in_progress ?? 0) > 0 && (liveLease === undefined || Number(liveLease.n) > 0);
   const failureCount = Number(meta.historian_failure_count ?? 0) || 0;
   const lastFailureAt = typeof meta.historian_last_failure_at === "number" ? meta.historian_last_failure_at : undefined;
   const lastCompartmentAt = typeof lastCompartment === "number" ? lastCompartment : undefined;
