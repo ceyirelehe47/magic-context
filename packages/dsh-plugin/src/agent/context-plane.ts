@@ -40,7 +40,9 @@ import {
 import { updateSessionMeta } from "@magic-context/core/features/magic-context/storage";
 import { checkDshCompartmentTrigger } from "./historian";
 import { foldLegacyBareMessageTags } from "./legacy-tag-cleanup";
-import { maybeNudgeChannels, scanSessionMetrics } from "./nudge";
+import { maybeNudgeChannels, promptTokensOf, scanSessionMetrics } from "./nudge";
+import type { PressureTruncationInput } from "./pressure-truncation";
+import { escalationBands } from "@magic-context/core/shared/escalation-bands";
 import { createTagger } from "@magic-context/core/features/magic-context/tagger";
 import { markNoteNudgeDelivered, onNoteTrigger, peekNoteNudgeText } from "@magic-context/core/hooks/magic-context/note-nudger";
 import { transcriptRawMessageProvider } from "./historian-wiring";
@@ -73,6 +75,12 @@ export interface ContextPlaneConfig {
   protectedTokenTierOverrides?: ProtectedTokensTierOverrides;
   /** Heuristic cleanup options (routed from the shared config). */
   heuristicCleanup?: { readonly caveman?: { readonly enabled: boolean; readonly minChars: number } };
+  /**
+   * Pressure truncation of large tool results at the force band (input +
+   * output reserve). Default on; `false` stops NEW decisions (persisted ones
+   * keep replaying so the surface does not flip back and bust the cache).
+   */
+  pressureTruncation?: boolean;
 }
 
 /** Historian background-pass plane (Phase 4): trigger + fire. */
@@ -493,6 +501,63 @@ function tailFoldAfterPass(
   }
 }
 
+/**
+ * Pressure-truncation inputs: projected input (token-meter projection, else
+ * the last provider usage), the request's output reserve (latest
+ * `request/header` `maxTokens`), the execute/force bands, and the seq of the
+ * latest usage-bearing assistant message (one batch per sample).
+ */
+export function pressureTruncationInputFor(deps: ContextPlaneDeps, agent: Agent): PressureTruncationInput | undefined {
+  try {
+    let projected: number | undefined;
+    let contextWindow: number | undefined;
+    try {
+      const sample = deps.historian?.readPressure?.(agent);
+      projected = sample?.projectedTokens;
+      contextWindow = sample?.contextWindow;
+    } catch {
+      // fall back to the event log
+    }
+    let outputReserve = 0;
+    let usageSeq = -1;
+    let lastPrompt = 0;
+    let logWindow: number | undefined;
+    for (const event of sessionEvents(agent.session)) {
+      if (event === null || typeof event !== "object") continue;
+      const e = event as { type?: unknown; seq?: unknown; data?: Record<string, unknown> };
+      if (e.type === "request/header") {
+        const header = e.data?.header as { config?: { maxTokens?: unknown } } | undefined;
+        const max = header?.config?.maxTokens;
+        if (typeof max === "number" && max > 0) outputReserve = max;
+      } else if (e.type === "request/context") {
+        const cw = e.data?.contextWindow;
+        if (typeof cw === "number" && cw > 0) logWindow = cw;
+      } else if (e.type === "assistant/message") {
+        const prompt = promptTokensOf(e.data?.usage);
+        if (prompt !== undefined) {
+          lastPrompt = prompt;
+          if (typeof e.seq === "number") usageSeq = e.seq;
+        }
+      }
+    }
+    if (!(typeof contextWindow === "number" && contextWindow > 0)) contextWindow = logWindow;
+    if (!(typeof contextWindow === "number" && contextWindow > 0)) return undefined;
+    const projectedTokens = Math.max(typeof projected === "number" ? projected : 0, lastPrompt);
+    const executePercentage =
+      safeThreshold(deps.historian, agent) ?? deps.historian?.config?.executeThresholdPercentage ?? 65;
+    return {
+      projectedTokens,
+      contextWindow,
+      outputReserveTokens: outputReserve,
+      executePercentage,
+      forcePercentage: escalationBands(executePercentage).forceMaterializationPercentage,
+      usageSeq,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 /** Protection-window inputs for one pass (config + live DSH context window). */
 export function protectionOptionsFor(deps: ContextPlaneDeps, agent: Agent): DshProtectionOptions {
   let contextWindow: number | undefined;
@@ -588,6 +653,9 @@ export async function runContextPlaneStep(
         db,
         protection,
         heuristicCleanup: deps.heuristicCleanup,
+        pressureTruncation:
+          deps.config?.pressureTruncation === false ? undefined : pressureTruncationInputFor(deps, agent),
+        log: deps.log,
       } satisfies PlanContext);
       if (plan !== null) {
         surfaceRewritten = true;

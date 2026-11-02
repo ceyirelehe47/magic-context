@@ -17,6 +17,7 @@
  * keeps its marker in a session_meta column; DSH must not occupy core
  * columns, so the marker state is adapter-owned).
  */
+import { initPressureTruncationTable } from "./pressure-truncation";
 import type { Database } from "@magic-context/core/shared/sqlite";
 
 /** The plan kinds that can produce outbox records (MutationPlan.ops[].kind). */
@@ -92,6 +93,7 @@ function toRecord(row: OutboxRow): OutboxRecord {
  * see these tables, and the adapter never alters core tables.
  */
 export function initializeDshAdapterTables(db: Database): void {
+  initPressureTruncationTable(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS dsh_context_outbox (
       op_id            TEXT PRIMARY KEY,

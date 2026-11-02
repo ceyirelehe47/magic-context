@@ -55,6 +55,12 @@ import {
 } from "@magic-context/core/hooks/magic-context/tag-content-primitives";
 import { estimateTokens } from "@magic-context/core/hooks/magic-context/read-session-formatting";
 import {
+  applyPressureTruncation,
+  PRESSURE_TRUNCATION_MARKER,
+  type PressureTruncationInput,
+  type TruncationCandidate,
+} from "./pressure-truncation";
+import {
   formatGap,
   TEMPORAL_MARKER_PATTERN,
   temporalMarkerPrefix,
@@ -178,6 +184,13 @@ export interface PlanContext {
   readonly heuristicCleanup?: {
     readonly caveman?: { readonly enabled: boolean; readonly minChars: number };
   };
+  /**
+   * Pressure truncation (DSH emergency tier for protected large tool results,
+   * `agent/pressure-truncation.ts`). Persisted truncations are ALWAYS replayed;
+   * this input only allows a new decision on this pass. Absent = replay only.
+   */
+  readonly pressureTruncation?: PressureTruncationInput;
+  readonly log?: (message: string) => void;
 }
 
 /* ────────────────────────────── event accessors ───────────────────────────── */
@@ -1244,6 +1257,8 @@ export class RecordingMessage implements TranscriptMessage {
         parts.push(`drop → ${record.to}`);
       } else if (record.field === "reasoning") {
         parts.push(`reasoning cleared through tag §${record.tag ?? "?"}§`);
+      } else if (record.field === "output" && record.to.includes(PRESSURE_TRUNCATION_MARKER)) {
+        parts.push(`pressure truncation ${record.from.length} → ${record.to.length} chars`);
       } else if (/^\u00a7\d+\u00a7/.test(record.to)) {
         const space = record.to.indexOf(" ");
         parts.push(`tag prefix ${space > 0 ? record.to.slice(0, space) : record.to}`);
@@ -1667,6 +1682,31 @@ export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): M
       } catch {
         // Cleanup must never break the pre-step chain (fail-open).
       }
+    }
+
+    // Pressure truncation: replay persisted head/tail truncations of active
+    // tool results, then (force band, latch permitting) decide one batch.
+    // After drops/cleanup so a dropped tag is never truncated (drop wins).
+    try {
+      const resultParts = new Map<string, RecordingPart>();
+      for (const message of transcript.messages) {
+        for (const part of message.parts) {
+          if (part.kind === "tool_result" && part.id !== undefined && !resultParts.has(part.id)) {
+            resultParts.set(part.id, part);
+          }
+        }
+      }
+      const candidates: TruncationCandidate[] = [];
+      for (const tag of getTagsBySession(db, sessionId)) {
+        if (tag.type !== "tool" || tag.status !== "active") continue;
+        const part = tag.messageId ? resultParts.get(tag.messageId) : undefined;
+        if (part !== undefined) candidates.push({ tagNumber: tag.tagNumber, part });
+      }
+      applyPressureTruncation(db, sessionId, candidates, ctx.pressureTruncation, ctx.log);
+    } catch (error) {
+      ctx.log?.(
+        `[magic-context] pressure truncation failed (fail-open): ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     planReasoningReplay(view, byMessageId, recordingTargets, db);
