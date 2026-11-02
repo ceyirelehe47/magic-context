@@ -17,6 +17,7 @@
  * Magic-marked (top-level magic-standard) tree, while children run with
  * official semantics.
  */
+import { randomUUID } from "node:crypto";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { textBlock } from "../compat/dsh-0.1/session";
@@ -99,12 +100,18 @@ export async function runMagicWorker(
     }
     const started = Date.now();
     const allow = deps.allow ?? MAGIC_WORKER_READONLY_TOOLS;
+    // Reserved child id: the `agent/created` listener below must match THIS
+    // worker's child exactly. Matching on origin + parentSession alone let two
+    // concurrent workers of one parent restrict each other's children
+    // (round 15).
+    const childId = randomUUID();
     const spec = magicWorkerActivation(deps.parent, {
       label: deps.label,
       prompt: [textBlock(deps.prompt)],
       maxDepth: workerMaxDepth(deps.parent), // child depth only: workers can never spawn further
       signal: deps.signal,
       systemPrompt: deps.systemPrompt,
+      childId,
     });
 
     // Tool allowlist + approval pinning + sandbox inheritance are applied to
@@ -125,6 +132,7 @@ export async function runMagicWorker(
       if (header?.origin !== "subagent" || String(header.parentSession ?? "") !== parentSessionId) {
         return undefined;
       }
+      if (String(child.session?.id ?? child.id ?? "") !== childId) return undefined;
       try {
         appendDelegatedPolicyOverrides(child.session as never, overrides);
         restricted = restrictChildTools(child, allow);

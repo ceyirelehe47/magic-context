@@ -85,6 +85,12 @@ export function magicWorkerActivation(
     signal: AbortSignal;
     systemPrompt?: string;
     provider?: string;
+    /**
+     * Reserved child session id (local backends only; rc.5 `startLocal`
+     * honours `spec.childId`). Lets the caller recognise ITS child in an
+     * `agent/created` listener when several workers of one parent overlap.
+     */
+    childId?: string;
   },
 ): SubagentActivationSpec {
   const prompt: ContentBlock[] =
@@ -96,6 +102,7 @@ export function magicWorkerActivation(
     label: opts.label,
     signal: opts.signal,
     delivery: "caller",
+    ...(opts.childId !== undefined ? { childId: opts.childId as SubagentActivationSpec["childId"] } : {}),
     request: {
       prompt,
       parent,

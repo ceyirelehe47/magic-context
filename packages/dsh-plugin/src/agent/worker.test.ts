@@ -18,9 +18,10 @@ function fakeSubagents(
   const service = {
     startActivation: async (spec: Record<string, unknown>) => {
       specs.push(spec);
+      const childId = String(spec.childId ?? `child-${specs.length}`);
       const child = {
-        id: `child-${specs.length}`,
-        session: Session.create(SessionId(`child-${specs.length}`)),
+        id: childId,
+        session: Session.create(SessionId(childId)),
         ctx:
           opts.childHasTools === false
             ? {}
@@ -295,5 +296,99 @@ describe("recursion isolation (PLAN §9)", () => {
     });
     expect(result).toBeNull();
     expect(logs.some((m) => m.includes("worker stopped: aborted"))).toBe(true);
+  });
+});
+
+describe("concurrent workers under one parent (round 15)", () => {
+  it("each worker's agent/created listener only touches ITS child (matched by the reserved childId, not just parentSession)", async () => {
+    // Two workers of the same parent are in flight at once: both one-shot
+    // listeners are registered when either child is created. Matching only on
+    // `origin === 'subagent' && parentSession === parent` let worker A apply
+    // its allowlist / policy overrides to worker B's child (and mark itself
+    // restricted although its own child was never touched).
+    const listeners: CreatedListener[] = [];
+    const ctx = {
+      get: (name: string) => (name === "subagents" ? service : undefined),
+      on: (name: string, fn: CreatedListener) => {
+        if (name === "agent/created") listeners.push(fn);
+        return () => {
+          const i = listeners.indexOf(fn);
+          if (i >= 0) listeners.splice(i, 1);
+        };
+      },
+    };
+    const restrictionsByChild = new Map<string, Array<readonly string[] | undefined>>();
+    const pending: Array<{ spec: Record<string, unknown>; release: () => void }> = [];
+    let n = 0;
+    const makeChild = (id: string) => {
+      const child = {
+        id,
+        session: Session.create(SessionId(id)),
+        ctx: {
+          tools: {
+            restrict: (filter: { allow?: readonly string[] }) => {
+              const list = restrictionsByChild.get(id) ?? [];
+              list.push(filter.allow);
+              restrictionsByChild.set(id, list);
+              return () => {};
+            },
+          },
+        },
+      };
+      Object.defineProperty(child.session, "header", {
+        value: { id, origin: "subagent", parentSession: "parent-1" },
+      });
+      return child;
+    };
+    const service = {
+      startActivation: (spec: Record<string, unknown>) =>
+        new Promise((resolve) => {
+          n += 1;
+          const id = String(spec.childId ?? `child-${n}`);
+          pending.push({
+            spec,
+            release: () => {
+              const child = makeChild(id);
+              for (const fn of [...listeners]) fn({ agent: child });
+              resolve({
+                childId: id,
+                result: Promise.resolve({ stopReason: "completed", output: [{ type: "text", text: `out ${id}` }] }),
+                dispose: async () => {},
+              });
+            },
+          });
+        }),
+    };
+    const a = runMagicWorker(ctx as never, {
+      parent: makeParent(),
+      label: "a",
+      prompt: "a",
+      allow: ["read"],
+      signal: new AbortController().signal,
+    });
+    const b = runMagicWorker(ctx as never, {
+      parent: makeParent(),
+      label: "b",
+      prompt: "b",
+      allow: ["grep"],
+      signal: new AbortController().signal,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pending).toHaveLength(2);
+    expect(listeners).toHaveLength(2);
+    const idA = String(pending[0]!.spec.childId ?? "child-1");
+    const idB = String(pending[1]!.spec.childId ?? "child-2");
+    // B's child is created first, while A's listener is still registered.
+    pending[1]!.release();
+    pending[0]!.release();
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(restrictionsByChild.get(idA)).toEqual([["read"]]);
+    expect(restrictionsByChild.get(idB)).toEqual([["grep"]]);
+    expect(ra?.text).toBe(`out ${idA}`);
+    expect(rb?.text).toBe(`out ${idB}`);
+    expect(listeners).toHaveLength(0);
+    // Reserved ids are distinct per worker.
+    expect(pending[0]!.spec.childId).toBeDefined();
+    expect(idA).not.toBe(idB);
   });
 });
