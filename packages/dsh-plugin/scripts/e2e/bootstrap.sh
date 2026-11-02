@@ -19,13 +19,13 @@ if ! command -v bun >/dev/null || [[ "$(bun --version)" != "$BUN_VERSION" ]]; th
 fi
 
 # Filtered workspace install: only the lanes the DSH adapter needs.
-(cd "$REPO" && timeout 100 bun install --ignore-scripts --backend=hardlink \
+(cd "$REPO" && timeout "${INSTALL_TIMEOUT:-100}" bun install --ignore-scripts --backend=hardlink \
   --filter '@cortexkit/opencode-magic-context' --filter '@cortexkit/retina-local-fs' \
   --filter 'dsh-magic-context-adapter' --filter 'dsh-magic-context')
 
 mkdir -p "$E2E_ROOT/dsh" "$E2E_ROOT/home" "$E2E_ROOT/xdg"/{config,data,state,cache}
 if [[ ! -x "$E2E_ROOT/dsh/node_modules/.bin/dsh" ]]; then
   echo '{"name":"dsh-e2e","private":true}' > "$E2E_ROOT/dsh/package.json"
-  (cd "$E2E_ROOT/dsh" && timeout 100 bun add --backend=hardlink "@deepseek-ai/dsh@$DSH_VERSION")
+  (cd "$E2E_ROOT/dsh" && timeout "${INSTALL_TIMEOUT:-100}" bun add --backend=hardlink "@deepseek-ai/dsh@$DSH_VERSION")
 fi
 echo "bootstrap ok: repo=$REPO e2e=$E2E_ROOT"

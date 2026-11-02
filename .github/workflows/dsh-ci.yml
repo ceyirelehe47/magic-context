@@ -1,0 +1,178 @@
+# DSH fork CI: the DeepSeek Harness adapter lane (packages/adapter-api +
+# packages/dsh-plugin) on GitHub-hosted runners, so the heavy checks do not
+# have to run on a small local sandbox. See docs/DSH-MAINTENANCE.md ("CI").
+#
+#   checks  every push to dsh-integration / dsh-sync/** and every dispatch:
+#           filtered install → typecheck:dsh → core typecheck → dsh-plugin
+#           tests → adapter-api tests → contracts:dsh
+#   e2e     ONLY on workflow_dispatch with input e2e=true (spends model quota):
+#           real @deepseek-ai/dsh 0.2.1-rc.5 headless + OpenCode Go
+#           (secret OPENCODE_API_KEY): worker self-test (normal + 1500 ms
+#           timeout), one session over three processes (§N§ identity across
+#           restarts); redacted logs uploaded as an artifact (7 days)
+#
+# Upstream workflows are left untouched (ci.yml is disabled in the fork's
+# Actions settings). This file is new and lives only on the DSH branches.
+name: dsh-ci
+
+on:
+  push:
+    branches: [dsh-integration, "dsh-sync/**"]
+  workflow_dispatch:
+    inputs:
+      e2e:
+        description: "Also run the real-model DSH e2e job (uses OPENCODE_API_KEY quota)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dsh-ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+env:
+  BUN_VERSION: 1.4.2 # packageManager: bun@1.4.2
+  DSH_VERSION: 0.2.1-rc.5
+
+jobs:
+  checks:
+    if: github.repository == 'ceyirelehe47/magic-context'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install the DSH lane (filtered, no lifecycle scripts)
+        run: |
+          bun install --ignore-scripts \
+            --filter '@cortexkit/opencode-magic-context' \
+            --filter '@cortexkit/retina-local-fs' \
+            --filter 'dsh-magic-context-adapter' \
+            --filter 'dsh-magic-context'
+
+      - name: typecheck:dsh (adapter-api + dsh-plugin, incl. compile-time DSH API contract)
+        id: tc_dsh
+        continue-on-error: true
+        run: bun run typecheck:dsh
+
+      - name: core typecheck (packages/plugin)
+        id: tc_core
+        continue-on-error: true
+        run: bun run --cwd packages/plugin typecheck
+
+      - name: dsh-plugin tests
+        id: t_dsh
+        continue-on-error: true
+        run: bun run --cwd packages/dsh-plugin test 2>&1 | tee "$RUNNER_TEMP/dsh-plugin.log"; exit ${PIPESTATUS[0]}
+
+      - name: adapter-api tests
+        id: t_api
+        continue-on-error: true
+        run: bun run --cwd packages/adapter-api test 2>&1 | tee "$RUNNER_TEMP/adapter-api.log"; exit ${PIPESTATUS[0]}
+
+      - name: contracts:dsh
+        id: t_contracts
+        continue-on-error: true
+        run: bun run contracts:dsh 2>&1 | tee "$RUNNER_TEMP/contracts.log"; exit ${PIPESTATUS[0]}
+
+      - name: Summary
+        if: always()
+        run: |
+          count() { grep -E "^ *[0-9]+ $2\$" "$RUNNER_TEMP/$1.log" 2>/dev/null | awk '{print $1}' | tail -n 1; }
+          {
+            echo "### dsh-ci checks @ ${GITHUB_SHA::9}"
+            echo "| step | outcome | pass | fail |"
+            echo "|---|---|---|---|"
+            echo "| typecheck:dsh | ${{ steps.tc_dsh.outcome }} | | |"
+            echo "| core typecheck | ${{ steps.tc_core.outcome }} | | |"
+            echo "| dsh-plugin | ${{ steps.t_dsh.outcome }} | $(count dsh-plugin pass) | $(count dsh-plugin fail) |"
+            echo "| adapter-api | ${{ steps.t_api.outcome }} | $(count adapter-api pass) | $(count adapter-api fail) |"
+            echo "| contracts:dsh | ${{ steps.t_contracts.outcome }} | $(count contracts pass) | $(count contracts fail) |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          for o in "${{ steps.tc_dsh.outcome }}" "${{ steps.tc_core.outcome }}" "${{ steps.t_dsh.outcome }}" \
+                   "${{ steps.t_api.outcome }}" "${{ steps.t_contracts.outcome }}"; do
+            [ "$o" = "success" ] || exit 1
+          done
+
+  e2e:
+    if: >-
+      github.repository == 'ceyirelehe47/magic-context' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scratch dirs (outside the checkout)
+        run: |
+          echo "E2E_ROOT=$RUNNER_TEMP/e2e" >> "$GITHUB_ENV"
+          echo "CI_OUT=$RUNNER_TEMP/e2e/ci" >> "$GITHUB_ENV"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Bootstrap (filtered workspace install + local DSH ${{ env.DSH_VERSION }})
+        # Same script as the local r9–r13 runs; BUN_VERSION makes it keep the
+        # runner's bun instead of downloading one.
+        working-directory: packages/dsh-plugin
+        env:
+          INSTALL_TIMEOUT: "600"
+        run: |
+          bash scripts/e2e/bootstrap.sh
+          node "$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js" --version || true
+
+      - name: Build + install into a scratch profile + setup/doctor
+        working-directory: packages/dsh-plugin
+        run: |
+          bun run build
+          bash scripts/e2e/install-profile.sh test headless
+          source scripts/e2e/env.sh
+          node dist/cli.js setup --profile test
+          node dist/cli.js doctor --profile test
+
+      - name: Real turns (worker self-test normal/timeout, 3-process session)
+        working-directory: packages/dsh-plugin
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          if [ -z "$OPENCODE_API_KEY" ]; then echo "::error::secret OPENCODE_API_KEY is not set"; exit 1; fi
+          bash scripts/e2e/ci-e2e.sh
+
+      - name: Redact logs
+        if: always()
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          mkdir -p "$CI_OUT"
+          python3 packages/dsh-plugin/scripts/e2e/ci-check.py redact "$CI_OUT"
+
+      - name: Check
+        id: check
+        working-directory: packages/dsh-plugin
+        run: |
+          set +e
+          python3 scripts/e2e/ci-check.py check "$CI_OUT"
+          rc=$?
+          cat "$CI_OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+
+      - name: Upload redacted e2e logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-e2e-${{ github.run_id }}
+          path: ${{ runner.temp }}/e2e/ci
+          retention-days: 7
+          if-no-files-found: warn
