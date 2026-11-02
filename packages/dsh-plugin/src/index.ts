@@ -115,6 +115,25 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
     },
   };
   ctx.provide("magicContextHost", host);
+  // Unload/reload (round 15): release this instance's liveness marker so a
+  // process that keeps running without the host no longer makes the core
+  // migration guard treat Magic Context as live here. The shared DB stays open
+  // (core keeps one connection per path; a reload reuses it).
+  if (typeof (ctx as unknown as { effect?: unknown }).effect === "function") {
+    ctx.effect(
+      () => () => {
+        void ready.then(
+          (outcome) => {
+            if (outcome.kind === "ok") outcome.release?.();
+          },
+          () => {
+            // A failed bootstrap already removed its marker.
+          },
+        );
+      },
+      "magic-context:host-liveness",
+    );
+  }
   // This bundle ships its own settings page (settings.section), so opt out of
   // schema auto-generation. Optional: the host runs without dsh-settings.
   const inject = (ctx as unknown as {

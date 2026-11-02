@@ -12,6 +12,7 @@
  *   5. `openDatabaseAsync()` — null means schema-fence or migration-guard
  *      refusal → fail-closed decision by the caller.
  */
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   migrateMagicContextConfigLocations,
@@ -46,6 +47,13 @@ export type DshStorageBootstrap =
       readonly db: Database;
       readonly storageDir: string;
       readonly livenessPath: string;
+      /**
+       * Remove this instance's liveness marker (host unload). A no-op when the
+       * file was since rewritten by a newer instance of this process (reload)
+       * or is already gone. The DB is NOT closed here: core keeps one
+       * connection per path for the process and a reload reuses it.
+       */
+      readonly release?: () => void;
     }
   | {
       readonly kind: "refused";
@@ -123,18 +131,36 @@ export async function bootstrapDshStorage(
     // schema fence only tracks schema_migrations; these dsh_* tables are the
     // adapter's own persistence and never touch core migrations.
     initializeDshAdapterTables(db);
+    const startedAt = nextMarkerStartedAt();
     const markerPathOut = writeDshLivenessMarker({
       storageDir,
       projectPath: opts.directory,
       port: opts.port,
       instanceId: process.pid.toString(16),
+      startedAt,
     });
     log(`[magic-context] dsh liveness marker: ${markerPathOut}`);
-    return { kind: "ok", db, storageDir, livenessPath: markerPathOut };
+    const release = (): void => {
+      try {
+        const record = JSON.parse(readFileSync(markerPathOut, "utf8")) as { pid?: unknown; started_at?: unknown };
+        if (record.pid !== process.pid || record.started_at !== startedAt) return;
+      } catch {
+        return; // gone or unreadable: nothing of ours to remove
+      }
+      removeDshLivenessMarker(markerPathOut);
+    };
+    return { kind: "ok", db, storageDir, livenessPath: markerPathOut, release };
   } catch (error) {
     removeDshLivenessMarker(ownLivenessPath);
     throw error;
   }
+}
+
+/** Strictly increasing marker timestamps, so two boots in one ms stay distinct. */
+let lastMarkerStartedAt = 0;
+function nextMarkerStartedAt(): number {
+  lastMarkerStartedAt = Math.max(Date.now(), lastMarkerStartedAt + 1);
+  return lastMarkerStartedAt;
 }
 
 /** Canonical Magic session key for a DSH session under this home. */
