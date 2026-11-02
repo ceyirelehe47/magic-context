@@ -96,21 +96,51 @@ export function restrictChildTools(child: Agent, allow: readonly string[]): bool
   const tools = (scoped?.tools ?? scoped?.get?.("tools")) as
     | {
         restrict?: (filter: ToolRestriction) => () => void;
-        get?: (name: string) => unknown;
+        get?: (name: string, scope?: unknown) => unknown;
+        view?: (scope?: unknown) => { restrictableNames?: ReadonlySet<string> } | undefined;
       }
     | undefined;
   if (typeof tools?.restrict !== "function") return false;
-  // rc.5 `tools.restrict()` throws on ANY unknown global name, so a default
-  // allowlist naming a tool this install lacks (e.g. `fs_search`, which rc.5
-  // splits into `grep`/`glob`) would fail the worker closed forever. Keep only
-  // names the registry knows; an empty result still fails closed.
-  const known =
-    typeof tools.get === "function"
-      ? allow.filter((name) => tools.get?.(name) !== undefined)
-      : [...allow];
+  // rc.5 `tools.restrict()` throws on ANY name outside the child scope's
+  // `view(scope).restrictableNames` (the global layer + every ANCESTOR layer,
+  // e.g. tools a preset mounted on the agent plane; never the child's own
+  // layer). A default allowlist naming a tool this install lacks (e.g.
+  // `fs_search`, which rc.5 splits into `grep`/`glob`) would fail the worker
+  // closed forever, so keep only names restrict() will accept. Check the
+  // CHILD's scoped view: `get(name)` without a scope reads the global layer
+  // only and misses ancestor contributions. An empty result still fails closed.
+  const known = knownRestrictableNames(tools, child, allow);
   if (known.length === 0) return false;
   tools.restrict({ allow: known });
   return true;
+}
+
+function knownRestrictableNames(
+  tools: {
+    get?: (name: string, scope?: unknown) => unknown;
+    view?: (scope?: unknown) => { restrictableNames?: ReadonlySet<string> } | undefined;
+  },
+  child: Agent,
+  allow: readonly string[],
+): string[] {
+  if (typeof tools.view === "function") {
+    try {
+      const names = tools.view(child)?.restrictableNames;
+      if (names !== undefined && typeof names.has === "function") return allow.filter((name) => names.has(name));
+    } catch {
+      // fall through to the per-name lookup
+    }
+  }
+  if (typeof tools.get === "function") {
+    return allow.filter((name) => {
+      try {
+        return tools.get?.(name, child) !== undefined || tools.get?.(name) !== undefined;
+      } catch {
+        return false;
+      }
+    });
+  }
+  return [...allow];
 }
 
 /** Resolve the subagents service from a context (undefined-safe read). */
