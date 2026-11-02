@@ -129,24 +129,33 @@ export async function runMagicWorker(
     }
 
     const timeout = deps.timeoutMs ?? 120_000;
-    const result = await Promise.race([
-      run.result,
-      new Promise<null>((resolve) => {
-        const timer = setTimeout(() => {
-          void run.dispose().catch(() => {});
-          resolve(null);
-        }, timeout);
-        deps.signal.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
+    // The timeout timer and the abort listener are torn down as soon as the
+    // race settles: a finished worker must not be disposed 120 s later (nor on
+    // a later parent abort), and a pending timer would hold a one-shot
+    // headless process open until it fired.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
+    let result: Awaited<typeof run.result> | null;
+    try {
+      result = await Promise.race([
+        run.result,
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => {
             void run.dispose().catch(() => {});
             resolve(null);
-          },
-          { once: true },
-        );
-      }),
-    ]);
+          }, timeout);
+          onAbort = () => {
+            void run.dispose().catch(() => {});
+            resolve(null);
+          };
+          if (deps.signal.aborted) onAbort();
+          else deps.signal.addEventListener("abort", onAbort, { once: true });
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      if (onAbort !== undefined) deps.signal.removeEventListener("abort", onAbort);
+    }
     if (result === null) return null;
     const stopReason = (result as { stopReason?: string }).stopReason;
     if (stopReason === "error" || stopReason === "aborted" || stopReason === "refusal") {

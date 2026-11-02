@@ -159,4 +159,46 @@ describe("recursion isolation (PLAN §9)", () => {
       false,
     );
   });
+
+  it("a finished worker leaves no timeout timer / abort listener behind (no late dispose, no 120 s exit hang)", async () => {
+    let ctxRef: ReturnType<typeof makeCtx> | undefined;
+    const sub = fakeSubagents({ emitCreated: (a) => ctxRef!.emitCreated(a) });
+    let disposed = 0;
+    const start = sub.service.startActivation;
+    sub.service.startActivation = async (spec: Record<string, unknown>) => {
+      const run = await start(spec);
+      return { ...run, dispose: async () => void (disposed += 1) };
+    };
+    const ctx = makeCtx(sub.service);
+    ctxRef = ctx;
+    const controller = new AbortController();
+    let listeners = 0;
+    const signal = controller.signal;
+    const add = signal.addEventListener.bind(signal);
+    const remove = signal.removeEventListener.bind(signal);
+    (signal as { addEventListener: unknown }).addEventListener = (...args: Parameters<typeof add>) => {
+      listeners += 1;
+      return add(...args);
+    };
+    (signal as { removeEventListener: unknown }).removeEventListener = (...args: Parameters<typeof remove>) => {
+      listeners -= 1;
+      return remove(...args);
+    };
+    const result = await runMagicWorker(ctx as never, {
+      parent: makeParent(),
+      label: "magic-worker-timer",
+      prompt: "p",
+      allow: ["read"],
+      signal,
+      timeoutMs: 30,
+      log: () => {},
+    });
+    expect(result?.text).toBe("worker output");
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(disposed).toBe(0);
+    expect(listeners).toBe(0);
+    // A later abort of the parent's signal must not dispose the finished run.
+    controller.abort();
+    expect(disposed).toBe(0);
+  });
 });
