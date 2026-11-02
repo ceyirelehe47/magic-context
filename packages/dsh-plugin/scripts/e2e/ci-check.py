@@ -15,8 +15,9 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       compartments written, prompt tokens fell below the peak,
       the early codeword is still answerable, no §N§ in visible output, no
       overlapping / stuck compression
-  S*  round 17: delegated child hits its 24k limit: stock summarizer ran in
-      the child, Magic wrote no child rows, child finished, parent answered
+  S*  round 17/18: delegated child reads eight <8 KB files on a 24k route:
+      the stock compaction-basic summarizer (not only the pruner) ran in the
+      child, Magic wrote no child rows, child finished, result reached the parent
   U*  round 17: ctx_search / ctx_memory / ctx_expand used once each; the
       settings-page readout and /ctx-status agree with the DB; doctor clean
   P1  no dsh process left after the runs
@@ -294,8 +295,11 @@ def check_r17_child(c, out: Path, runs):
             u = (e.get("data") or {}).get("usage") or {}
             usage.append((u.get("totalTokens") or 0) - (u.get("outputTokens") or 0))
     turn_end = [e.get("data", {}).get("reason") for e in cev if e.get("type") == "turn/end"]
-    c.add("S2", summaries >= 1 and not errors, "child compacted with the stock summarizer (compaction/summary, no error)",
-          {"compaction/start": starts, "compaction/summary": summaries, "errors": errors[:2], "childPromptTokens": usage})
+    prunes = types.count("compaction/prune")
+    c.add("S2", summaries >= 1 and not errors,
+          "child reached the stock compaction-basic SUMMARIZER (compaction/summary, not only prune; no error)",
+          {"compaction/start": starts, "compaction/summary": summaries, "compaction/prune": prunes,
+           "errors": errors[:2], "childPromptTokens": usage})
     c.add("S3", all("<compartment" not in s and "§" not in s for s in summary_texts),
           "child summary is not MC historian output (no <compartment>, no §N§)", [s[:200] for s in summary_texts[:2]])
     dbk = load_json(out / "db-child.json") or {}
@@ -311,9 +315,25 @@ def check_r17_child(c, out: Path, runs):
           "MC table growth during the child run is the parent's own only", {"delta": delta, "parentCompartments": pcomp})
     c.add("S6", isinstance(turn_end[-1] if turn_end else None, dict) and turn_end[-1].get("kind") == "completed",
           "child turn completed", turn_end[-1:] if turn_end else None)
+    # S7 (round 18): the child read eight generated files whose CHECKSUM line
+    # is only reachable by reading each whole file; its result reaches the
+    # parent. Counted on the parent's reply, or the child's own final message
+    # when the parent paraphrased ("already delivered above", round 17).
     ptext = final_text(out / "child-parent.log") or ""
-    hits = sum(1 for f in ("outbox.ts", "meter.ts", "nudge.ts", "pressure-truncation.ts") if f in ptext)
-    c.add("S7", hits >= 3, "parent reply carries the child's result lines", ptext[:300])
+    sums_path = out / "child-checksums.txt"
+    sums = [l.split("\t")[1] for l in sums_path.read_text().splitlines() if l.strip()] if sums_path.exists() else []
+    ctext = ""
+    for e in cev:
+        if e.get("type") == "assistant/message":
+            msg = (e.get("data") or {}).get("message") or {}
+            parts = [b.get("text", "") for b in (msg.get("content") or []) if isinstance(b, dict) and b.get("type") == "text"]
+            if any(p.strip() for p in parts):
+                ctext = "".join(parts)
+    phits = sum(1 for x in sums if x in ptext)
+    chits = sum(1 for x in sums if x in ctext)
+    c.add("S7", bool(sums) and max(phits, chits) >= 6,
+          "child result (>= 6 of 8 CHECKSUM codes) in the parent reply or the child's final message",
+          {"parentHits": phits, "childHits": chits, "of": len(sums), "parent": ptext[:200], "child": ctext[:200]})
 
 
 def check(out: Path) -> int:
