@@ -105,6 +105,11 @@ describe("drops land on messages that were already tagged (op copies are expande
       expect(texts.some((t) => t.includes(`[dropped \u00a7${msg.tag_number}\u00a7]`))).toBe(true);
       expect(texts.some((t) => t.includes("BODY1 BODY1"))).toBe(false);
       expect(texts.some((t) => t.includes("BODY4 BODY4"))).toBe(true);
+      // Round 11: a dropped tool arc (call + result parts of one folded copy)
+      // renders ONE placeholder, not one per part (real rc.5 showed
+      // "[dropped §3§]\n\n[dropped §3§]").
+      const marker = `[dropped \u00a7${tool.tag_number}\u00a7]`;
+      expect(texts.join("\n").split(marker).length - 1).toBe(1);
     });
   });
 

@@ -1271,10 +1271,16 @@ export class RecordingMessage implements TranscriptMessage {
 
   /** Full Magic-rendered text of this message in its CURRENT (recorded) state. */
   render(): string {
-    return this.parts
-      .map((part) => part.render())
-      .filter((value): value is string => value !== null && value.length > 0)
-      .join("\n\n");
+    const out: string[] = [];
+    for (const part of this.parts) {
+      const value = part.render();
+      if (value === null || value.length === 0) continue;
+      // A dropped tool arc puts the same `[dropped §N§]` sentinel on its call
+      // AND its result part (DSH folds both into one copy): render it once.
+      if (DROPPED_SENTINEL_PATTERN.test(value) && out[out.length - 1] === value) continue;
+      out.push(value);
+    }
+    return out.join("\n\n");
   }
 }
 
