@@ -242,7 +242,7 @@ describe("agent plane live settings", () => {
     expect(before).not.toBe(42);
   });
 
-  it("host service dereferences volatile refs from its Config", () => {
+  it("host service dereferences volatile refs from its Config", async () => {
     const schema = hostEntry.Config as (value: unknown) => Record<string, unknown>;
     const config = schema({ protectedTokens: 12_000 });
     const provided: Record<string, unknown> = {};
@@ -255,5 +255,10 @@ describe("agent plane live settings", () => {
     hostEntry.apply(ctx as never, { ...config, directory: "/tmp", homeHash: "abcd1234" } as never);
     const service = provided.magicContextHost as MagicContextHostService;
     expect(service.overrides?.()).toEqual({ protectedTokens: 12_000 });
+    // apply() starts the storage bootstrap in the background. Settle it inside
+    // the test and close the DB: left dangling, a late open failure surfaced as
+    // an "Unhandled error between tests" in a later file (round 13, loaded sandbox).
+    const outcome = (await service.ready) as { kind: string; db?: { close(): void } };
+    if (outcome.kind === "ok") outcome.db?.close();
   });
 });
