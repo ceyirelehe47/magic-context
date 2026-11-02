@@ -47,6 +47,66 @@ Baseline (round 13, 2026-11-02, DSH 0.2.1-rc.5, bun 1.4.4, filtered install abov
 **425 pass**, `contracts:dsh` **98 pass**, 0 fail everywhere. The filtered
 install is enough for a clean typecheck; nothing else has to be installed.
 
+## CI (`.github/workflows/dsh-ci.yml`)
+
+DSH 自己的 CI，只在本 fork 运行（`if: github.repository == 'ceyirelehe47/magic-context'`）。
+上游的 `ci.yml` 在 fork 的 Actions 设置里禁用，**不要改上游的 workflow 文件**；`dsh-ci.yml`
+是新文件，只存在于 DSH 分支上。能交给 Actions 的验证都交给它，本地只做快速迭代
+（本地 2 核 / 8 GB 的沙箱跑全量 tsc 很慢，还容易被 OOM）。
+
+| job | 何时运行 | 做什么 |
+|---|---|---|
+| `checks` | push 到 `dsh-integration` / `dsh-sync/**`，以及每次手动触发 | bun 1.4.2（与 `packageManager` 一致）→ filtered install（同 `upstream-sync.yml`）→ `typecheck:dsh` → core typecheck（`packages/plugin`）→ dsh-plugin 测试 → adapter-api 测试 → `contracts:dsh`；各步 `continue-on-error`，最后的 Summary 步骤汇总结果和 pass/fail 数，任何一步失败则 job 失败 |
+| `e2e` | **只在** `workflow_dispatch` 且输入 `e2e=true` 时运行（消耗模型额度） | 真实 `@deepseek-ai/dsh` 0.2.1-rc.5 headless + OpenCode Go（与本地 r9–r13 相同的 `model-opencode-go.yml`：24k 主路由 + 200k historian 路由），见下文 |
+
+`e2e` 的步骤（脚本都在 `packages/dsh-plugin/scripts/e2e/`）：
+
+1. `bootstrap.sh`（`INSTALL_TIMEOUT=600`；runner 已有 bun 1.4.2，不会另外下载）→
+   `bun run build` → `install-profile.sh test headless` → `setup --profile test` → `doctor`。
+   全部装在 `$RUNNER_TEMP/e2e` 下（`E2E_ROOT`），不碰 runner 的全局 `~/.dsh`。
+2. `ci-e2e.sh`：每次 `run-headless.sh` 都是一个新的 `dsh` 进程。
+   - `selftest-normal`：`MAGIC_CONTEXT_DSH_WORKER_SELFTEST=1`，默认 worker 超时；
+   - `selftest-timeout`：同上，`MAGIC_CONTEXT_DSH_WORKER_SELFTEST_TIMEOUT_MS=1500`；
+     模型没调用 `ctx_worker_selftest` 时各重试一次；
+   - `multi-1..3`：同一个会话跑三轮（中间两次进程重启），每轮之后用 `ci-db.ts` 导出该会话的 tags；
+   - 解码两个子会话的 `session.v4.jsonl.zstd`，导出子会话在 Magic 各表中的行数，记录残留的 `dsh` 进程。
+3. `ci-check.py redact`：把 `OPENCODE_API_KEY` 的字面值（只在内存里比对，不打印）、
+   `sk-…` / `token=…` 一类的串和 `$HOME` 路径替换掉；`ci-check.py check` 写 `summary.md`
+   （同时贴到 job summary），任何 FAIL 都会让 job 失败。
+4. `actions/upload-artifact@v4` 上传 `$RUNNER_TEMP/e2e/ci`（脱敏后的 turn 日志、子会话事件、
+   DB 导出、`summary.md`），名为 `dsh-e2e-<run_id>`，保留 7 天。一次运行约 30 KB，远低于 500 MB 上限。
+
+检查项（`ci-check.py`）：
+
+| id | 内容 |
+|---|---|
+| N0–N5, Nc1–Nc3 | 正常 worker：`ok:true`；子会话可见工具与实际请求里的工具 ⊆ `read/grep/glob`；`bash/write/edit/ctx_*` 在子会话作用域解析为 `child:false`（执行器会报 `UNKNOWN_TOOL`）；`workerText`、子会话 system prompt 和回复里都没有 `§N§`；子会话在 Magic 表里 0 行 |
+| T0–T3, Tc1–Tc4 | 1500 ms 超时：`ok:false`；`workerLog` 写明 `worker timed out after 1500ms; child disposed`（复验 `502d74b94`）；子会话 `turn/end` 为 `aborted {kind: parent}`；子会话 0 行 |
+| M0–M4 | 三个进程、同一个会话：每轮退出码 0；每轮之后 tag 号和 message id 都唯一、从 1 连续编号；重启前已有的 tag 号在之后的导出里都不变 |
+| M5（WARN） | 模型回复开头的 `§N§` 当时没有被其他消息占用（属于模型行为，只告警） |
+| P1 | 运行结束后没有残留的 `dsh` 进程 |
+| Nc5 / Tc5 | 子会话的 `sandbox/mode` 事件，仅记录（见下文 worker 沙箱一节） |
+
+触发与查看（本环境没有 `gh`，用 `apicall github`）：
+
+```bash
+# 手动跑一次 e2e（checks 也会一起跑）
+apicall github workflow_dispatch owner=ceyirelehe47 repo=magic-context \
+  workflow_id=dsh-ci.yml ref=dsh-integration inputs='{"e2e":"true"}'
+apicall github workflow_runs_list_for_workflow owner=ceyirelehe47 repo=magic-context workflow_id=dsh-ci.yml per_page=5
+apicall github workflow_run_jobs_list owner=ceyirelehe47 repo=magic-context run_id=<id>
+apicall github workflow_job_logs_get owner=ceyirelehe47 repo=magic-context job_id=<job id>
+apicall github workflow_run_artifacts_list owner=ceyirelehe47 repo=magic-context run_id=<id>
+```
+
+前提：仓库 secret `OPENCODE_API_KEY`（只通过 step 的 `env` 传入；GitHub 会在日志里把它
+显示成 `***`；`ci-e2e.sh` 不用 `set -x`，也不打印环境变量）。没有设置这个 secret 时，
+`e2e` 会在第一轮之前报错退出。
+
+首次结果（round 14）：push run 41464023149（`checks` 全绿：dsh-plugin 425 / adapter-api 15 /
+contracts 98，typecheck:dsh 和 core typecheck 均 0 错误）；dispatch run 41464255692
+（`e2e=true`，`checks` + `e2e` 全部 PASS，`T2` 在真实 rc.5 上确认了 `502d74b94` 的超时原因日志）。
+
 ## Syncing with upstream
 
 ### Automatic (`upstream-sync.yml`)
@@ -536,8 +596,23 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
 2. **Core borrows the `opencode` model harness** (`historian.opencode`,
    `dreamer.opencode`); there is no first-class `dsh` harness in core. See
    open point 1.
-3. **Worker tool allowlist not verified against a real DSH runtime** (unit
-   tests only; no production path uses the worker yet). See open point 2.
+3. **Worker tool allowlist — verified on real rc.5 (round 13 locally, round 14 in
+   CI `dsh-ci.yml` e2e N*/T*), still not used by any production path.** See open
+   point 2. **Worker sandbox:** the child runs with the parent's
+   `sandbox/mode` (`workspace-write` in the test profile) and `approval/policy
+   never`. This is rc.5's native delegation behaviour, not ours:
+   `@deepseek-ai/dsh-subagent` `lib/index.js` `SubagentRuntime.startActivation`
+   → `startLocal()` calls `captureDelegatedPolicyOverrides(parent)`
+   (`sandboxMode = sandboxPolicy.overrideOf(parent.session)`, approval pinned to
+   `never`), and the child `setup` in `materializeTracked()` calls
+   `appendDelegatedPolicyOverrides(child.session, …)`, which appends
+   `sandbox/mode {source: "delegation"}`. `runMagicWorker` passes no sandbox
+   parameter (`SubagentStartRequest` has none in rc.5); its `agent/created`
+   listener re-appends the same captured pair, which is why child logs show
+   `sandbox/mode` + `approval/policy` twice (seq 1–2 from DSH, 3–4 from us,
+   identical values). Left as is: a read-only child would need a DSH-side
+   option; the worker's write capability is already removed by the tool
+   allowlist (no `bash`/`write`/`edit` resolvable in the child scope).
 4. **No bubblewrap on the verification machine.** The Linux sandbox used for
    the e2e runs has no `bwrap`, so DSH's sandboxed shell/tool execution was
    not exercised there; in the web UI every shell call asks for
@@ -703,6 +778,28 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     sessions were created under the `standard` preset, which the one-shot runner
     cannot resume, so the fold was verified on a copy of the real DB, not
     inside a resumed DSH session.
+
+12. **`dsh_context_compaction_marker` rows stay `pending` forever (round 14,
+    static + DB).** The historian's atomic publish (`agent/historian.ts`
+    `publishHistorianResult`) stages a marker (`stageDshCompactionMarker`, one
+    row per session, `INSERT OR REPLACE`), mirroring Pi's
+    `pending_pi_compaction_marker_state`. In Pi the marker is drained through
+    Pi's `appendCompaction()` (native session trim). In the DSH port its
+    consumer `applyDshCompactionMarkerIfCovered` has **no production caller**:
+    the surface is trimmed by Magic's own path instead (the publish queues
+    drops for the compartmentalized range → coordinator surface replace, plus
+    `<session-history>` rendering of the compartments). So the round 13 run-31
+    "pending at process exit" is not an exit race — every marker in the local
+    DB (9 sessions, incl. multi-process sessions) is `pending`. Impact: no data
+    loss (compartments, facts, drops and the publication floor commit in the
+    same transaction; the marker is only a pointer; DSH keeps the original
+    events in its log) and no double compaction (nothing reads the row; a newer
+    publish overwrites it). Not wired on purpose: appending a DSH
+    `compaction/summary` on top of Magic's drops would put the same summary in
+    front of the model twice (Pi has to strip exactly that duplicate,
+    `stripMcOwnedPiCompactionSummary`) and bust the prompt cache. If DSH-native
+    trimming is ever wanted, wire the consumer and drop Magic's own trim for
+    that range in the same change.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
