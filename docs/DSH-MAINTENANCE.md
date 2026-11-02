@@ -42,7 +42,15 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 15, 2026-11-03, DSH 0.2.1-rc.5, CI `dsh-ci.yml` on bun 1.4.2
+Baseline (round 16, 2026-11-03, DSH 0.2.1-rc.5, core **v0.49.35** merged at
+`3d9511f23`; push run 41531086184 and dispatch run 41531489091 (`e2e=true`)
+@ `3d9511f23`): `typecheck:dsh` **0 errors**, core typecheck **0 errors**,
+`dsh-plugin` **451 pass** (62 files; +4 = `child-session-compaction.test.ts`),
+`adapter-api` **15 pass**, `contracts:dsh` **98 pass**, 0 fail; real-model
+`e2e` **35/35 PASS**. The e2e does not drive a child session to its context
+limit, so the round 16 child-compaction fix is verified by unit tests only.
+
+Previous baseline (round 15, 2026-11-03, DSH 0.2.1-rc.5, CI `dsh-ci.yml` on bun 1.4.2
 with the filtered install above, push run 41495367987 and dispatch run
 41497195497 (`e2e=true`) @ `5f8fe562b`): `typecheck:dsh` **0 errors**, core
 typecheck (`packages/plugin`) **0 errors**, `adapter-api` **15 pass**,
