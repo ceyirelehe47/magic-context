@@ -119,8 +119,11 @@ core 原样来自上游 release tag，DSH 层（`packages/adapter-api`、`packag
 - git tag 用 `dsh/<upstream>-dsh.N`（例如 `dsh/0.49.34-dsh.1`）。**不要用 `v*` 或
   `dashboard-v*`**：fork 里保留着上游的 `release.yml`（`push: tags: v*`）和
   `dashboard-release.yml`（`dashboard-v*`），这类 tag 一推就会在 fork 上跑上游的发布流程。
-- `packages/dsh-plugin/package.json` 目前仍是 `0.2.0`；第一次正式打 `-dsh.N` 发行版时
-  把它改成同一个版本号（`0.49.34-dsh.1` 是合法 semver 预发布号），与 tag 保持一致。
+- `packages/dsh-plugin/package.json` 的版本号已按此规则改为 `0.49.34-dsh.1`（round 14），
+  打 tag 时用同一个号（`dsh/0.49.34-dsh.1`）。`dsh-magic-context --version` 直接读
+  `package.json`，不再单独维护一份；`src/doctor/cli-version.test.ts` 同时检查版本号符合
+  `<upstream>-dsh.N`。注意 `bun.lock` 里 workspace 条目的 `version` 仍是 `0.2.0`，下次
+  需要改 lockfile 时用 `bun install --lockfile-only` 一并刷新（本轮约定不动 lockfile）。
 
 ### 同步节奏
 

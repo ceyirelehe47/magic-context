@@ -15,8 +15,11 @@
 import { runDshSetup, type SetupReport } from "./setup";
 import { runDshDoctor, type DoctorReport } from "./doctor";
 import { MAGIC_CONTEXT_PACKAGE } from "./env";
+// Single source of truth: the package version (bundled into dist/cli.js by
+// `bun build`), never a hand-kept copy that drifts on a release bump.
+import packageJson from "../../package.json";
 
-const VERSION = "0.2.0";
+const VERSION: string = packageJson.version;
 
 export function printSetupReport(report: SetupReport): void {
   for (const step of report.steps) {
