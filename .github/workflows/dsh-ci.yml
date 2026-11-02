@@ -9,7 +9,10 @@
 #           real @deepseek-ai/dsh 0.2.1-rc.5 headless + OpenCode Go
 #           (secret OPENCODE_API_KEY): worker self-test (normal + 1500 ms
 #           timeout), one session over three processes (§N§ identity across
-#           restarts); redacted logs uploaded as an artifact (7 days)
+#           restarts), round 17 real-use scenarios (main session past the 65 %
+#           threshold on a 40k route; delegated child hitting its 24k limit;
+#           ctx_search/ctx_memory/ctx_expand + status readouts); redacted logs
+#           uploaded as an artifact (7 days)
 #
 # Upstream workflows are left untouched (ci.yml is disabled in the fork's
 # Actions settings). This file is new and lives only on the DSH branches.
@@ -106,7 +109,7 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       inputs.e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
 
@@ -142,7 +145,7 @@ jobs:
           node dist/cli.js setup --profile test
           node dist/cli.js doctor --profile test
 
-      - name: Real turns (worker self-test normal/timeout, 3-process session)
+      - name: Real turns (worker self-test, 3-process session, round 17 scenarios C/S/U)
         working-directory: packages/dsh-plugin
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}

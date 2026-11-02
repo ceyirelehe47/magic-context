@@ -10,6 +10,14 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
   N*  worker self-test, default timeout   (round 13 A1/A2/A3/A5 on CI)
   T*  worker self-test, 1500 ms timeout   (A4 + re-verification of 502d74b94)
   M*  one session over three processes    (§N§ tag identity across restarts)
+  C*  round 17: main session past the 65 % execute threshold (40k window):
+      historian fired at 65 %, compartments written, prompt tokens fell,
+      the early codeword is still answerable, no §N§ in visible output, no
+      overlapping / stuck compression
+  S*  round 17: delegated child hits its 24k limit: stock summarizer ran in
+      the child, Magic wrote no child rows, child finished, parent answered
+  U*  round 17: ctx_search / ctx_memory / ctx_expand used once each; the
+      settings-page readout and /ctx-status agree with the DB; doctor clean
   P1  no dsh process left after the runs
 """
 import json
@@ -21,6 +29,11 @@ from pathlib import Path
 ALLOWED_CHILD_TOOLS = {"read", "grep", "glob", "fs_search"}
 MASKED = ("bash", "write", "edit", "ctx_search", "ctx_reduce")
 TAG_PREFIX = re.compile(r"^\s*§(\d+)§")
+TRIGGER = re.compile(r"historian trigger: pct=(\d+) threshold=(\d+) budget=(\d+) window=(\d+) fires=(true|false)")
+CODEWORD = os.environ.get("MC_E2E_CODEWORD", "AMBER-FALCON-7319")
+MC_SESSION_TABLES = ("compartments", "compartment_history_versions", "dsh_context_compaction_marker",
+                     "compartment_state_lease", "session_meta", "tags", "pending_ops", "dsh_context_outbox",
+                     "dsh_pressure_truncations", "historian_runs")
 
 
 def events(path: Path):
@@ -103,6 +116,193 @@ def check_child_log(c, prefix, path: Path, expect_abort: bool):
         c.add(f"{prefix}c4", isinstance(turn_end, dict) and turn_end.get("kind") == "aborted",
               "child turn/end aborted (disposed)", turn_end)
     c.add(f"{prefix}c5", True, "child sandbox/mode events (informational)", sandbox)
+
+
+def run_steps(path: Path):
+    """[(turn, step, prompt_tokens)] from the headless step_end usage frames."""
+    out = []
+    for ev in events(path):
+        if ev.get("type") == "status" and ev.get("phase") == "step_end" and isinstance(ev.get("usage"), dict):
+            u = ev["usage"]
+            total = u.get("totalTokens") or 0
+            out.append((ev.get("turn"), ev.get("step"), total - (u.get("outputTokens") or 0)))
+    return out
+
+
+def final_text(path: Path):
+    t = None
+    for ev in events(path):
+        if ev.get("type") == "final":
+            t = ev.get("text", "")
+    return t
+
+
+def visible_texts(path: Path):
+    return [ev.get("text", "") for ev in events(path) if ev.get("type") in ("text", "final")]
+
+
+def tool_calls(path: Path, name: str):
+    calls = {ev.get("callId"): ev for ev in events(path) if ev.get("type") == "tool_call" and ev.get("tool") == name}
+    results = [ev for ev in events(path) if ev.get("type") == "tool_result" and ev.get("callId") in calls]
+    return list(calls.values()), results
+
+
+def triggers(path: Path):
+    if not path.exists():
+        return []
+    return [tuple(m.groups()) for m in TRIGGER.finditer(path.read_text(errors="replace"))]
+
+
+def session_events(path: Path):
+    return events(path)
+
+
+def check_r17(c, out: Path, runs):
+    names = sorted(n for n in runs if n.startswith("cmp-") and n != "cmp-q")
+    if not names:
+        c.add("C0", False, "scenario C ran", "no cmp-* runs")
+        return
+    seq = names + [n for n in ("cmp-q", "use-search", "use-memory", "use-expand") if n in runs]
+    bad = {n: runs[n][1] for n in seq if not runs[n][1].startswith("rc=0")}
+    c.add("C0", not bad, "scenario C/U runs exit 0", bad or len(seq))
+    # C1 historian trigger at the shipped 65 % threshold on the 40k route
+    trig = {n: triggers(out / f"{n}.log") for n in seq}
+    fired = [(n, t) for n, ts in trig.items() for t in ts if t[4] == "true"]
+    thresholds = sorted({t[1] for ts in trig.values() for t in ts})
+    windows = sorted({t[3] for ts in trig.values() for t in ts})
+    first_fire = fired[0] if fired else None
+    c.add("C1", bool(fired) and thresholds == ["65"] and int(first_fire[1][0]) >= 65,
+          "historian trigger fired at pct >= 65 with threshold 65 (never lowered)",
+          {"first": first_fire, "thresholds": thresholds, "windows": windows,
+           "maxPctBeforeFire": max([int(t[0]) for n in seq for t in trig[n] if t[4] == "false"] or [0])})
+    # C2 compartments written; first turn where they appear
+    dumps = {n: load_json(out / f"db-{n}.json") for n in names}
+    first_cmp = next((n for n in names if dumps.get(n) and isinstance(dumps[n].get("compartments"), list)
+                      and len(dumps[n]["compartments"]) > 0), None)
+    final = load_json(out / "db-cmp-final.json") or load_json(out / "db-cmp-q.json") or {}
+    comps = final.get("compartments") if isinstance(final.get("compartments"), list) else []
+    c.add("C2", first_cmp is not None and len(comps) > 0, "historian wrote compartments",
+          {"firstAfter": first_cmp, "compartments": [(x["sequence"], x["start_message"], x["end_message"], x["title"]) for x in comps],
+           "historyVersions": final.get("compartmentHistoryVersions"), "codewordInCompartment": any(x.get("mentionsCodeword") for x in comps)})
+    # C3 prompt tokens before vs after compression
+    steps = {n: run_steps(out / f"{n}.log") for n in seq}
+    tok = {n: [s[2] for s in v] for n, v in steps.items()}
+    detail = {"perRun": tok}
+    ok3 = False
+    if first_cmp is not None:
+        i = seq.index(first_cmp)
+        before = [x for n in seq[: i + 1] for x in tok[n]]
+        after_run = seq[i + 1] if i + 1 < len(seq) else None
+        peak = max(before) if before else None
+        first_after = tok[after_run][0] if after_run and tok.get(after_run) else None
+        detail.update({"peakBefore": peak, "firstStepAfter": first_after, "afterRun": after_run,
+                       "window": 40000, "peakPct": round(100 * peak / 40000, 1) if peak else None,
+                       "afterPct": round(100 * first_after / 40000, 1) if first_after else None})
+        ok3 = peak is not None and first_after is not None and first_after < peak
+    c.add("C3", ok3, "prompt tokens actually sent fell after compression", detail)
+    # C4 codeword after compression
+    ans = final_text(out / "cmp-q.log") or ""
+    c.add("C4", CODEWORD in ans, "early codeword still answered after compression", ans[:200])
+    # C5 no §N§ in user-visible output of any round 17 turn
+    leaks = {}
+    for n in seq + ["child-parent"]:
+        for t in visible_texts(out / f"{n}.log"):
+            if re.search(r"§\d+§", t):
+                leaks.setdefault(n, []).append(t[:80])
+    c.add("C5", not leaks, "no §N§ in visible output (text/final frames)", leaks or "clean")
+    # C6 no overlapping / repeated compression, nothing stuck running
+    ranges = [(x["start_message"], x["end_message"]) for x in comps]
+    overlap = any(b[0] <= a[1] for a, b in zip(ranges, ranges[1:])) or any(a > b for a, b in ranges)
+    seqs = [x["sequence"] for x in comps]
+    meta = final.get("meta") or {}
+    live = [l for l in (final.get("leases") or []) if isinstance(l, dict) and l.get("live")]
+    det = final.get("details") or {}
+    hist = (det.get("historian") or {}) if isinstance(det, dict) else {}
+    c.add("C6", not overlap and seqs == list(range(len(seqs))) and not live and hist.get("state") != "running"
+          and not meta.get("historian_failure_count"),
+          "compartments contiguous, non-overlapping; no live lease; historian not running/failed",
+          {"ranges": ranges, "sequences": seqs, "liveLeases": live, "in_progress": meta.get("compartment_in_progress"),
+           "state": hist.get("state"), "failures": meta.get("historian_failure_count"), "markers": final.get("markers")})
+    # U1-U3 daily tools
+    for cid, run, tool in (("U1", "use-search", "ctx_search"), ("U2", "use-memory", "ctx_memory"), ("U3", "use-expand", "ctx_expand")):
+        calls, results = tool_calls(out / f"{run}.log", tool)
+        okr = [r for r in results if r.get("status") == "completed" and str(r.get("result", "")).strip()]
+        c.add(cid, bool(calls) and bool(okr), f"{tool} called and returned a result",
+              {"calls": [x.get("input", "")[:160] for x in calls], "result": [str(r.get("result", ""))[:200] for r in results]})
+    c.add("U2b", ((final.get("memoryCodeword") or {}).get("n") or 0) >= 1, "ctx_memory write landed in memories",
+          final.get("memoryCodeword"))
+    # U4 settings-page readout and /ctx-status agree with the DB
+    if isinstance(det, dict) and "compartments" in det:
+        ts = {r["status"]: r["n"] for r in (final.get("tagStatus") or []) if isinstance(r, dict)}
+        pend = {r["operation"]: r["n"] for r in (final.get("pendingOps") or []) if isinstance(r, dict)}
+        mism = {}
+        if det.get("compartments") != len(comps):
+            mism["compartments"] = (det.get("compartments"), len(comps))
+        if (det.get("tags") or {}).get("active") != ts.get("active", 0):
+            mism["active"] = ((det.get("tags") or {}).get("active"), ts.get("active", 0))
+        if (det.get("tags") or {}).get("dropped") != ts.get("dropped", 0):
+            mism["dropped"] = ((det.get("tags") or {}).get("dropped"), ts.get("dropped", 0))
+        if (det.get("pending") or {}).get("drops") != pend.get("drop", 0):
+            mism["drops"] = ((det.get("pending") or {}).get("drops"), pend.get("drop", 0))
+        if det.get("lastContextPercentage") != meta.get("last_context_percentage"):
+            mism["pct"] = (det.get("lastContextPercentage"), meta.get("last_context_percentage"))
+        c.add("U4", not mism, "settings page / popover readout == DB", mism or {"compartments": len(comps), "tags": ts, "pending": pend})
+    else:
+        c.add("U4", False, "settings page / popover readout == DB", det)
+    st = final.get("status")
+    if isinstance(st, str):
+        problems = []
+        m = re.search(r"- Compartments: (\d+)", st)
+        if not m or int(m.group(1)) != len(comps):
+            problems.append(f"compartments {m.group(1) if m else None} != {len(comps)}")
+        if "historian) and the mid-turn valve are disabled" in st:
+            problems.append("claims the historian is disabled (OpenCode DB banner)")
+        if re.search(r"- Last input tokens: 0 tokens", st):
+            problems.append("Last input tokens: 0 (DSH never recorded usage)")
+        c.add("U5", not problems, "/ctx-status text agrees with the DB and the live host", problems or "ok")
+    else:
+        c.add("U5", False, "/ctx-status text agrees with the DB and the live host", st)
+    doc = (out / "doctor-after.txt").read_text(errors="replace") if (out / "doctor-after.txt").exists() else ""
+    c.add("U6", "rc=0" in doc and "FAIL" not in doc, "doctor after all runs: rc 0, no FAIL", doc[-300:])
+
+
+def check_r17_child(c, out: Path, runs):
+    # --- S: child hits its context limit
+    tail = runs.get("child-parent", ("", "missing"))[1]
+    c.add("S0", tail.startswith("rc=0"), "child-parent exit", tail)
+    kid = (out / "child.sid").read_text().strip() if (out / "child.sid").exists() else ""
+    c.add("S1", bool(kid), "parent delegated through the subagent tool", kid or "no 'started subagent'")
+    cev = session_events(out / "child-session.jsonl")
+    types = [e.get("type") for e in cev]
+    starts, summaries = types.count("compaction/start"), types.count("compaction/summary")
+    errors = [e.get("data") for e in cev if e.get("type") == "compaction/summary-error"]
+    summary_texts = [json.dumps(e.get("data"), ensure_ascii=False) for e in cev if e.get("type") == "compaction/summary"]
+    usage = []
+    for e in cev:
+        if e.get("type") == "assistant/message":
+            u = (e.get("data") or {}).get("usage") or {}
+            usage.append((u.get("totalTokens") or 0) - (u.get("outputTokens") or 0))
+    turn_end = [e.get("data", {}).get("reason") for e in cev if e.get("type") == "turn/end"]
+    c.add("S2", summaries >= 1 and not errors, "child compacted with the stock summarizer (compaction/summary, no error)",
+          {"compaction/start": starts, "compaction/summary": summaries, "errors": errors[:2], "childPromptTokens": usage})
+    c.add("S3", all("<compartment" not in s and "§" not in s for s in summary_texts),
+          "child summary is not MC historian output (no <compartment>, no §N§)", [s[:200] for s in summary_texts[:2]])
+    dbk = load_json(out / "db-child.json") or {}
+    counts = (dbk.get(kid) or {}).get("counts") if kid else None
+    c.add("S4", kid != "" and counts == {}, "child has 0 rows in every Magic table", counts)
+    s0, s1 = load_json(out / "r17-snap-s0.json") or {}, load_json(out / "r17-snap-s1.json") or {}
+    psid = (out / "child-parent.sid").read_text().strip() if (out / "child-parent.sid").exists() else ""
+    pdump = load_json(out / "db-child-parent.json") or {}
+    delta = {t: (s1.get("counts", {}).get(t, 0) - s0.get("counts", {}).get(t, 0)) for t in MC_SESSION_TABLES}
+    pcomp = len(pdump.get("compartments") or []) if isinstance(pdump.get("compartments"), list) else 0
+    c.add("S5", delta.get("compartments", 0) == pcomp and delta.get("compartment_state_lease", 0) <= 0
+          and delta.get("dsh_context_compaction_marker", 0) <= (1 if pcomp else 0),
+          "MC table growth during the child run is the parent's own only", {"delta": delta, "parentCompartments": pcomp})
+    c.add("S6", isinstance(turn_end[-1] if turn_end else None, dict) and turn_end[-1].get("kind") == "completed",
+          "child turn completed", turn_end[-1:] if turn_end else None)
+    ptext = final_text(out / "child-parent.log") or ""
+    hits = sum(1 for f in ("outbox.ts", "meter.ts", "nudge.ts", "pressure-truncation.ts") if f in ptext)
+    c.add("S7", hits >= 3, "parent reply carries the child's result lines", ptext[:300])
 
 
 def check(out: Path) -> int:
@@ -190,6 +390,10 @@ def check(out: Path) -> int:
         taken = [t["message_id"] for t in dumps.get(k, []) if t["tag_number"] == n]
         c.add(f"M5.{k}", True if not taken else "warn",
               f"turn {k} reply prefix §{n}§ not already owned by another message", taken or "free")
+
+    # --- round 17 scenarios
+    check_r17(c, out, runs)
+    check_r17_child(c, out, runs)
 
     # --- P: process hygiene
     left = (out / "leftover-procs.txt").read_text().split() if (out / "leftover-procs.txt").exists() else []

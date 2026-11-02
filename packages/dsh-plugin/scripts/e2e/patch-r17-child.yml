@@ -1,0 +1,33 @@
+# Round 17 scenario S (ci-e2e.sh): a delegated child that really hits its
+# context limit.
+#
+#   tool-subagent    the stock `subagent` tool (spawn provider), with every
+#                    child routed to opencode-go-child (24k window, 2048 out).
+#   magic-compaction the Magic compaction row written by `setup` (auto) plus a
+#                    compaction-basic policy for that child route only:
+#                    compaction-basic's default 65 536-token headroom leaves a
+#                    24k route NO pressure budget (pressure compaction never
+#                    fires), so the small route gets headroom 0 / threshold
+#                    0.7 (16 800 tokens) / 3 000 retained tokens / 2 048 summary
+#                    tokens — exactly what the compaction-basic README asks of
+#                    small-window deployments. The main routes keep the
+#                    defaults, and MC's own 65 % execute threshold is untouched.
+- id: tool-subagent
+  config:
+    provider: spawn
+    toolName: subagent
+    agentOptions:
+      provider: opencode-go-child
+      model: deepseek-v4.1-flash
+      maxTokens: 2048
+
+- id: magic-compaction
+  config:
+    auto: true
+    modelPolicies:
+      - provider: opencode-go-child
+        model: deepseek-v4.1-flash
+        headroomTokens: 0
+        thresholdRatio: 0.7
+        retainTokens: 3000
+        maxTokens: 2048
