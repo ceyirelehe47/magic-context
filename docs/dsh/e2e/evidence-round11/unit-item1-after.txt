@@ -1,0 +1,9 @@
+(pass) pressure truncation of protected large tool results (24k window deadlock) > over the force band (input + output reserve), the older protected reads are middle-truncated; the newest stays whole [802.56ms]
+(pass) pressure truncation of protected large tool results (24k window deadlock) > below the force band nothing is truncated [271.17ms]
+(pass) pressure truncation of protected large tool results (24k window deadlock) > idempotent and cache-stable: later passes (and a restart) replay the same bytes and write nothing [258.22ms]
+(pass) pressure truncation of protected large tool results (24k window deadlock) > a ctx_reduce drop of a truncated result lands once it leaves the protection window (drop wins over the replay) [243.49ms]
+(pass) truncateOutput (pure) > is deterministic, keeps head/tail, never splits a surrogate pair, leaves short text alone [0.60ms]
+(pass) truncateOutput (pure) > keep budget scales with the window (1.2k..12k chars) [0.06ms]
+(pass) one batch per pressure sample > a newer usage sample still over the force band may truncate the newest result too [306.22ms]
+ 7 pass
+ 0 fail

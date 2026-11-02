@@ -1,0 +1,21 @@
+key dsh:<home>:session-30c75e4e-6743-420e-bf18-5fc3d873a4ab
+tags total 16 message 12 tool 4 bare-id message tags 0
+message_id keys distinct 12 dup keys 0
+1 message dropped d81638a5:p0
+2 message active synth-user-66f274c8:p0
+3 tool active call_00_j2kolub38l5kf35qj8q9e3gl
+4 message active b09c4689:p0
+5 message active 2a4d41c5:p0
+6 tool active call_00_hkkm19hcwms8z0a4cnm7ycta
+7 message active 7fe8bae6:p0
+8 message active b6450dc2:p0
+9 tool active call_00_9axuvmdtc5qhyx89n7dswoy1
+10 message active 4e9c9b46:p0
+11 message active 6ebcf8df:p0
+12 tool active call_00_j0kvtt78npsqzrh7rs6jayuk
+13 message active d448e4fc:p0
+14 message active b483dac8:p0
+15 message active 42054548:p0
+16 message active 8cc3dd54:p0
+compartments 2
+compartment rows [{"sequence":0,"start_message":1,"end_message":3,"t":"Read LICENSE once and report its first line"},{"sequence":1,"start_message":4,"end_message":4,"t":"Runtime context snapshot: workspace-write file policy in dsh"}]

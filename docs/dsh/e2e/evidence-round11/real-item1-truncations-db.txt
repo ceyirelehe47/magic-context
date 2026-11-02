@@ -1,0 +1,4 @@
+dsh_pressure_truncations:
+{"tag_number":6,"head_chars":1440,"tail_chars":480,"original_chars":14957,"sha":"3678b4001a5a","basis_usage_seq":51}
+pending_ops: [{"id":9,"session_id":"dsh:5e4b5e1a:session-30c75e4e-6743-420e-bf18-5fc3d873a4ab","tag_id":9,"operation":"drop","queued_at":1793595408975,"harness":"dsh"}]
+outbox: [{"kind":"tags","status":"committed","dsh_ack_seq":20},{"kind":"tags","status":"committed","dsh_ack_seq":38},{"kind":"drops","status":"committed","dsh_ack_seq":56},{"kind":"tags","status":"committed","dsh_ack_seq":73},{"kind":"drops","status":"committed","dsh_ack_seq":93}]

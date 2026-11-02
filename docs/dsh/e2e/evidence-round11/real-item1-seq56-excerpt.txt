@@ -1,0 +1,41 @@
+len 2317
+[tool: read #call_00_hkkm19hcwms8z0a4cnm7ycta]
+input: {"file_path":"<work>/magic-context/packages/dsh-plugin/src/agent/outbox.ts"}
+
+[tool result: read #call_00_hkkm19hcwms8z0a4cnm7ycta]
+output:
+§6§ <path><work>/magic-context/packages/dsh-plugin/src/agent/outbox.ts</path>
+<type>file</type>
+<content>
+1: /**
+2:  * agent/outbox — the DSH adapter's saga records + recovery (Phase 3).
+3
+...
+ } from "./pressure-truncation";
+21: import type { Database } from "@magic-context/core/shared/sqlite";
+22: 
+23: /** The plan kinds that can produce outbox records (MutationPlan.ops[].kind). */
+24: export type OutboxKind =
+25:   | "tags"
+26:   | "drops"
+27:   | "reasoning"
+28:   | "temporal"
+[… §6§ truncated by Magic Context under context pressure: 13072 of 14957 characters omitted (output lines 32-381). The full output is kept in the session log; re-run the tool on a narrower range if you need the omitted part. …]
+379: ): boolean {
+380:   const changed = db.transaction(() => {
+381:     const result = db
+382:       .prepare(
+383:         `DELETE FROM dsh_context_compaction_marker
+384:       
+...
+t_compaction_marker
+384:          WHERE session_id = ? AND ordinal = ? AND end_message_id = ?`,
+385:       )
+386:       .run(sessionId, expected.ordinal, expected.endMessageId);
+387:     return result.changes > 0;
+388:   })();
+389:   return changed;
+390: }
+
+(End of file - total 390 lines)
+</content>

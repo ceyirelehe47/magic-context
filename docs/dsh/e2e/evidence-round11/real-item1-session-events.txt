@@ -1,0 +1,57 @@
+# DSH session events (message types), text truncated to 90 chars; seq = DSH event seq; op = surface op
+4 turn/start {'turn': 1}
+8 user/message src=magic-context append '<session-history></session-history>'
+9 user/message src=magic-context append '<session-history-since>(no new content since last materialization)</session-history-since>'
+10 user/message src=user append '§1§ Turn 1. Use the read tool exactly once to read the file LICENSE in the current directo'
+11 user/message src=runtime-context append 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurr'
+16 assistant/message src=model append '§2§ '
+16 assistant/message src=model append '[tool-call read]'
+18 tool/result src=tool append '<path><work>/magic-context/packages/dsh-plugin/LICENSE</path>\n<type>file</type>\n<'
+20 user/message src=magic-context replace 16-18 '§2§ \n\n[tool: read #call_00_j2kolub38l5kf35qj8q9e3gl]\ninput: {"file_path":"<work>/'
+24 assistant/message src=model append '§4§ MIT License'
+29 turn/start {'turn': 2}
+32 user/message src=user append '§5§ Turn 2. Use the read tool exactly once to read src/agent/outbox.ts. Then reply with on'
+34 assistant/message src=model append '[tool-call read]'
+36 tool/result src=tool append '<path><work>/magic-context/packages/dsh-plugin/src/agent/outbox.ts</path>\n<type>f'
+38 user/message src=magic-context replace 34-36 '[tool: read #call_00_hkkm19hcwms8z0a4cnm7ycta]\ninput: {"file_path":"<work>/magic-'
+41 assistant/message src=model append '§7§ initializeDshAdapterTables'
+46 turn/start {'turn': 3}
+49 user/message src=user append '§8§ Turn 3. Use the read tool exactly once to read src/host/meter.ts. Then reply with only'
+51 assistant/message src=model append '[tool-call read]'
+53 tool/result src=tool append '<path><work>/magic-context/packages/dsh-plugin/src/host/meter.ts</path>\n<type>fil'
+55 user/message src=magic-context replace 51-53 '[tool: read #call_00_9axuvmdtc5qhyx89n7dswoy1]\ninput: {"file_path":"<work>/magic-'
+56 user/message src=magic-context replace 38-38 '[tool: read #call_00_hkkm19hcwms8z0a4cnm7ycta]\ninput: {"file_path":"<work>/magic-'
+59 assistant/message src=model append '§10§ wrapPressureDefinition'
+64 turn/start {'turn': 4}
+67 user/message src=user append '§11§ Turn 4. Call the ctx_reduce tool exactly once with drop set to the §N§ number shown a'
+69 assistant/message src=model append '[tool-call ctx_reduce]'
+71 tool/result src=tool append 'Queued: deferred drop §9§.'
+73 user/message src=magic-context replace 69-71 '[tool: ctx_reduce #call_00_j0kvtt78npsqzrh7rs6jayuk]\ninput: {"drop":"9"}\n\n[tool result: ct'
+76 assistant/message src=model append '§13§ DROPPED'
+81 turn/start {'turn': 5}
+84 user/message src=user append '§14§ Turn 5. Do not call any tools. In one sentence, quote the first line of the LICENSE f'
+86 assistant/message src=model append '§15§ The first line of the LICENSE file is "MIT License".'
+91 turn/start {'turn': 6}
+93 user/message src=magic-context replace 10-10 '[dropped §1§]'
+95 user/message src=user append '§16§ Turn 6. Do not call any tools. Reply with the single word OK.'
+97 assistant/message src=model append '§17§ OK'
+
+# reconstructed surface (seq order)
+[7, 8, 9, 93, 11, 20, 24, 32, 56, 41, 49, 55, 59, 67, 73, 76, 84, 86, 95, 97]
+
+# §N§ prefix ownership (raw assistant events + surface): number -> distinct texts
+1 OK [('surface', '[dropped §1§]')]
+2 OK [('raw-assistant', ''), ('surface', '\n\n[tool: read #call_00_j2kolub38l5kf35qj8q9e3gl]\ninput: {"fi')]
+4 OK [('raw-assistant', 'MIT License'), ('surface', 'MIT License')]
+5 OK [('surface', 'Turn 2. Use the read tool exactly once to read src/agent/out')]
+7 OK [('raw-assistant', 'initializeDshAdapterTables'), ('surface', 'initializeDshAdapterTables')]
+8 OK [('surface', 'Turn 3. Use the read tool exactly once to read src/host/mete')]
+10 OK [('raw-assistant', 'wrapPressureDefinition'), ('surface', 'wrapPressureDefinition')]
+11 OK [('surface', 'Turn 4. Call the ctx_reduce tool exactly once with drop set ')]
+13 OK [('raw-assistant', 'DROPPED'), ('surface', 'DROPPED')]
+14 OK [('surface', 'Turn 5. Do not call any tools. In one sentence, quote the fi')]
+15 OK [('raw-assistant', 'The first line of the LICENSE file is "MIT License".'), ('surface', 'The first line of the LICENSE file is "MIT License".')]
+16 OK [('surface', 'Turn 6. Do not call any tools. Reply with the single word OK')]
+17 OK [('raw-assistant', 'OK'), ('surface', 'OK')]
+duplicate numbers: 0
+runtime-context events appended: [11] still on surface as runtime-context: [11]

@@ -1,0 +1,40 @@
+Received: "[tool: read #call-1]\ninput: {\"file_path\":\"f1.ts\"}\n\n[tool result: read #call-1]\noutput:\n§2§ 1: alpha line 1 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n2: alpha line 2 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n3: alpha line 3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n4: alpha line 4 xxxxxxxxxxxxxxxxxxxxxxx …(full 15 kB untruncated read output elided)
+
+      at <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/pressure-truncation.test.ts:134:21)
+      at async scenario (<work>/magic-context/packages/dsh-plugin/src/agent/pressure-truncation.test.ts:103:11)
+      at async <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/pressure-truncation.test.ts:114:11)
+(fail) pressure truncation of protected large tool results (24k window deadlock) > over the force band (input + output reserve), the older protected reads are middle-truncated; the newest stays whole [892.49ms]
+(pass) pressure truncation of protected large tool results (24k window deadlock) > below the force band nothing is truncated [184.62ms]
+167 |         { turn: 4, step: 1, message: createAssistantMessage({ content: [{ type: "text", text: "" }], provider: "d", model: "m", source: { kind: "model" } }), usage: { inputTokens: 19_100, outputTokens: 1 } } as never,
+168 |         { surfaceOp: "append" },
+169 |       );
+170 |       await step();
+171 |       const decided = rows();
+172 |       expect(decided.length).toBeGreaterThan(0);
+                                   ^
+error: expect(received).toBeGreaterThan(expected)
+
+Expected: > 0
+Received: 0
+
+      at <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/pressure-truncation.test.ts:172:30)
+      at async scenario (<work>/magic-context/packages/dsh-plugin/src/agent/pressure-truncation.test.ts:103:11)
+      at async <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/pressure-truncation.test.ts:160:11)
+(fail) pressure truncation of protected large tool results (24k window deadlock) > idempotent and cache-stable: later passes (and a restart) replay the same bytes and write nothing [195.07ms]
+197 |         { turn: 4, step: 1, message: createAssistantMessage({ content: [{ type: "text", text: "" }], provider: "d", model: "m", source: { kind: "model" } }), usage: { inputTokens: 19_100, outputTokens: 1 } } as never,
+198 |         { surfaceOp: "append" },
+199 |       );
+200 |       await step();
+201 |       const first = rows()[0]!;
+202 |       queuePendingOp(db, KEY, first.tag_number, "drop", Date.now());
+                                    ^
+TypeError: undefined is not an object (evaluating 'first.tag_number')
+      at <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/pressure-truncation.test.ts:202:31)
+      at async scenario (<work>/magic-context/packages/dsh-plugin/src/agent/pressure-truncation.test.ts:103:11)
+      at async <anonymous> (<work>/magic-context/packages/dsh-plugin/src/agent/pressure-truncation.test.ts:190:11)
+(fail) pressure truncation of protected large tool results (24k window deadlock) > a later ctx_reduce drop of a truncated result still lands (drop wins, no truncation row replay) [177.80ms]
+
+ 1 pass
+ 3 fail
+ 4 expect() calls
+Ran 4 tests across 1 file. [9.18s]
