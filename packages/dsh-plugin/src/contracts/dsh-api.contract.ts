@@ -125,6 +125,9 @@ export type C_TypertSchemas = Assert<
   Extends<TypertContribution["schemas"], readonly TypertSchemaFactory[]>
 >;
 
+/* ── LLM stream waterfall (agent/output-tag-strip, round 17) ───────────── */
+export type C_LlmStream = Assert<Has<Events, "llm/stream">>;
+
 /* ── Cordis context service lookup the adapter relies on ────────────────── */
 export type C_CtxGet = Assert<Has<Context, "get">>;
 export type C_CtxOn = Assert<Has<Context, "on">>;

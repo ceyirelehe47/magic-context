@@ -51,6 +51,8 @@ import { prunePressureTruncations } from "./pressure-truncation";
 import { pruneTerminalOutboxRows } from "./outbox";
 import { createRecompSeams } from "./recomp";
 import { createEmbedSeam } from "./embed";
+import { registerOutputTagStrip } from "./output-tag-strip";
+import { isAgentLoopRequest } from "../compat/dsh-0.1/session";
 import { dshModelRefToCanonical } from "dsh-magic-context-adapter";
 import { modelSupportsVision } from "@magic-context/core/shared/models-dev-cache";
 import type { KnowledgeAgentView } from "./knowledge-gate";
@@ -391,6 +393,11 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   const historianModel = () => config.historian?.model;
 
   registerSystemGuidance(ctx, { config: config.guidance, log });
+
+  // Persistence-boundary strip of copied `§N§` notation from assistant text
+  // (upstream: OpenCode experimental.text.complete / Pi message_end). Without
+  // it every reply reached the user as "§8§ …" (round 17 real rc.5, C5).
+  registerOutputTagStrip(ctx as never, { isAgentLoopRequest: isAgentLoopRequest as never, isEnabled: liveEnabled, log });
 
   // Background historian passes are fire-and-forget; one-shot hosts (dsh
   // headless) unload right after the turn, so give in-flight passes a bounded
