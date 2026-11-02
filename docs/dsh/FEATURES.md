@@ -8,7 +8,7 @@
 
 | 能力 | DSH 适配 | 状态 |
 |---|---|---|
-| 预设激活 | `magic-standard` thin preset（stock standard + 禁 compaction-basic + 插 magic-compaction/magic-agent）；仅该预设会话激活 Magic 行为，其余预设零干预 | ✅ |
+| 预设激活 | `dsh-magic-context setup` 按 agent preset 启用（`--preset` / `--all-presets` / `--disable-preset`；默认生成 `magic-standard`）：受管 `cordis.patch.yml` 块对启用的 preset 禁 compaction-basic、挂 magic-compaction + magic-agent；未启用的 preset 零干预 | ✅ |
 | ctx_search | 工具接线（无嵌入时纯词法 lane） | ✅ |
 | ctx_memory / ctx_note | 记忆读写 / 笔记（含 smart note `surface_condition` 持久化） | ✅ |
 | ctx_expand | raw 源 = transcript 映射（全日志恢复、tool 折叠、seq↔ordinal 可逆） | ✅ |
@@ -31,7 +31,7 @@
 | /ctx-status /ctx-flush | 状态 / flush（compaction-off 门一致） | ✅ |
 | /ctx-dream /ctx-embed | seam 接线（定时器/状态/全部 outcome 映射） | ✅ |
 | /ctx-recomp /ctx-wrapup /ctx-session-upgrade | DSH session client + Managed 上下文（同会话原地升级） | ✅ |
-| Web 状态/设置 | client 注册 + Remote diagnostics 端点 | ✅ |
+| Web 状态/设置 | DSH 设置页「Magic Context」分区（按 profile 实时覆盖，写入 `magic-host` 行）+ 输入框旁 MC 上下文用量环（达执行阈值变黄，点击看详情）+ Remote diagnostics 端点 | ✅ |
 | 压缩-off 模式 | 知识层继续（`compaction.enabled=false` 时 compartments 不渲染、命令不可用） | ✅ |
 | 跨 harness 记忆 | 共享 SQLite + `harness='dsh'` 行隔离 | ✅ |
 | 升级维护 | 无写回 include + doctor 契约检查 | ✅ |
@@ -39,7 +39,8 @@
 ## 差异记录
 
 - **Sidekick**：Pi 用子代理（含工具）；DSH 单轮直连 + 记忆检索注入
-  （需工具路径由 worker 承担——maxDepth 0 + 工具 allowlist + 委托策略钉死）。
+  （需工具路径由 worker 承担——子代理深度钉为 parentDepth+1（不能再派生）+ 只读工具 allowlist
+  read/grep/glob + 委托审批 never；worker 子会话不进入 Magic 管线，也不注入 Magic 指引）。
 - **feedback**：核心零消费（研究确认）——DSH 自建桥接；retrospective 消费接
   DSH raw provider 后生效。
 - **命令可见性**：DSH 的 `/ctx-*` 命令是模型可见用户消息（Pi 是模型不可见
@@ -48,16 +49,16 @@
   决策与提醒文本同源。
 - **todowrite 工具描述**：DSH 平台无 promptSnippet 字段，使用准则并入
   description（模型可见内容一致）。
-- **Web 渲染**：headless 环境无法驱动 Web UI；Remote 端点契约已测，
-  真机渲染验证留待发布后。
+- **Web 渲染**：设置分区、用量环、保存后即时刷新已在真实 DSH web（rc.5）上验证。
 - **Rust/subc**：显式阻止（不静默降级）。
 
 ## 验证状态
 
-- dsh-plugin **194/194** 测试全绿（29 文件）+ adapter-api 14/14 +
-  pi-plugin 762/762（Pi oracle 基线）+ typecheck 0 错误
-- 隔离环境真实模型验证：首轮注入（m0/m1/§N§）、低上下文（8k 窗口）压缩
-  触发与 `<session-history>` 渲染、跨对话记忆注入、Pi/DSH 共享库双向读写
-  与 harness 隔离、非 magic 预设零干预
-- 发布物（tgz）干净安装链路验证通过（setup/doctor/启动/行为一致）
-- 兼容基线：DSH `0.1.0-rc.6`、Magic Context 0.36.1（共享 schema v77）
+- 兼容基线：DSH **0.2.1-rc.5**（精确匹配，`doctor` 检查）、Magic Context core
+  **0.49.34**（共享 schema 与该版本一致）。
+- 每次提交运行 `bun run typecheck:dsh`、`bun run test:dsh`（adapter-api +
+  dsh-plugin，含长会话 tag 身份回归测试）、`bun run contracts:dsh`。
+- 真实 rc.5 验证（证据见 `docs/dsh/e2e/evidence-*`）：§N§ 不重复、drop 落地、
+  historian 压缩、小窗口压力截断、设置页与用量环、按 preset 启用/禁用、
+  worker 子代理（工具仅 read/grep/glob、超时清理、子会话不写 Magic 表）。
+- 已知限制见 `docs/DSH-MAINTENANCE.md`。

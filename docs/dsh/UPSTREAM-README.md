@@ -1,3 +1,9 @@
+> **归档文档（只作出处记录）**：这是导入前社区移植（DSH 0.1.0-rc.6 / Magic Context 0.36.1）
+> 的原 README，其中的版本号、安装方式和链接都已过时，请勿按此安装。当前安装说明见
+> [`packages/dsh-plugin/README.zh.md`](../../packages/dsh-plugin/README.zh.md)（英文：
+> [`README.md`](../../packages/dsh-plugin/README.md)），基线为 DSH 0.2.1-rc.5 / Magic Context 0.49.34，
+> 来源分支为 https://github.com/ceyirelehe47/magic-context 的 `dsh-integration`。
+
 # Magic Context for DSH
 
 <div align="center">
@@ -51,7 +57,7 @@ nudge 双通道、heuristic cleanup、配置桥接——均与 Magic Context 0.3
 ```json
 {
   "dependencies": {
-    "dsh-magic-context": "github:xiaohj233/dsh-magic-context#v0.1.0&path:/packages/dsh-plugin"
+    "dsh-magic-context": "<已过时：见 packages/dsh-plugin/README.zh.md 的安装说明>"
   },
   "dsh": {
     "profile": {
