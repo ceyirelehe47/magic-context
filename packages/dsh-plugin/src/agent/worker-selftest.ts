@@ -58,6 +58,7 @@ export function createWorkerSelftestTool(ctx: Context, log?: (message: string) =
       if (!agent) throw new Error("ctx_worker_selftest requires an agent execution context.");
       let visible: readonly string[] | undefined;
       let childSessionId: string | undefined;
+      let resolution: Record<string, { global: boolean; child: boolean }> | undefined;
       const logs: string[] = [];
       const controller = new AbortController();
       const timeoutMs = workerSelftestTimeoutMs();
@@ -67,9 +68,11 @@ export function createWorkerSelftestTool(ctx: Context, log?: (message: string) =
         prompt: WORKER_PROMPT,
         signal: controller.signal,
         timeoutMs,
+        probeTools: ["bash", "write", "edit", "read", "glob", "grep", "ctx_search", "ctx_reduce", "spawn_agent"],
         onChildRestricted: (info) => {
           visible = info.visible;
           childSessionId = info.childSessionId;
+          resolution = info.resolution;
         },
         log: (message) => {
           logs.push(message);
@@ -80,6 +83,8 @@ export function createWorkerSelftestTool(ctx: Context, log?: (message: string) =
         ok: result !== null,
         childVisibleTools: visible ?? null,
         childSessionId: childSessionId ?? null,
+        // tools.get(name, child) — the executor's lookup; child:false => UNKNOWN_TOOL.
+        toolResolution: resolution ?? null,
         parentSessionId: String(agent.session?.id ?? agent.id),
         timeoutMs,
         workerText: result?.text ?? null,

@@ -25,6 +25,7 @@ import {
   captureDelegatedPolicyOverrides,
   MAGIC_WORKER_READONLY_TOOLS,
   magicWorkerActivation,
+  childToolResolution,
   childVisibleToolNames,
   restrictChildTools,
   workerMaxDepth,
@@ -68,7 +69,11 @@ export interface MagicWorkerDeps {
   readonly onChildRestricted?: (info: {
     visible: readonly string[] | undefined;
     childSessionId?: string;
+    /** `tools.get(name, child)` vs global for the probed names (see `probeTools`). */
+    resolution?: Record<string, { global: boolean; child: boolean }>;
   }) => void;
+  /** Diagnostics: tool names whose child-scope resolution is reported to `onChildRestricted`. */
+  readonly probeTools?: readonly string[];
   readonly signal: AbortSignal;
   /** Hard timeout (default 120s). */
   readonly timeoutMs?: number;
@@ -127,6 +132,9 @@ export async function runMagicWorker(
           deps.onChildRestricted?.({
             visible: childVisibleToolNames(child),
             childSessionId: child.session?.id === undefined ? undefined : String(child.session.id),
+            ...(deps.probeTools !== undefined && deps.probeTools.length > 0
+              ? { resolution: childToolResolution(child, deps.probeTools) }
+              : {}),
           });
         }
       } catch (error) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { childVisibleToolNames } from "../compat/dsh-0.1/subagent";
+import { childToolResolution, childVisibleToolNames } from "../compat/dsh-0.1/subagent";
 import {
   WORKER_SELFTEST_TOOL,
   createWorkerSelftestTool,
@@ -22,6 +22,20 @@ describe("worker self-test (env-gated diagnostics)", () => {
   it("defines the ctx_worker_selftest tool", () => {
     const tool = createWorkerSelftestTool({} as never) as { name: string };
     expect(tool.name).toBe(WORKER_SELFTEST_TOOL);
+  });
+  it("childToolResolution compares the child's scoped lookup with the global one", () => {
+    let child: unknown;
+    const tools = {
+      get: (name: string, scope?: unknown) =>
+        scope === child ? (name === "read" ? {} : undefined) : name === "bash" || name === "read" ? {} : undefined,
+    };
+    child = { ctx: { tools } };
+    expect(childToolResolution(child as never, ["bash", "read", "nope"])).toEqual({
+      bash: { global: true, child: false },
+      read: { global: true, child: true },
+      nope: { global: false, child: false },
+    });
+    expect(childToolResolution({ ctx: {} } as never, ["bash"])).toBeUndefined();
   });
   it("childVisibleToolNames reads the child's scoped view", () => {
     let child: unknown;

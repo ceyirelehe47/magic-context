@@ -152,6 +152,36 @@ export function childVisibleToolNames(child: Agent): string[] | undefined {
   }
 }
 
+/**
+ * How a tool name resolves for the restricted child vs the global layer —
+ * the same `tools.get(name, scope)` lookup rc.5's executor uses
+ * (`resolveExecution`), so `child: false` means a call by that name fails
+ * with UNKNOWN_TOOL. Diagnostics only (worker self-test); undefined when the
+ * registry exposes no `get`.
+ */
+export function childToolResolution(
+  child: Agent,
+  names: readonly string[],
+): Record<string, { global: boolean; child: boolean }> | undefined {
+  const scoped = (child as unknown as { ctx?: { get?: (name: string) => unknown; tools?: unknown } }).ctx;
+  const tools = (scoped?.tools ?? scoped?.get?.("tools")) as
+    | { get?: (name: string, scope?: unknown) => unknown }
+    | undefined;
+  if (typeof tools?.get !== "function") return undefined;
+  const out: Record<string, { global: boolean; child: boolean }> = {};
+  for (const name of names) {
+    const probe = (scope?: unknown): boolean => {
+      try {
+        return tools.get?.(name, scope) !== undefined;
+      } catch {
+        return false;
+      }
+    };
+    out[name] = { global: probe(), child: probe(child) };
+  }
+  return out;
+}
+
 function knownRestrictableNames(
   tools: {
     get?: (name: string, scope?: unknown) => unknown;
