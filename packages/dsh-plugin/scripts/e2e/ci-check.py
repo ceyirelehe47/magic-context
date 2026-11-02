@@ -271,6 +271,8 @@ def check_r17(c, out: Path, runs):
             problems.append("claims the historian is disabled (OpenCode DB banner)")
         if re.search(r"- Last input tokens: 0 tokens", st):
             problems.append("Last input tokens: 0 (DSH never recorded usage)")
+        if "- Last response: never" in st:
+            problems.append("Last response: never (DSH never recorded the completion clock)")
         c.add("U5", not problems, "/ctx-status text agrees with the DB and the live host", problems or "ok")
     else:
         c.add("U5", False, "/ctx-status text agrees with the DB and the live host", st)

@@ -196,6 +196,26 @@ function sessionLogView(
  * session log is the same source, scanned conservatively (>= min_clusters
  * distinct bursts). Gated additionally by the eligible-token budget below.
  */
+/**
+ * Wall-clock time (event `time`, epoch ms) of the latest assistant/message
+ * that completed (not `interrupted`) — the DSH equivalent of the response
+ * completion that upstream stamps as lastResponseTime. 0 when none.
+ */
+export function latestCompletedResponseTime(agent: Agent): number {
+  try {
+    const events = sessionEvents(agent.session);
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const e = events[i] as { type?: unknown; time?: unknown; data?: { interrupted?: unknown } } | null;
+      if (e === null || typeof e !== "object" || e.type !== "assistant/message") continue;
+      if (e.data?.interrupted === true) continue;
+      return typeof e.time === "number" && Number.isFinite(e.time) ? e.time : 0;
+    }
+  } catch {
+    // fail-open
+  }
+  return 0;
+}
+
 const COMMIT_MENTION_RE = /(?:^|[\s(`])[0-9a-f]{7,40}(?:$|[\s`)])/i;
 export function recentCommitClusterCount(agent: Agent): number {
   try {
@@ -322,9 +342,20 @@ function maybeFireHistorian(
       // the response usage); /ctx-status and ctx_reduce's nudge stamp read
       // last_input_tokens and showed 0 on DSH.
       const inputTokens = Math.max(0, Math.round(sample.projectedTokens ?? 0));
+      // Round 18: the completion clock too (upstream stamps lastResponseTime
+      // when a response completes). DSH never wrote it: /ctx-status said
+      // "Last response: never" and core's ttl_idle HARD fold could not arm.
+      const responseTime = latestCompletedResponseTime(agent);
+      const prevResponseTime = (
+        db.prepare("SELECT last_response_time AS t FROM session_meta WHERE session_id = ?").get(sessionId) as
+          | { t: number | null }
+          | null
+          | undefined
+      )?.t ?? 0;
       updateSessionMeta(db, sessionId, {
         lastContextPercentage: percentage,
         ...(inputTokens > 0 ? { lastInputTokens: inputTokens } : {}),
+        ...(responseTime > prevResponseTime ? { lastResponseTime: responseTime } : {}),
       });
     } catch {
       // 持久化失败不可破坏 pre-step 链（fail-open）。
