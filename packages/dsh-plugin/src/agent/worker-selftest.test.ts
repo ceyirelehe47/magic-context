@@ -1,12 +1,23 @@
 import { describe, expect, it } from "bun:test";
 import { childVisibleToolNames } from "../compat/dsh-0.1/subagent";
-import { WORKER_SELFTEST_TOOL, createWorkerSelftestTool, workerSelftestEnabled } from "./worker-selftest";
+import {
+  WORKER_SELFTEST_TOOL,
+  createWorkerSelftestTool,
+  workerSelftestEnabled,
+  workerSelftestTimeoutMs,
+} from "./worker-selftest";
 
 describe("worker self-test (env-gated diagnostics)", () => {
   it("is enabled only by MAGIC_CONTEXT_DSH_WORKER_SELFTEST=1", () => {
     expect(workerSelftestEnabled({})).toBe(false);
     expect(workerSelftestEnabled({ MAGIC_CONTEXT_DSH_WORKER_SELFTEST: "0" })).toBe(false);
     expect(workerSelftestEnabled({ MAGIC_CONTEXT_DSH_WORKER_SELFTEST: "1" })).toBe(true);
+  });
+  it("timeout is overridable only by a positive integer env value", () => {
+    expect(workerSelftestTimeoutMs({})).toBe(180_000);
+    expect(workerSelftestTimeoutMs({ MAGIC_CONTEXT_DSH_WORKER_SELFTEST_TIMEOUT_MS: "1500" })).toBe(1500);
+    expect(workerSelftestTimeoutMs({ MAGIC_CONTEXT_DSH_WORKER_SELFTEST_TIMEOUT_MS: "-5" })).toBe(180_000);
+    expect(workerSelftestTimeoutMs({ MAGIC_CONTEXT_DSH_WORKER_SELFTEST_TIMEOUT_MS: "abc" })).toBe(180_000);
   });
   it("defines the ctx_worker_selftest tool", () => {
     const tool = createWorkerSelftestTool({} as never) as { name: string };

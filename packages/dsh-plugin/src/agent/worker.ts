@@ -63,7 +63,10 @@ export interface MagicWorkerDeps {
    * child can call (`tools.view(child).visible`). Used by the env-gated
    * worker self-test only.
    */
-  readonly onChildRestricted?: (info: { visible: readonly string[] | undefined }) => void;
+  readonly onChildRestricted?: (info: {
+    visible: readonly string[] | undefined;
+    childSessionId?: string;
+  }) => void;
   readonly signal: AbortSignal;
   /** Hard timeout (default 120s). */
   readonly timeoutMs?: number;
@@ -118,7 +121,12 @@ export async function runMagicWorker(
       try {
         appendDelegatedPolicyOverrides(child.session as never, overrides);
         restricted = restrictChildTools(child, allow);
-        if (restricted) deps.onChildRestricted?.({ visible: childVisibleToolNames(child) });
+        if (restricted) {
+          deps.onChildRestricted?.({
+            visible: childVisibleToolNames(child),
+            childSessionId: child.session?.id === undefined ? undefined : String(child.session.id),
+          });
+        }
       } catch (error) {
         restricted = false;
         log(`[magic-context] worker child policy setup failed: ${error instanceof Error ? error.message : String(error)}`);
