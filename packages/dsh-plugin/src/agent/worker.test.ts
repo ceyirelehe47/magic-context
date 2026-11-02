@@ -98,6 +98,23 @@ describe("magic worker (PLAN §5.13 minimal worker)", () => {
     expect(ctx.listenerCount()).toBe(0); // one-shot listener released
   });
 
+  it("strips a leading §N§ tag the child wrote (worker text never carries a Magic tag into the parent)", async () => {
+    let ctxRef: ReturnType<typeof makeCtx> | undefined;
+    const sub = fakeSubagents(
+      { emitCreated: (a) => ctxRef!.emitCreated(a) },
+      { output: "§4§ TOOL: glob\nmid-text §2§ stays" },
+    );
+    const ctx = makeCtx(sub.service);
+    ctxRef = ctx;
+    const result = await runMagicWorker(ctx as never, {
+      parent: makeParent(),
+      label: "x",
+      prompt: "x",
+      signal: new AbortController().signal,
+    });
+    expect(result?.text).toBe("TOOL: glob\nmid-text §2§ stays");
+  });
+
   it("fails closed when the child's tools cannot be restricted", async () => {
     let ctxRef: ReturnType<typeof makeCtx> | undefined;
     const sub = fakeSubagents({ emitCreated: (a) => ctxRef!.emitCreated(a) }, { childHasTools: false });

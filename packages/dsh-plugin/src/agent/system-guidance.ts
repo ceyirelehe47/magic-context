@@ -23,6 +23,7 @@ import { createPromptSurfaceRuntime } from "@magic-context/core/shared/prompt-su
 import type { PromptSurfaceConfig } from "@magic-context/core/shared/prompt-surface";
 import type { ConfigHarness } from "@magic-context/core/config/migrate-config-location";
 import { DSH_HARNESS } from "dsh-magic-context-adapter";
+import { isMagicChildSession } from "./worker";
 
 /** Stable section identity (B.8: unique name, order asc, 300 = after tool guidance). */
 export const GUIDANCE_SECTION_NAME = "magic-context:guidance";
@@ -58,7 +59,7 @@ export interface DshSystemPromptView {
   section(section: {
     name: string;
     order: number;
-    text: string | ((ctx: unknown) => string);
+    text: string | ((assembly: unknown) => string);
     complete?: boolean;
   }): () => void;
 }
@@ -124,7 +125,18 @@ export function registerSystemGuidance(ctx: Context, deps: SystemGuidanceDeps = 
   const dispose = systemPrompt.section({
     name: GUIDANCE_SECTION_NAME,
     order: GUIDANCE_SECTION_ORDER,
-    text,
+    // A worker child (subagent origin / delegation depth >= 1) inherits the
+    // parent's preset composition, so a static string would also reach every
+    // Magic worker: measured on real rc.5 (round 13, ctx_worker_selftest) the
+    // child got the full ~7.6k-char guidance and prefixed its own reply with a
+    // §N§ tag that then flowed back into the parent's tool result. Children run
+    // with official semantics (no tags, no ctx_* tools), so they get no
+    // guidance. The text is still byte-stable per agent (cache-safe).
+    text: (assembly: unknown) => {
+      const agent = (assembly as { agent?: unknown } | undefined)?.agent;
+      if (agent !== undefined && agent !== null && isMagicChildSession(agent as never)) return "";
+      return text;
+    },
   });
   // Fiber ownership: the section is removed when the plugin unloads.
   ctx.effect(() => dispose);

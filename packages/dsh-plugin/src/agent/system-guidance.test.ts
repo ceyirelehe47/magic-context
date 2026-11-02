@@ -61,7 +61,8 @@ describe("agent system-guidance (static Magic Context section)", () => {
     const call = sectionSpy.mock.calls[0]?.[0];
     expect(call?.name).toBe(GUIDANCE_SECTION_NAME);
     expect(call?.order).toBe(GUIDANCE_SECTION_ORDER);
-    expect(call?.text).toContain("## Magic Context");
+    const text = typeof call?.text === "function" ? (call.text as (c: unknown) => string)({}) : call?.text;
+    expect(text).toContain("## Magic Context");
     expect(registry.has(GUIDANCE_SECTION_NAME)).toBe(true);
     expect(readSystemPrompt(fakeCtx)).toBeDefined();
 
@@ -72,6 +73,31 @@ describe("agent system-guidance (static Magic Context section)", () => {
     const disposer = (effects[0] as () => () => void)();
     disposer();
     expect(registry.has(GUIDANCE_SECTION_NAME)).toBe(false);
+  });
+
+  it("renders NO guidance for a worker child session (no §N§/ctx_* instructions leak into subagents)", () => {
+    let registered: { text: string | ((c: unknown) => string) } | undefined;
+    const fakeCtx = {
+      get: (name: string) =>
+        name === "systemPrompt"
+          ? {
+              section: (section: { text: string | ((c: unknown) => string) }) => {
+                registered = section;
+                return () => {};
+              },
+            }
+          : undefined,
+      effect: () => {},
+    } as unknown as Parameters<typeof registerSystemGuidance>[0];
+    registerSystemGuidance(fakeCtx, { log: () => {} });
+    expect(typeof registered?.text).toBe("function");
+    const render = registered!.text as (c: unknown) => string;
+    const child = { session: { header: { origin: "subagent", delegationDepth: 1 } } };
+    const parent = { session: { header: { origin: "user" } } };
+    expect(render({ agent: child, scope: child })).toBe("");
+    expect(render({ agent: parent, scope: parent })).toContain("## Magic Context");
+    // Global assembly (no agent): the guidance stays.
+    expect(render({})).toContain("## Magic Context");
   });
 
   it("skips registration when guidance is disabled", () => {

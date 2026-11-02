@@ -31,6 +31,8 @@ import {
   subagentsOf,
 } from "../compat/dsh-0.1/subagent";
 
+const LEADING_MAGIC_TAG = /^(?:§\d+§\s*)+/u;
+
 /** Whether a session is a CHILD session (subagent origin or delegation depth). */
 export function isMagicChildSession(agent: Agent): boolean {
   const header = agent.session?.header as
@@ -181,6 +183,11 @@ export async function runMagicWorker(
     const text = result.output
       .map((block: { type: string; text?: string }) => (block.type === "text" ? (block.text ?? "") : ""))
       .join("\n")
+      .trim()
+      // Defensive: a child that still saw Magic tag guidance may prefix its
+      // reply with "§N§"; that tag belongs to the child's own numbering and
+      // must never reach the parent (round 13, real rc.5).
+      .replace(LEADING_MAGIC_TAG, "")
       .trim();
     if (text.length === 0) return null;
     return {
