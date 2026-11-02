@@ -12,6 +12,8 @@
  * every historical session) is intentionally NOT wired here — slice A tracks
  * live sessions only; backfill lands with the session-query phase.
  */
+import { existsSync, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { resolveProjectIdentityForSession } from "@magic-context/core/features/magic-context/memory/project-identity";
@@ -73,6 +75,21 @@ export function registerSessionProjectTracking(
 ): void {
   if (deps.config?.enabled === false) return;
   const trackedSessions = new Set<string>();
+  // One-shot legacy repair (round 15): rows written before f95710825 hold
+  // the raw cwd. Fire-and-forget after the bootstrap; idempotent and CAS'd,
+  // so the web and headless processes may both run it.
+  void (async () => {
+    try {
+      const bootstrap = await deps.host.ready;
+      if (bootstrap.kind !== "ok") return;
+      const { updated } = normalizeDshSessionProjectRows(bootstrap.db);
+      if (updated > 0) deps.log?.(`[magic-context] session_projects: normalized ${updated} legacy raw-path dsh row(s)`);
+    } catch (error) {
+      deps.log?.(
+        `[magic-context] session_projects normalization failed (fail-open): ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  })();
   // DSH 0.2: `agent/session-start` was folded into `agent/created` (serial,
   // awaited before creation resolves). Keep the listener non-blocking so the
   // bootstrap wait never delays agent creation.
@@ -123,4 +140,49 @@ export function sessionProjectPath(
 ): string | undefined {
   const cwd = agent.session.header.cwd;
   return cwd && cwd.length > 0 ? cwd : fallbackDirectory;
+}
+
+/**
+ * Rewrite legacy `session_projects` rows of the DSH harness that still hold a
+ * raw filesystem path (pre-f95710825 `agent/created` tracking) to the
+ * resolved project identity. Conservative on purpose:
+ *   - only `harness = 'dsh'` rows; other harnesses are never touched;
+ *   - only values that are not already `git:` / `dir:` identities, are
+ *     absolute, and name a directory that still exists (a vanished path would
+ *     otherwise mint a `dir:` hash of a project that no longer exists);
+ *   - skipped when the identity does not resolve (home directory, git
+ *     failure) — the row is left for the knowledge gate to fix live;
+ *   - compare-and-set on the old value, so a concurrent writer (another
+ *     process's knowledge gate) always wins.
+ * Idempotent: a second run finds nothing to change.
+ */
+export function normalizeDshSessionProjectRows(db: Database): { scanned: number; updated: number } {
+  const rows = db
+    .prepare(
+      `SELECT session_id, project_path FROM session_projects
+        WHERE harness = 'dsh' AND project_path NOT LIKE 'git:%' AND project_path NOT LIKE 'dir:%'`,
+    )
+    .all() as Array<{ session_id: string; project_path: string }>;
+  let updated = 0;
+  const update = db.prepare(
+    `UPDATE session_projects SET project_path = ?, updated_at = ?
+      WHERE session_id = ? AND harness = 'dsh' AND project_path = ?`,
+  );
+  for (const row of rows) {
+    const raw = row.project_path;
+    if (!isAbsolute(raw)) continue;
+    let isDir = false;
+    try {
+      isDir = existsSync(raw) && statSync(raw).isDirectory();
+    } catch {
+      isDir = false;
+    }
+    if (!isDir) continue;
+    const identity = resolveSessionProjectIdentity(raw);
+    if (identity === undefined || identity === raw) continue;
+    if (!identity.startsWith("git:") && !identity.startsWith("dir:")) continue;
+    const result = update.run(identity, Date.now(), row.session_id, raw) as { changes?: number };
+    if ((result.changes ?? 0) > 0) updated += 1;
+  }
+  return { scanned: rows.length, updated };
 }
