@@ -14,6 +14,7 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
+import { resolveProjectIdentityForSession } from "@magic-context/core/features/magic-context/memory/project-identity";
 import { recordSessionProjectIdentity } from "@magic-context/core/features/magic-context/session-project-storage";
 import type { Database } from "@magic-context/core/shared/sqlite";
 import type { DshStorageBootstrap } from "../host/bootstrap";
@@ -85,7 +86,9 @@ export function registerSessionProjectTracking(
         const bootstrap = await deps.host.ready;
         if (bootstrap.kind !== "ok") return;
         const magicSessionId = deps.host.canonicalKey(agent.id);
-        const projectPath = sessionProjectPath(agent, deps.directory);
+        // The resolved identity, never the raw cwd (round 14: the raw path
+        // overwrote the knowledge gate's identity on every process start).
+        const projectPath = resolveSessionProjectIdentity(sessionProjectPath(agent, deps.directory));
         trackSessionProjectOnce(trackedSessions, bootstrap.db, magicSessionId, projectPath);
       } catch (error) {
         deps.log?.(
@@ -95,6 +98,22 @@ export function registerSessionProjectTracking(
     })();
     return undefined;
   });
+}
+
+/**
+ * The project identity (`git:<root-commit>` / `dir:<hash>`) of a workspace
+ * directory — the value `session_projects.project_path` holds for every
+ * harness. Undefined when it cannot be resolved. Both writers (agent/created
+ * tracking and the knowledge gate) go through this, so a session never
+ * flips between a raw path and its identity.
+ */
+export function resolveSessionProjectIdentity(directory: string | undefined): string | undefined {
+  if (!directory || directory.length === 0) return undefined;
+  try {
+    return resolveProjectIdentityForSession(directory) || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Resolve the per-session workspace directory (header cwd wins). */

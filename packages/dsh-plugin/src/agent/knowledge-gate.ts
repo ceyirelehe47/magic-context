@@ -48,7 +48,6 @@ import { resolveCacheTtl } from "@magic-context/core/hooks/magic-context/event-r
 import { buildSyntheticTodoPart } from "@magic-context/core/hooks/magic-context/todo-view";
 import { consumeDshDeferredSignals } from "./historian";
 import { parseCacheTtl } from "@magic-context/core/features/magic-context/scheduler";
-import { resolveProjectIdentityForSession } from "@magic-context/core/features/magic-context/memory/project-identity";
 import type { Database } from "@magic-context/core/shared/sqlite";
 import {
   isMagicSource,
@@ -62,7 +61,7 @@ import {
   type PreStepPayload,
 } from "../compat/dsh-0.1/prestep";
 import type { DshStorageBootstrap } from "../host/bootstrap";
-import { trackSessionProjectOnce, sessionProjectPath } from "./session-track";
+import { resolveSessionProjectIdentity, trackSessionProjectOnce, sessionProjectPath } from "./session-track";
 import { maybeRunAutoSearchHint, type AutoSearchConfig } from "./auto-search";
 import { isMagicChildSession } from "./worker";
 
@@ -451,12 +450,7 @@ export async function maybeInjectKnowledge(
 
 /** Resolve the canonical project identity for a session workspace. */
 export function resolveKnowledgeProjectPath(directory: string | undefined): string | undefined {
-  if (!directory || directory.length === 0) return undefined;
-  try {
-    return resolveProjectIdentityForSession(directory) || undefined;
-  } catch {
-    return undefined;
-  }
+  return resolveSessionProjectIdentity(directory);
 }
 
 /** Full gate body (host wait → track → knowledge → auto-search → next). */
