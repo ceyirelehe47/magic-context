@@ -47,6 +47,7 @@ import { getOrCreateSessionMeta } from "@magic-context/core/features/magic-conte
 import { resolveCacheTtl } from "@magic-context/core/hooks/magic-context/event-resolvers";
 import { buildSyntheticTodoPart } from "@magic-context/core/hooks/magic-context/todo-view";
 import { consumeDshDeferredSignals } from "./historian";
+import { getDshCompactionMarker } from "./outbox";
 import { parseCacheTtl } from "@magic-context/core/features/magic-context/scheduler";
 import type { Database } from "@magic-context/core/shared/sqlite";
 import {
@@ -448,6 +449,45 @@ export async function maybeInjectKnowledge(
   );
 }
 
+/**
+ * Durable twin of the historian's in-memory deferred-materialization signal.
+ *
+ * DSH headless runs each turn in a fresh process: the post-publish signal
+ * (historian.ts deferredSignalsBySession) dies with the process that ran the
+ * background historian, so the next process saw a cache-valid m0, replayed
+ * the old (empty) <session-history> under the same watermark, and the
+ * compartmentalized raw messages were dropped anyway — history lost (real
+ * rc.5, round 17 e2e). The publish itself is durable: it stages the
+ * compaction marker (published_at) and writes compartments (created_at) in
+ * one transaction. Anything published after the cached m0 baseline was
+ * materialized therefore owes a fold. Self-consuming like core's ttl_idle /
+ * host_compaction triggers: the fold stamps cached_m0_materialized_at =
+ * Date.now(), newer than the publish. Fail-open (false) on any read error.
+ */
+export function hasUnmaterializedHistorianPublish(
+  db: Database,
+  magicSessionId: string,
+  config: { compactionOff?: boolean },
+): boolean {
+  if (config.compactionOff === true) return false; // compartments never render
+  try {
+    const meta = db
+      .prepare("SELECT cached_m0_bytes IS NOT NULL AS has_m0, cached_m0_materialized_at AS at FROM session_meta WHERE session_id = ?")
+      .get(magicSessionId) as { has_m0: number; at: number | null } | null | undefined;
+    // No baseline yet → core's first_render handles it.
+    if (!meta || !meta.has_m0) return false;
+    const materializedAt = meta.at ?? 0;
+    const marker = getDshCompactionMarker(db, magicSessionId);
+    if (marker !== null && marker.publishedAt > materializedAt) return true;
+    const row = db
+      .prepare("SELECT MAX(created_at) AS latest FROM compartments WHERE session_id = ?")
+      .get(magicSessionId) as { latest: number | null } | null | undefined;
+    return typeof row?.latest === "number" && row.latest > materializedAt;
+  } catch {
+    return false;
+  }
+}
+
 /** Resolve the canonical project identity for a session workspace. */
 export function resolveKnowledgeProjectPath(directory: string | undefined): string | undefined {
   return resolveSessionProjectIdentity(directory);
@@ -479,9 +519,15 @@ export async function runKnowledgeGateStep(
 
       // Historian 发布后的 deferred-materialization 信号（Pi parity）：下一轮
       // pre-step 强制 HARD 物化 → m0 折叠 m1 并渲染 <session-history>。
+      // The in-memory signal only survives inside one process; the durable
+      // check covers headless (one process per turn) and a signal consumed
+      // on a pass whose surface generation was already injected.
       const deferred = consumeDshDeferredSignals(magicSessionId);
+      const forceMaterialize =
+        deferred.materialization ||
+        hasUnmaterializedHistorianPublish(db, magicSessionId, { compactionOff: deps.config.compactionOff });
       // Knowledge baseline (once per surface generation; forced after publish).
-      await maybeInjectKnowledge(state, deps, agent, db, magicSessionId, projectPath, directory, deferred.materialization);
+      await maybeInjectKnowledge(state, deps, agent, db, magicSessionId, projectPath, directory, forceMaterialize);
       // Pi transform 语义：首轮注入的消息前置到本次调用的消息列表（立即可见）。
       // DSH 0.2: the claimed batch IS appended to the surface (user/message
       // events), so the prepend is the single delivery path; the watermark
