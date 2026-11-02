@@ -729,3 +729,67 @@ describe("createMagicSummarizeHook (Magic 压缩策略)", () => {
     }
   });
 });
+
+// Round 15 scan (historian error paths): the DSH runner never recorded the
+// core failure state (session_meta.historian_failure_count / last_error /
+// last_failure_at). Every failure notice said "failed 1 time", the MC details
+// popover (reads historian_failure_count) never showed a failing historian,
+// and nothing throttled retries: the pressure trigger re-fires on every step
+// above the threshold, so a broken historian model cost one LLM call per step.
+describe("historian failure state + retry backoff (round 15)", () => {
+  it("records consecutive failures, backs off retries, and clears on success", async () => {
+    const { getHistorianFailureState } = await import("@magic-context/core/features/magic-context/storage");
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      let calls = 0;
+      let fail = true;
+      const notices: string[] = [];
+      const deps = historianDeps(db, session, {
+        summarize: async () => {
+          calls += 1;
+          if (fail) throw new Error("provider 401");
+          return validHistorianXml([{ start: 1, end: 3, title: "intro" }], 4);
+        },
+        notifyIssue: (text: string) => {
+          notices.push(String(text));
+        },
+      } as never);
+      expect(await runDshHistorian(deps)).toBe(false);
+      expect(calls).toBe(1);
+      expect(getHistorianFailureState(db, SESSION_ID).failureCount).toBe(1);
+      expect(getHistorianFailureState(db, SESSION_ID).lastError ?? "").toContain("401");
+
+      // Immediately again (the next step above the threshold): backed off, no LLM call.
+      expect(await runDshHistorian(deps)).toBe(false);
+      expect(calls).toBe(1);
+
+      // After the backoff window the retry runs and the count climbs.
+      db.prepare("UPDATE session_meta SET historian_last_failure_at = ? WHERE session_id = ?").run(
+        Date.now() - 10 * 60_000,
+        SESSION_ID,
+      );
+      expect(await runDshHistorian(deps)).toBe(false);
+      expect(calls).toBe(2);
+      expect(getHistorianFailureState(db, SESSION_ID).failureCount).toBe(2);
+      expect(notices.length).toBe(2);
+      // The count reaches the notice: at the persistent threshold the heading escalates.
+      const { buildHistorianFailureNotice } = await import("@magic-context/core/hooks/magic-context/compartment-runner-validation");
+      expect(notices[1]).toBe(buildHistorianFailureNotice(2, "provider 401"));
+
+      // A successful pass clears the failure state.
+      db.prepare("UPDATE session_meta SET historian_last_failure_at = ? WHERE session_id = ?").run(
+        Date.now() - 10 * 60_000,
+        SESSION_ID,
+      );
+      fail = false;
+      expect(await runDshHistorian(deps)).toBe(true);
+      expect(getHistorianFailureState(db, SESSION_ID).failureCount).toBe(0);
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+});

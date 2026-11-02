@@ -41,7 +41,10 @@ import { insertCompartmentEvents } from "@magic-context/core/features/magic-cont
 import { acquireCompartmentLease, isCompartmentLeaseHeld, releaseCompartmentLease } from "@magic-context/core/features/magic-context/compartment-lease";
 import { promoteSessionFactsDurable } from "@magic-context/core/features/magic-context/memory/promotion";
 import {
+  clearHistorianFailureState,
+  getHistorianFailureState,
   getOverflowState,
+  incrementHistorianFailure,
   recordProtectedTailPublicationFloor,
   updateSessionMeta,
 } from "@magic-context/core/features/magic-context/storage";
@@ -144,6 +147,19 @@ export interface HistorianDeps {
   readonly log?: (message: string) => void;
   /** Optional cancellation signal forwarded to the SummarizeCall. */
   readonly signal?: AbortSignal;
+  /** Run even inside the failure backoff window (explicit user-triggered passes). */
+  readonly ignoreFailureBackoff?: boolean;
+}
+
+/**
+ * Retry backoff after consecutive historian failures (round 15): 1 min after
+ * the first, doubling per further failure, capped at 15 min. The pressure
+ * trigger re-fires on every step above the threshold; without this a broken
+ * historian model cost one LLM call (and one notice) per step.
+ */
+export function historianFailureBackoffMs(failureCount: number): number {
+  if (!(failureCount > 0)) return 0;
+  return Math.min(15 * 60_000, 60_000 * 2 ** Math.min(10, failureCount - 1));
 }
 
 /** The compaction marker + coverage gate (contract slice: marker block). */
@@ -592,6 +608,23 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
     return false;
   }
 
+  if (deps.ignoreFailureBackoff !== true) {
+    try {
+      const failure = getHistorianFailureState(db, sessionId);
+      const backoff = historianFailureBackoffMs(failure.failureCount);
+      const at = failure.lastFailureAt ?? 0;
+      const now = Date.now();
+      if (backoff > 0 && at > 0 && at <= now && now - at < backoff) {
+        log(
+          `[magic-context] historian: backing off after ${failure.failureCount} failure(s) for ${sessionId} (retry in ${Math.ceil((backoff - (now - at)) / 1000)}s)`,
+        );
+        return false;
+      }
+    } catch {
+      // A failure-state read must never block the historian (fail-open).
+    }
+  }
+
   const lease = acquireCompartmentLease(db, sessionId, holderId);
   if (lease === null) {
     log(`[magic-context] historian: compartment lease busy for ${sessionId}`);
@@ -600,6 +633,16 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
 
   const telemetry: Partial<HistorianRunInput> = { runKind: "incremental", status: "failed" };
   let completedSuccessfully = false;
+  // Core failure state (session_meta.historian_failure_count / last_error /
+  // last_failure_at), shared with OpenCode/Pi: drives the notice escalation,
+  // the MC details popover and the retry backoff above.
+  const recordFailure = (reason: string): number => {
+    try {
+      return incrementHistorianFailure(db, sessionId, reason);
+    } catch {
+      return 1;
+    }
+  };
 
   try {
     await withRawMessageProvider(sessionId, deps.provider, async () => {
@@ -628,8 +671,9 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
         if (result.status === "failed") {
           const reason = result.reason ?? "unknown";
           log(`[magic-context] historian failure: ${reason}`);
+          const failCount = recordFailure(reason);
           try {
-            deps.notifyIssue?.(buildHistorianFailureNotice(1, reason));
+            deps.notifyIssue?.(buildHistorianFailureNotice(failCount, reason));
           } catch (error) {
             log(`[magic-context] historian notify failed: ${describeError(error).brief}`);
           }
@@ -655,6 +699,11 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
 
       completedSuccessfully = true;
       telemetry.status = "success";
+      try {
+        clearHistorianFailureState(db, sessionId);
+      } catch {
+        // fail-open
+      }
       telemetry.chunkStartOrdinal = result.chunk!.startIndex;
       telemetry.chunkEndOrdinal = result.chunk!.endIndex;
       telemetry.unprocessedFrom = result.lastNewEnd! + 1;
@@ -691,8 +740,9 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
     const desc = describeError(error);
     telemetry.failureReason = `exception: ${desc.brief}`;
     log(`[magic-context] historian failure: source=exception ${desc.brief}`);
+    const failCount = recordFailure(desc.brief);
     try {
-      deps.notifyIssue?.(buildHistorianFailureNotice(1, desc.brief));
+      deps.notifyIssue?.(buildHistorianFailureNotice(failCount, desc.brief));
     } catch {
       // notify must never break the fire-and-forget contract
     }
