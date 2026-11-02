@@ -80,7 +80,7 @@ describe("magicContext/context details", () => {
 // historian "running" forever. The flag only counts while a compartment
 // lease is live (the pass holds it; it expires when the holder died).
 describe("historian running state requires a live compartment lease", () => {
-  it("a stale in-progress flag without a live lease is not "running"; with a live lease it is", () => {
+  it("a stale in-progress flag without a live lease is not 'running'; with a live lease it is", () => {
     const d = db();
     d.exec(`CREATE TABLE compartment_state_lease (session_id TEXT PRIMARY KEY, holder_id TEXT, owner_pid INTEGER, acquired_at INTEGER, expires_at INTEGER)`);
     d.prepare(`INSERT INTO session_meta (session_id, compartment_in_progress, historian_failure_count) VALUES ('dsh:h:s1', 1, 0)`).run();
