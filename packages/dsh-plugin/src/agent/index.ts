@@ -284,16 +284,36 @@ export interface MagicLiveSettings {
   thresholdFor(agent: { options?: { provider?: string; model?: string } }, contextWindow?: number): number;
 }
 
+/**
+ * How long the live view trusts its last magic-context.jsonc read. Same order
+ * as the settings page's cache (host/remote.ts, 3 s) so the page and the agent
+ * plane agree within a few seconds of an edit, without a file read per step.
+ */
+export const LIVE_JSONC_TTL_MS = 3_000;
+
 export function createLiveSettings(
   host: Pick<MagicContextHostService, "overrides">,
   directory: string,
+  opts: { now?: () => number; ttlMs?: number } = {},
 ): MagicLiveSettings {
-  let jsonc: MagicContextPluginConfig | undefined;
-  try {
-    jsonc = loadPluginConfig(directory);
-  } catch {
-    jsonc = undefined;
-  }
+  const now = opts.now ?? Date.now;
+  const ttlMs = opts.ttlMs ?? LIVE_JSONC_TTL_MS;
+  // Re-read the shared jsonc with a short TTL (round 15): it used to be read
+  // once at apply time, so a jsonc edit showed up as the effective value on the
+  // settings page while the agent kept the old enabled/threshold until restart.
+  let cache: { at: number; value: MagicContextPluginConfig | undefined } | undefined;
+  const jsonc = (): MagicContextPluginConfig | undefined => {
+    const t = now();
+    if (cache !== undefined && t - cache.at < ttlMs) return cache.value;
+    let value: MagicContextPluginConfig | undefined;
+    try {
+      value = loadPluginConfig(directory);
+    } catch {
+      value = undefined;
+    }
+    cache = { at: t, value };
+    return value;
+  };
   const overrides = () => {
     try {
       return host.overrides?.() ?? {};
@@ -301,7 +321,7 @@ export function createLiveSettings(
       return {};
     }
   };
-  const effective = () => resolveEffectiveSettings(jsonc, overrides());
+  const effective = () => resolveEffectiveSettings(jsonc(), overrides());
   return {
     overrides,
     effective,
