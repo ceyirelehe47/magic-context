@@ -169,12 +169,26 @@ export function registerCtxStatusCommand(ctx: Context, opts: CtxCommandsOptions)
           detectedContextLimit,
           { backlog: dreamerBacklogFor(db, projectIdentity) },
         );
-        return successResult(statusText);
+        return successResult(stripOpenCodeDbStatusLine(statusText));
       } catch (error) {
         return errorResult(`## Magic Status — Failed\n\n${describeError(error).brief}`);
       }
     },
   });
+}
+
+/**
+ * Core `executeStatus` opens with an OpenCode-DB line when OpenCode's own
+ * session database is missing or unreadable ("OpenCode DB: MISSING … History
+ * compaction (historian) and the mid-turn valve are disabled"). That is true
+ * for the OpenCode host only: the DSH historian reads the DSH session log
+ * through the agent's transcript provider and never opens OpenCode's DB, so
+ * on DSH the line is false (round 17 real rc.5: shown in a session whose
+ * historian had just written four compartments). Drop it; the rest of the
+ * status is host-neutral.
+ */
+export function stripOpenCodeDbStatusLine(text: string): string {
+  return text.replace(/^OpenCode DB: [^\n]*\n(?:\n)?/, "");
 }
 
 /* ─────────────────────────────── /ctx-flush ────────────────────────────── */

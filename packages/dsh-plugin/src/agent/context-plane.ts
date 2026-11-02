@@ -318,7 +318,14 @@ function maybeFireHistorian(
     // 压力持久化（对齐 Pi persistPiPressureFromMessageEnd）：把最近一次的
     // 百分比写入 session_meta，供 /ctx-status 与共享状态读取。
     try {
-      updateSessionMeta(db, sessionId, { lastContextPercentage: percentage });
+      // Round 17: the measured prompt tokens too (upstream writes both from
+      // the response usage); /ctx-status and ctx_reduce's nudge stamp read
+      // last_input_tokens and showed 0 on DSH.
+      const inputTokens = Math.max(0, Math.round(sample.projectedTokens ?? 0));
+      updateSessionMeta(db, sessionId, {
+        lastContextPercentage: percentage,
+        ...(inputTokens > 0 ? { lastInputTokens: inputTokens } : {}),
+      });
     } catch {
       // 持久化失败不可破坏 pre-step 链（fail-open）。
     }

@@ -200,6 +200,44 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
     }
   });
 
+  it("round 17: persists the measured prompt tokens with the percentage (status / ctx_reduce read last_input_tokens)", async () => {
+    // Real rc.5 (round 17 e2e): /ctx-status always said "Last input tokens: 0"
+    // and ctx_reduce stamped lastNudgeTokens=0 — the DSH plane only wrote
+    // lastContextPercentage. Upstream writes both from the response usage.
+    const dir = mkdtempSync(join(tmpdir(), "dsh-magic-plane-"));
+    try {
+      const db = await createTestDb(join(dir, "context.db"));
+      const session = buildSession();
+      const deps: ContextPlaneDeps = {
+        host: {
+          ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }),
+          canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}`,
+        },
+        config: { enabled: false },
+        historian: {
+          config: { enabled: true, executeThresholdPercentage: 65, triggerBudgetTokens: 1000 },
+          readPressure: () => ({ projectedTokens: 26_000, contextWindow: 40_000 }),
+          fire: () => {},
+        },
+        log: () => {},
+      };
+      await runContextPlaneStep(
+        createContextPlaneState(),
+        deps,
+        { agent: { id: session.id, session } as never },
+        async () => ({ reject: false, messages: [] }),
+      );
+      const row = db
+        .prepare("SELECT last_context_percentage AS pct, last_input_tokens AS tokens FROM session_meta WHERE session_id = ?")
+        .get("dsh:a1b2c3d4:sess-plane") as { pct: number; tokens: number };
+      expect(row.pct).toBe(65);
+      expect(row.tokens).toBe(26_000);
+      db.close();
+    } finally {
+      await cleanupDir(dir);
+    }
+  });
+
   it("does not fire the historian pass below the threshold", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dsh-magic-plane-"));
     try {

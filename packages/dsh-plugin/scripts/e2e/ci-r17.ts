@@ -13,7 +13,8 @@
 //     - `details`: readSessionContextDetails() — the source of the DSH settings
 //       page / composer MC popover (`magicContext/context`), resolved through
 //       the same wireSessionToCanonical() the Remote endpoint uses;
-//     - `status`:  core executeStatus() text — the `/ctx-status` command body.
+//     - `status`:  the `/ctx-status` command body (core executeStatus() passed
+//       through the DSH command's stripOpenCodeDbStatusLine()).
 // Prints JSON only; the DB holds no secrets.
 import { Database } from "bun:sqlite";
 import { readSessionContextDetails } from "../../src/host/context-details";
@@ -117,7 +118,8 @@ if (key !== undefined) {
   out.status = await (async () => {
     try {
       const { executeStatus } = await import("@magic-context/core/hooks/magic-context/execute-status");
-      return executeStatus(db as never, key, threshold, modelKey);
+      const { stripOpenCodeDbStatusLine } = await import("../../src/agent/commands");
+      return stripOpenCodeDbStatusLine(executeStatus(db as never, key, threshold, modelKey));
     } catch (error) {
       return { error: String(error instanceof Error ? error.message : error).slice(0, 300) };
     }

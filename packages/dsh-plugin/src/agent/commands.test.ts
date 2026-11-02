@@ -150,6 +150,45 @@ describe("/ctx-status", () => {
   });
 });
 
+describe("/ctx-status on DSH (round 17)", () => {
+  it("does not claim the historian is disabled for want of an OpenCode DB, and reports DSH usage + window", async () => {
+    // Real rc.5 (round 17 e2e): core executeStatus prepends
+    // "OpenCode DB: MISSING … History compaction (historian) and the mid-turn
+    // valve are disabled" whenever no OpenCode DB exists — on DSH the
+    // historian never reads it (it ran and wrote compartments in that very
+    // session). The status also said "Last input tokens: 0" and
+    // "Resolved context limit: unknown".
+    const { db, dir } = await openDb();
+    const previous = process.env.OPENCODE_DB;
+    process.env.OPENCODE_DB = join(dir, "no-such-opencode.db");
+    try {
+      const { ctx, registered } = makeFakeCtx();
+      registerCtxCommands(ctx, baseOpts(db));
+      const command = findCommand(registered, "ctx-status");
+      const agent = makeFakeAgent(SESSION_ID, "/tmp/dsh-proj");
+      (agent as unknown as { session: { events: unknown[] } }).session.events = [
+        { type: "request/context", seq: 1, data: { provider: "deepseek", model: "deepseek-chat", contextWindow: 40_000 } },
+        { type: "assistant/message", seq: 2, data: { usage: { inputTokens: 26_000, outputTokens: 10, totalTokens: 26_010 } } },
+      ];
+      db.prepare(
+        "INSERT OR REPLACE INTO session_meta (session_id, harness, last_input_tokens, last_context_percentage) VALUES (?, 'dsh', ?, ?)",
+      ).run(CANONICAL, 26_000, 65);
+      const result = (await command.handler(invocation(agent))) as CommandResult;
+      expect(result.kind).toBe("success");
+      if (result.kind !== "success") return;
+      expect(result.text).not.toContain("OpenCode DB");
+      expect(result.text).not.toContain("historian) and the mid-turn valve are disabled");
+      expect(result.text).toContain("- Last input tokens: 26,000 tokens");
+      expect(result.text).not.toContain("Resolved context limit: unknown");
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_DB;
+      else process.env.OPENCODE_DB = previous;
+      db.close();
+      await removeTestDir(dir);
+    }
+  });
+});
+
 describe("/ctx-flush", () => {
   it("flushes pending drops and marks tags dropped", async () => {
     const { db, dir } = await openDb();
