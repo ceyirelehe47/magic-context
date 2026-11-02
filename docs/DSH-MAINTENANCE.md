@@ -468,14 +468,41 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
    coverage, fold boundaries around a copy) and skips ops that re-render the
    copy's current text (no churn). Old sessions: a copy whose sources include
    a non-copy Magic message (knowledge, temporal merge) stays a baseline.
-   Remaining gap (real, round 10, 24k window): core's token-floor protection
-   keeps the newest tool results (there: all three, `protectedTagNumbers
-   [3,6,9]`), so two 15 kB reads left the request at 80 % with no output room
-   (`max-tokens` after 1 token) and the model could not call ctx_reduce; the
-   native pruner would have middle-truncated them. Not fixed: doing it right
-   needs a persistent per-tag "pruned" state (core `drop_mode` semantics) so
-   the rebuilt view does not re-render the full output on the next pass; on
-   realistic windows (≥128k) the floor and the tool outputs are far apart.
+   Small-window deadlock (real, round 10, 24k window) — **fixed in round 11
+   (cc3d6469f, 5c8f5c1e3)**: core's token-floor protection keeps the newest
+   tool results (there: all three), core's emergency drop yields only at
+   ≥95 % of INPUT, and nothing under Magic calls the native pruner, so two
+   15 kB reads left the request at 80 % with no room for `maxTokens` 4096
+   (`max-tokens` after 1 token, ctx_reduce unreachable). Magic now has a DSH
+   emergency tier, `agent/pressure-truncation.ts`: when projected input +
+   output reserve (latest `request/header` `maxTokens`) reaches the force band
+   (`max(85, execute + 2)`), active tool results ≥ 3× the keep budget are
+   middle-truncated — protected ones included, oldest first, the newest only
+   if the others cannot get under the force band — to head + tail (~8 % of the
+   window in chars, 1.2k–12k; 75/25) with a marker naming the tag and the
+   omitted (numbered) lines. The `§N§` prefix stays in the head; the original
+   output stays in the DSH event log (historian, re-reading). Core `drop_mode`
+   semantics: the decision is persisted (`dsh_pressure_truncations`: head/tail
+   sizes + sha256 of the untruncated output + the usage seq it was based on)
+   and replayed byte-identically every pass, so the rebuilt view never
+   re-renders the full output and the coordinator sees the copy as current
+   (no op, no event, no cache bust); a tag is truncated at most once; one
+   batch per usage sample (a new batch needs a newer usage-bearing assistant
+   message); a drop wins (dropped tags are not replayed); a digest mismatch
+   skips the row. `pressureTruncation: false` in the context-plane config stops
+   new decisions (persisted ones keep replaying). Verified: unit tests red
+   before (`docs/dsh/e2e/evidence-round11/unit-item1-*`); real rc.5 with the
+   round 10 turns (`evidence-round11/real-item1-*`): §6§ truncated once at
+   ≈96 % effective, turns 3–8 all answer (round 10: empty `max-tokens`),
+   ctx_reduce callable again, the truncated copy written once and unchanged
+   across 6 process restarts (one re-render after the marker-wording change).
+   Limits: the trigger reads the token-meter projection, which lags one step;
+   a single tool result larger than the whole window is still truncated only
+   down to the keep budget; protected drops queued by ctx_reduce still wait
+   for the window (core parity).
+   Also fixed in round 11 (3218f6148): a dropped tool arc rendered its
+   placeholder once per part (`[dropped §3§]\n\n[dropped §3§]`, real rc.5);
+   it now renders once (existing copies re-render once).
 8. **Client bundle is plain JS against the rc.5 web boot.** It may only
    `require` the web boot's static modules (`react`, `react/jsx-runtime`,
    `react-dom`, `@deepseek-ai/dsh-client-store`, `…-ui-slots`, …); the test
