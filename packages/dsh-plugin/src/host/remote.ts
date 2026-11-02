@@ -230,7 +230,7 @@ export class MagicContextRemoteService extends Service {
     const effective = effectiveFor(this.host);
     return readSessionContextDetails({
       db: bootstrap.kind === "ok" ? bootstrap.db : undefined,
-      canonicalSessionId: sessionId.length > 0 ? this.host.canonicalKey(sessionId) : undefined,
+      canonicalSessionId: wireSessionToCanonical(this.host, sessionId),
       sessionId,
       effective,
       thresholds: resolveThresholds(effective, model, contextWindow),
@@ -249,7 +249,10 @@ export class MagicContextRemoteService extends Service {
       compartments: 0,
       meta: { hasM0: false },
     };
-    if (sessionId.length === 0) return empty;
+    // Every Magic table is keyed by the canonical `dsh:<home>:<id>` key; the
+    // raw wire id used to be queried as is and always read zeros (round 15).
+    const key = wireSessionToCanonical(this.host, sessionId);
+    if (key === undefined) return empty;
     const bootstrap = await this.host.ready;
     if (bootstrap.kind !== "ok") return empty;
     const db = bootstrap.db;
@@ -259,40 +262,40 @@ export class MagicContextRemoteService extends Service {
       const outbox = {
         pending: count(
           "SELECT COUNT(*) AS n FROM dsh_context_outbox WHERE session_id = ? AND status = 'pending'",
-          sessionId,
+          key,
         ),
         applied: count(
           "SELECT COUNT(*) AS n FROM dsh_context_outbox WHERE session_id = ? AND status = 'applied'",
-          sessionId,
+          key,
         ),
         committed: count(
           "SELECT COUNT(*) AS n FROM dsh_context_outbox WHERE session_id = ? AND status = 'committed'",
-          sessionId,
+          key,
         ),
         abandoned: count(
           "SELECT COUNT(*) AS n FROM dsh_context_outbox WHERE session_id = ? AND status = 'abandoned'",
-          sessionId,
+          key,
         ),
       };
       const tags = {
         active: count(
           "SELECT COUNT(*) AS n FROM tags WHERE session_id = ? AND status = 'active'",
-          sessionId,
+          key,
         ),
         dropped: count(
           "SELECT COUNT(*) AS n FROM tags WHERE session_id = ? AND status = 'dropped'",
-          sessionId,
+          key,
         ),
       };
       const compartments = count(
         "SELECT COUNT(*) AS n FROM compartments WHERE session_id = ?",
-        sessionId,
+        key,
       );
       const metaRow = db
         .prepare(
           "SELECT last_context_percentage, cached_m0_bytes FROM session_meta WHERE session_id = ?",
         )
-        .get(sessionId) as
+        .get(key) as
         | { last_context_percentage: number | null; cached_m0_bytes: Uint8Array | null }
         | undefined;
       return {
@@ -310,6 +313,26 @@ export class MagicContextRemoteService extends Service {
     } catch {
       return empty;
     }
+  }
+}
+
+/**
+ * Resolve a session id received over the Remote wire to this home's canonical
+ * Magic key. Accepts the DSH-native id or this home's canonical key; answers
+ * undefined (never throws) for an empty id, a malformed id (the key separator
+ * inside a native id) or another home's canonical key.
+ */
+export function wireSessionToCanonical(
+  host: Pick<MagicContextHostService, "canonicalKey"> & Partial<Pick<MagicContextHostService, "parseKey">>,
+  raw: string,
+): string | undefined {
+  if (raw.length === 0) return undefined;
+  try {
+    const parsed = host.parseKey?.(raw);
+    if (parsed !== undefined) return host.canonicalKey(parsed.dshSessionId) === raw ? raw : undefined;
+    return host.canonicalKey(raw);
+  } catch {
+    return undefined;
   }
 }
 
