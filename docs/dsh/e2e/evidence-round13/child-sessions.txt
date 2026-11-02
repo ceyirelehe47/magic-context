@@ -1,0 +1,36 @@
+## run-30 child 554f0b41-f11c-48ad-b2e4-d35e49490a83
+session origin=subagent parent=session-32e863a3-e03f-40a2-88e7-766fbc26bcae delegationDepth=1
+sandbox/mode seq=1 t=1793618070028 {"mode": "workspace-write", "source": "delegation"}
+approval/policy seq=2 t=1793618070028 {"policy": "never", "source": "delegation"}
+sandbox/mode seq=3 t=1793618070149 {"mode": "workspace-write", "source": "delegation"}
+approval/policy seq=4 t=1793618070150 {"policy": "never", "source": "delegation"}
+turn/start seq=6 t=1793618070200 {"turn": 1}
+system/message chars=1941 contains '## Magic Context'=False contains '§'=False
+request tools = ["glob", "grep", "read"]
+tool/call glob {"pattern":"*"}
+assistant text: "TOOL: glob\nTOOL: grep\nTOOL: read\nGLOB_COUNT: 322\nBASH: unavailable — no tool named bash is exposed in this session\nWRITE: unavailable — no tool named write is exposed in this session"
+turn/end seq=22 t=1793618075470 {"turn": 1, "reason": {"kind": "completed"}}
+
+## run-31 child 1b7d7567-1af6-4d0d-9404-0f0079f39b6e
+session origin=subagent parent=session-72fad26c-33c0-4d1c-ba75-301e017d3032 delegationDepth=1
+sandbox/mode seq=1 t=1793618682129 {"mode": "workspace-write", "source": "delegation"}
+approval/policy seq=2 t=1793618682129 {"policy": "never", "source": "delegation"}
+sandbox/mode seq=3 t=1793618682174 {"mode": "workspace-write", "source": "delegation"}
+approval/policy seq=4 t=1793618682175 {"policy": "never", "source": "delegation"}
+turn/start seq=6 t=1793618682182 {"turn": 1}
+system/message chars=1941 contains '## Magic Context'=False contains '§'=False
+request tools = ["glob", "grep", "read"]
+tool/call glob {"pattern":"*"}
+assistant text: "TOOL: glob\nTOOL: grep\nTOOL: read\nGLOB_COUNT: 324\nBASH: unavailable — no tool named bash exists in my toolset (only glob, grep, read), so the call could not be issued and produced no output or error text.\nWRITE: unavailable — no tool named write exists in my toolset, so the call could not be issued; no file mc-worker-probe.txt was created."
+turn/end seq=22 t=1793618689198 {"turn": 1, "reason": {"kind": "completed"}}
+
+## run-32 child 91060f17-1d24-49a8-b375-511544149c48
+session origin=subagent parent=session-c7e4552b-0b39-4151-bff5-427d30c0dfa6 delegationDepth=1
+sandbox/mode seq=1 t=1793618742153 {"mode": "workspace-write", "source": "delegation"}
+approval/policy seq=2 t=1793618742153 {"policy": "never", "source": "delegation"}
+sandbox/mode seq=3 t=1793618742199 {"mode": "workspace-write", "source": "delegation"}
+approval/policy seq=4 t=1793618742199 {"policy": "never", "source": "delegation"}
+turn/start seq=6 t=1793618742206 {"turn": 1}
+system/message chars=1941 contains '## Magic Context'=False contains '§'=False
+request tools = ["glob", "grep", "read"]
+turn/end seq=17 t=1793618743746 {"turn": 1, "reason": {"kind": "aborted", "reason": {"kind": "parent"}}}

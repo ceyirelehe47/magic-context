@@ -1,0 +1,67 @@
+# DB per-session row counts (context.db, read-only). p=parent session, c=worker child session
+tags {"p30":4,"p31":5,"p32":2}
+pending_ops {}
+source_contents {"p30":2,"p31":3,"p32":1}
+compartments {"p31":1}
+session_projects {"p30":1,"p31":1,"p32":1}
+compartment_events {}
+compartment_state_lease {}
+compression_depth {}
+session_facts {}
+primer_candidates {}
+synapse_batch_ledger {}
+embedding_measurement_corpus {}
+m0_mutation_log {}
+message_history_fts {}
+message_fts_rowid_map {}
+lkg_slots {}
+lkg_slot_chunks {}
+session_replay_decisions {}
+message_history_index {}
+message_history_source {}
+pending_session_cleanup {}
+session_meta {"p30":1,"p31":1,"p32":1}
+tool_owner_backfill_state {}
+subagent_invocations {}
+historian_runs {"p30":2,"p31":2,"p32":2}
+transform_decisions {}
+recomp_compartments {}
+recomp_facts {}
+compartment_history_versions {"p31":1}
+temporal_decisions {}
+notes {}
+plugin_messages {}
+user_memory_candidates {}
+compartment_chunk_embeddings {}
+dsh_context_outbox {"p30":1,"p31":2,"p32":1}
+dsh_context_compaction_marker {"p31":1}
+dsh_feedback_signals {}
+dsh_pressure_truncations {}
+
+# parent rows (tags / historian_runs / outbox / compartments / compaction marker)
+[ "dsh:5e4b5e1a:session-32e863a3-e03f-40a2-88e7-766fbc26bcae", "dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032",
+  "dsh:5e4b5e1a:session-c7e4552b-0b39-4151-bff5-427d30c0dfa6"
+]
+tags id,session_id,message_id,type,status,byte_size,tag_number,harness,entry_fingerprint,token_count,input_token_count,reasoning_token_count,reasoning_byte_size,drop_mode,tool_name,input_byte_size,caveman_depth,tool_owner_message_id
+historian_runs id,session_id,harness,subagent_invocation_id,run_kind,status,failure_reason,chunk_start_ordinal,chunk_end_ordinal,unprocessed_from,compartments_produced,compartment_id_min,compartment_id_max,facts_emitted,facts_by_category_json,events_emitted,importance_min,importance_max,importance_avg,discarded_last,legacy,created_at
+dsh_context_outbox op_id,session_id,harness,kind,source_watermark,input_digest,generation,status,dsh_ack_seq,error_detail,created_at,updated_at
+compartments id,session_id,sequence,start_message,end_message,start_message_id,end_message_id,start_block_index,end_block_index,title,content,p1,p2,p3,p4,importance,episode_type,p1_embedding,p1_embedding_model_id,legacy,created_at,harness,rebase_status
+dsh_context_compaction_marker session_id,ordinal,end_message_id,tokens_before,summary,published_at,status
+===== dsh:5e4b5e1a:session-32e863a3-e03f-40a2-88e7-766fbc26bcae
+tags [{"id":127,"session_id":"dsh:5e4b5e1a:session-32e863a3-e03f-40a2-88e7-766fbc26bcae","message_id":"f3b34aba-3f6f-47f2-9d47-4ae193241fce:p0","type":"message","status":"active","byte_size":203,"tag_number":1,"harness":"dsh","entry_fingerprint":null,"token_count":null,"input_token_count":null,"reasoning_token_count":null,"reasoning_byte_size":0,"drop_mode":"full","tool_name":null,"input_byte_size":0,"caveman_depth":0,"tool_owner_message_id":null},{"id":128,"session_id":"dsh:5e4b5e1a:session-32e863a3-e03f-40a2-88e7-766fbc26bcae","message_id":"synth-user-d93b7fcb-6ecf-4efe-9c89-56ed8d3dc3a6:p0","type":"message","status":"active","byte_size":33,"tag_number":2,"harness":"dsh","entry_fingerprint":null,"token_count":7,"input_token_count":null,"reasoning_token_count":null,"reasoning_byte_size":0,"drop_mode":"full","tool_name":null,"input_byte_size":0,"caveman_depth":0,"tool_owner_message_id":null},{"id":129,"session_id":"dsh:5e4b5e1a:session-32e863a3-e03f-40a2-88e7-766fbc26bcae","message_id":"call_b59128726eaf4cf0a81f67a1","type":"tool","status":"active","byte_size":2907,"tag_number":3,"harness":"dsh","entry_fingerprint":null,"token_count":1155,"input_token_count":0,"reasoning_token_count":null,"reasoning_byte_size":0,"drop_mode":"full","tool_name":"glob","input_byte_size":15,"caveman_depth":0,"tool_owner_message_id":"synth-user-d93b7fcb-6ecf-4efe-9c89-56ed8d3dc3a6"},{"id":130,"session_id":"dsh:5e4b5e1a:session-32e863a3-e03f-40a2-88e7-766fbc26bcae","message_id":"call_67c8d70567d54bf88d6bafcb","type":"tool","status":"active","byte_size":450,"tag_number":4,"harness":"dsh","entry_fingerprint":null,"token_count":154,"input_token_count":0,"reasoning_token_count":null,"reasoning_byte_size":0,"drop_mode":"full","tool_name":"ctx_worker_selftest","input_byte_size":2,"caveman_depth":0,"tool_owner_message_id":"synth-user-d93b7fcb-6ecf-4efe-9c89-56ed8d3dc3a6"}]
+hist [{"id":40,"session_id":"dsh:5e4b5e1a:session-32e863a3-e03f-40a2-88e7-766fbc26bcae","harness":"dsh","subagent_invocation_id":null,"run_kind":"incremental","status":"noop","failure_reason":"nothing to compact (eligibleEnd=1 <= offset=1)","chunk_start_ordinal":null,"chunk_end_ordinal":null,"unprocessed_from":null,"compartments_produced":0,"compartment_id_min":null,"compartment_id_max":null,"facts_emitted":0,"facts_by_category_json":"{\"facts_promoted\":0,\"events_published\":0}","events_emitted":0,"importance_min":null,"importance_max":null,"importance_avg":null,"discarded_last":0,"legacy":0,"created_at":1793618078886},{"id":39,"session_id":"dsh:5e4b5e1a:session-32e863a3-e03f-40a2-88e7-766fbc26bcae","harness":"dsh","subagent_invocation_id":null,"run_kind":"incremental","status":"noop","failure_reason":"nothing to compact (eligibleEnd=1 <= offset=1)","chunk_start_ordinal":null,"chunk_end_ordinal":null,"unprocessed_from":null,"compartments_produced":0,"compartment_id_min":null,"compartment_id_max":null,"facts_emitted":0,"facts_by_category_json":"{\"facts_promoted\":0,\"events_published\":0}","events_emitted":0,"importance_min":null,"importance_max":null,"importance_avg":null,"discarded_last":0,"legacy":0,"created_at":1793618075854}]
+outbox [{"op_id":"059d380d-cfbb-4c96-8947-fabf03801297","session_id":"dsh:5e4b5e1a:session-32e863a3-e03f-40a2-88e7-766fbc26bcae","harness":"dsh","kind":"tags","source_watermark":23,"input_digest":"69aad8e536802caf","generation":0,"status":"committed","dsh_ack_seq":24,"error_detail":null,"created_at":1793618075742,"updated_at":1793618075763}]
+comp []
+marker []
+===== dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032
+tags [{"id":131,"session_id":"dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032","message_id":"79e38d85-2637-45e4-bc48-d45c5900c2ef:p0","type":"message","status":"active","byte_size":203,"tag_number":1,"harness":"dsh","entry_fingerprint":null,"token_count":null,"input_token_count":null,"reasoning_token_count":null,"reasoning_byte_size":0,"drop_mode":"full","tool_name":null,"input_byte_size":0,"caveman_depth":0,"tool_owner_message_id":null},{"id":132,"session_id":"dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032","message_id":"synth-user-0210a890-d0c0-4912-a5e0-6369ec5aeb2a:p0","type":"message","status":"active","byte_size":30,"tag_number":2,"harness":"dsh","entry_fingerprint":null,"token_count":8,"input_token_count":null,"reasoning_token_count":null,"reasoning_byte_size":0,"drop_mode":"full","tool_name":null,"input_byte_size":0,"caveman_depth":0,"tool_owner_message_id":null},{"id":133,"session_id":"dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032","message_id":"call_00_te17tiev6h7grbuwxjrhbabo","type":"tool","status":"active","byte_size":2907,"tag_number":3,"harness":"dsh","entry_fingerprint":null,"token_count":1153,"input_token_count":0,"reasoning_token_count":null,"reasoning_byte_size":0,"drop_mode":"full","tool_name":"glob","input_byte_size":15,"caveman_depth":0,"tool_owner_message_id":"synth-user-0210a890-d0c0-4912-a5e0-6369ec5aeb2a"},{"id":134,"session_id":"dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032","message_id":"synth-user-f876acf6-a274-4db9-aa84-0d554352443a:p0","type":"message","status":"active","byte_size":110,"tag_number":4,"harness":"dsh","entry_fingerprint":null,"token_count":25,"input_token_count":null,"reasoning_token_count":null,"reasoning_byte_size":0,"drop_mode":"full","tool_name":null,"input_byte_size":0,"caveman_depth":0,"tool_owner_message_id":null},{"id":135,"session_id":"dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032","message_id":"call_00_pfe5i68m6cu4p6a2xwulssz5","type":"tool","status":"active","byte_size":978,"tag_number":5,"harness":"dsh","entry_fingerprint":null,"token_count":298,"input_token_count":0,"reasoning_token_count":null,"reasoning_byte_size":0,"drop_mode":"full","tool_name":"ctx_worker_selftest","input_byte_size":2,"caveman_depth":0,"tool_owner_message_id":"synth-user-f876acf6-a274-4db9-aa84-0d554352443a"}]
+hist [{"id":42,"session_id":"dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032","harness":"dsh","subagent_invocation_id":null,"run_kind":"incremental","status":"success","failure_reason":null,"chunk_start_ordinal":1,"chunk_end_ordinal":1,"unprocessed_from":2,"compartments_produced":1,"compartment_id_min":18,"compartment_id_max":18,"facts_emitted":0,"facts_by_category_json":"{\"facts_promoted\":0,\"events_published\":0}","events_emitted":0,"importance_min":2,"importance_max":2,"importance_avg":2,"discarded_last":0,"legacy":0,"created_at":1793618726092},{"id":41,"session_id":"dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032","harness":"dsh","subagent_invocation_id":null,"run_kind":"incremental","status":"noop","failure_reason":"nothing to compact (eligibleEnd=1 <= offset=1)","chunk_start_ordinal":null,"chunk_end_ordinal":null,"unprocessed_from":null,"compartments_produced":0,"compartment_id_min":null,"compartment_id_max":null,"facts_emitted":0,"facts_by_category_json":"{\"facts_promoted\":0,\"events_published\":0}","events_emitted":0,"importance_min":null,"importance_max":null,"importance_avg":null,"discarded_last":0,"legacy":0,"created_at":1793618679347}]
+outbox [{"op_id":"f9786c5b-050f-462a-b018-0ecb9d2d3509","session_id":"dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032","harness":"dsh","kind":"tags","source_watermark":20,"input_digest":"1446d8692b44e999","generation":0,"status":"committed","dsh_ack_seq":21,"error_detail":null,"created_at":1793618679119,"updated_at":1793618679175},{"op_id":"e4c2e1ab-4017-48be-acb6-2e3eb99394bf","session_id":"dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032","harness":"dsh","kind":"tags","source_watermark":28,"input_digest":"5ac5d65217d7d949","generation":1,"status":"committed","dsh_ack_seq":29,"error_detail":null,"created_at":1793618689511,"updated_at":1793618689542}]
+comp [{"session_id":"dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032","sequence":0,"start_message":1,"end_message":1,"t":"Empty session-history marker at session start"}]
+marker [{"session_id":"dsh:5e4b5e1a:session-72fad26c-33c0-4d1c-ba75-301e017d3032","ordinal":1,"end_message_id":"b18b8ed3-e395-40a1-9f0e-bc4821b4b1e1","tokens_before":14,"summary":"Magic Context compacted: Empty session-history marker at session start","published_at":1793618726072,"status":"pending"}]
+===== dsh:5e4b5e1a:session-c7e4552b-0b39-4151-bff5-427d30c0dfa6
+tags [{"id":136,"session_id":"dsh:5e4b5e1a:session-c7e4552b-0b39-4151-bff5-427d30c0dfa6","message_id":"c1dd8f92-ed16-4518-9de8-ca5fdbd2fb9e:p0","type":"message","status":"active","byte_size":116,"tag_number":1,"harness":"dsh","entry_fingerprint":null,"token_count":null,"input_token_count":null,"reasoning_token_count":null,"reasoning_byte_size":0,"drop_mode":"full","tool_name":null,"input_byte_size":0,"caveman_depth":0,"tool_owner_message_id":null},{"id":137,"session_id":"dsh:5e4b5e1a:session-c7e4552b-0b39-4151-bff5-427d30c0dfa6","message_id":"call_00_dbd6nvpttordfqn8t0xlcxpd","type":"tool","status":"active","byte_size":630,"tag_number":2,"harness":"dsh","entry_fingerprint":null,"token_count":198,"input_token_count":0,"reasoning_token_count":null,"reasoning_byte_size":0,"drop_mode":"full","tool_name":"ctx_worker_selftest","input_byte_size":2,"caveman_depth":0,"tool_owner_message_id":"synth-user-185b8852-748a-46a6-a6a6-f05d313aacdc"}]
+hist [{"id":44,"session_id":"dsh:5e4b5e1a:session-c7e4552b-0b39-4151-bff5-427d30c0dfa6","harness":"dsh","subagent_invocation_id":null,"run_kind":"incremental","status":"noop","failure_reason":"nothing to compact (eligibleEnd=1 <= offset=1)","chunk_start_ordinal":null,"chunk_end_ordinal":null,"unprocessed_from":null,"compartments_produced":0,"compartment_id_min":null,"compartment_id_max":null,"facts_emitted":0,"facts_by_category_json":"{\"facts_promoted\":0,\"events_published\":0}","events_emitted":0,"importance_min":null,"importance_max":null,"importance_avg":null,"discarded_last":0,"legacy":0,"created_at":1793618750361},{"id":43,"session_id":"dsh:5e4b5e1a:session-c7e4552b-0b39-4151-bff5-427d30c0dfa6","harness":"dsh","subagent_invocation_id":null,"run_kind":"incremental","status":"noop","failure_reason":"nothing to compact (eligibleEnd=1 <= offset=1)","chunk_start_ordinal":null,"chunk_end_ordinal":null,"unprocessed_from":null,"compartments_produced":0,"compartment_id_min":null,"compartment_id_max":null,"facts_emitted":0,"facts_by_category_json":"{\"facts_promoted\":0,\"events_published\":0}","events_emitted":0,"importance_min":null,"importance_max":null,"importance_avg":null,"discarded_last":0,"legacy":0,"created_at":1793618744115}]
+outbox [{"op_id":"44ba5cc8-9c3a-4017-937a-f595f8bec92b","session_id":"dsh:5e4b5e1a:session-c7e4552b-0b39-4151-bff5-427d30c0dfa6","harness":"dsh","kind":"tags","source_watermark":21,"input_digest":"f87237664541745e","generation":0,"status":"committed","dsh_ack_seq":22,"error_detail":null,"created_at":1793618743903,"updated_at":1793618743918}]
+comp []
+marker []
