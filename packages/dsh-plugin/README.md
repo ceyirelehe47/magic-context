@@ -7,18 +7,32 @@ injection, historian/dreamer scheduling, Magic compaction, a **Magic Context
 section on the DSH Settings page** and a **Magic Context context meter** in
 the composer.
 
-> Community port maintained on the `dsh-integration` branch of a fork of
+> Community-maintained downstream distribution on the `dsh-integration` branch
+> of https://github.com/ceyirelehe47/magic-context, a fork of
 > https://github.com/cortexkit/magic-context (MIT). Not affiliated with the
-> DeepSeek projects. Maintainer notes: `docs/DSH-MAINTENANCE.md`.
+> official Magic Context or DeepSeek projects. Maintainer notes:
+> `docs/DSH-MAINTENANCE.md`.
 
-Compatibility: DSH **0.2.1-rc.5** (exact; `doctor` checks it), Magic Context
-core v0.49.x shared schema (v95).
+Compatibility baseline: DSH **0.2.1-rc.5** (exact; `doctor` checks it), Magic
+Context core **0.49.34** (shared schema; see `docs/dsh/FEATURES.md`).
 
 ## Install
 
-Install the package into the DSH profile (`dsh plugin --profile <name> add
-dsh-magic-context`, or put the built package in the profile's `node_modules`),
-then wire it:
+The package is not published to npm; build it from the fork's
+`dsh-integration` branch:
+
+```sh
+git clone -b dsh-integration https://github.com/ceyirelehe47/magic-context.git
+cd magic-context
+bun install
+cd packages/dsh-plugin
+bun run build
+bun pm pack            # -> dsh-magic-context-<version>.tgz
+```
+
+Install the tarball into the DSH profile (`dsh plugin --profile <name> add
+<path to the .tgz>` — `dsh plugin` forwards to pnpm in the profile directory —
+or unpack it into the profile's `node_modules/dsh-magic-context`), then wire it:
 
 ```sh
 dsh-magic-context setup  --profile web                 # first run: Magic in a generated `magic-standard` mode
