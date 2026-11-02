@@ -26,6 +26,7 @@ import {
 } from "../host/meter";
 import { loadJsoncForHost } from "../host/remote";
 import { resolveEffectiveSettings, resolveThresholds } from "../settings/magic-settings";
+import { fireAndForget } from "../agent/fire-and-forget";
 import type { MagicContextHostService } from "../index";
 
 export const name = "magic-context-meter";
@@ -75,14 +76,14 @@ export function apply(ctx: Context, config: MagicMeterConfig = {}): void {
       `[magic-context] meter: stock token-meter row still mounted — adding ${MAGIC_PRESSURE_KEY} only; ` +
         `run \`dsh-magic-context setup\` to hide the native indicator`,
     );
-    void captureTokenMeterDefinitions(TokenMeter).then((defs) => {
+    fireAndForget(captureTokenMeterDefinitions(TokenMeter).then((defs) => {
       const pressure = defs.get(NATIVE_PRESSURE_KEY);
       if (pressure === undefined) {
         log("[magic-context] meter: token-meter exposes no contextPressure unit; MC indicator disabled");
         return;
       }
       real.register(wrapPressureDefinition(pressure, settings));
-    });
+    }), log, "meter: token-meter definition capture");
     return;
   }
 

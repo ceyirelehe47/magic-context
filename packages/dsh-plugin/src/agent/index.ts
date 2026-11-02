@@ -19,6 +19,7 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import { setDshHarness } from "dsh-magic-context-adapter";
+import { fireAndForget } from "./fire-and-forget";
 import { loadPluginConfig, type MagicContextPluginConfig } from "@magic-context/core/config";
 import { getProtectedTokensTierOverrides } from "@magic-context/core/config/project-security";
 import { isCompactionEnabled, isDreamerRunnable, isHistorianRunnable } from "@magic-context/core/config/agent-disable";
@@ -488,7 +489,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   // seams lazily once `host.ready` settles (the commands read them at
   // invocation time and answer "not wired" until then).
   const seams = new Map<string, unknown>();
-  void host.ready.then((bootstrap) => {
+  fireAndForget(host.ready.then((bootstrap) => {
     if (bootstrap.kind !== "ok") return;
     seams.set(
       "dreamer",
@@ -499,7 +500,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
       }),
     );
     seams.set("recomp", createRecompSeams({ ctx, host, directory, db: bootstrap.db, log }));
-  });
+  }), log, "dreamer/recomp seam setup");
   registerCtxCommands(ctx, {
     ...runtime,
     ...(config.commands ?? {}),

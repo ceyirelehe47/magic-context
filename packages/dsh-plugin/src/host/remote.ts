@@ -42,6 +42,7 @@ import {
   type MagicThresholds,
 } from "../settings/magic-settings";
 import { readSessionContextDetails, type MagicSessionContextDetails } from "./context-details";
+import { fireAndForget } from "../agent/fire-and-forget";
 
 /** Wire endpoint name (client calls `magicContext/status`). */
 export const MAGIC_STATUS_METHOD = "status";
@@ -430,7 +431,8 @@ export function registerMagicContextRemote(
   };
   const disposer = typert.register(contribution);
   return () => {
-    void disposer();
+    // The typert disposer may return a promise; never leave its rejection unhandled.
+    fireAndForget(disposer(), undefined, "typert disposer");
   };
 }
 
