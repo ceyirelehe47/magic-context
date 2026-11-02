@@ -514,14 +514,24 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
    section lives" above); the link uses `pluginNavigation.openBundle`, whose
    bundle page carries the same form. Revisit if a later DSH exposes
    `openSection` to plugins.
-10. **The ring recolours on the next agent step, not on Save.** A settings
-    change is live for the agent immediately, but the ring reads the
-    `magicContextPressure` projection, which is recomputed per step: after
-    setting 50 % the ring stayed grey at 54 % until the next step (then
-    yellow at 56 %), and after `unset` it stayed yellow until the next step
-    (then grey at 58 % against 65 %).
-    The popover's threshold rows come from `magicContext/context` and update
-    as soon as it is reopened.
+10. **Ring refresh on Save and slow saves — improved in round 11
+    (313b67393).** Round 8: a settings change was live for the agent at once
+    but the ring reads the `magicContextPressure` projection, recomputed per
+    agent step, so after 50 % it stayed grey until the next step, and the
+    Save button could sit on "Saving…" > 3 s with no feedback (DSH serializes
+    the profile write with a running turn). Now a successful Save bumps a
+    client-side settings epoch; the composer indicator (another slot
+    component) re-reads `magicContext/context` and shows its thresholds /
+    `enabled` until the projection itself moves (then the projection is
+    authoritative again; a change made outside this page — another tab, a
+    hand edit — still shows on the next step). The editor shows "Still
+    saving…" after 3 s and after 20 s stops blocking the form, reloads the
+    real values (draft kept) and still applies a late reply. The popover also
+    lists truncated tool results (limitation 7). Verified on real rc.5 web
+    (`docs/dsh/e2e/evidence-round11/web-item2-*`, `r11-*.png`): override 54
+    → ring yellow ≤1 s after "Saved" with no step, Inherit → grey at once;
+    during a running turn Save took 4.9 s with the hint at 4.0 s. The 20 s
+    give-up path is unit/static only.
 11. **Duplicate `§N§` prefixes — root-caused and fixed in round 9
     (10181d774, befdcea2e, 7471bfd42).** Root cause: the first-call payload
     preview in `agent/context-plane.ts` allocated its own tag under the BARE
