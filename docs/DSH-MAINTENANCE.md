@@ -42,13 +42,15 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 14, 2026-11-02, DSH 0.2.1-rc.5, CI `dsh-ci.yml` on bun 1.4.2
-with the filtered install above, run 41474648027 @ `19d79cb24`):
-`typecheck:dsh` **0 errors**, core typecheck (`packages/plugin`) **0 errors**,
-`adapter-api` **15 pass**, `dsh-plugin` **433 pass**, `contracts:dsh`
-**98 pass**, 0 fail everywhere; the real-model `e2e` job passed every check.
-The filtered install is enough for a clean typecheck; nothing else has to be
-installed. (Round 13 local baseline on bun 1.4.4: 425 / 15 / 98.)
+Baseline (round 15, 2026-11-03, DSH 0.2.1-rc.5, CI `dsh-ci.yml` on bun 1.4.2
+with the filtered install above, push run 41495367987 and dispatch run
+41497195497 (`e2e=true`) @ `5f8fe562b`): `typecheck:dsh` **0 errors**, core
+typecheck (`packages/plugin`) **0 errors**, `adapter-api` **15 pass**,
+`dsh-plugin` **447 pass** (61 files), `contracts:dsh` **98 pass**, 0 fail
+everywhere; the real-model `e2e` job passed all 35 checks (N*/T*/M*/P1, the
+M5 warning did not fire). The filtered install is enough for a clean
+typecheck; nothing else has to be installed. (Round 14: 433 / 15 / 98 at
+run 41474648027 @ `19d79cb24`; round 13 local on bun 1.4.4: 425 / 15 / 98.)
 
 Round 14 fixes (each with a unit test that was red before):
 `--version` reads `package.json` (was a stale `0.2.0` copy);
@@ -62,6 +64,64 @@ flip `session_projects.project_path`; existing raw-path rows are not
 migrated); the compaction summarize hook is built per call (a cached hook
 held the transcript snapshot of the first compaction, so a second compaction
 of the same session in one process failed "summarize range unresolvable").
+
+Round 15 fixes (one commit each, each with a unit test that was red before
+unless noted):
+- `b8a31a055` worker: the `agent/created` listener matches the worker's own
+  child by a reserved `childId` (two concurrent workers of one parent used to
+  apply each other's tool allowlist to both children).
+- `84803faa8` session tracking: legacy raw-path `session_projects` rows are
+  normalized once at startup (round 14 left existing rows unmigrated).
+- `5b595e807` S6: unreplayable `dsh_pressure_truncations` rows are pruned at
+  startup (dropped/compacted tags, sessions with no tags left; the per-session
+  latch row is kept).
+- `02c7623fe` outbox: reconcile closes `retryable` rows as abandoned instead of
+  leaving them `pending` forever (they were counted as pending ops in the MC
+  popover / context endpoint on every restart).
+- `2719c0920` outbox: terminal rows (committed/abandoned) older than 14 days are
+  pruned at startup.
+- `a88ade224` remote: `magicContext/diagnostics` resolves the wire session id to
+  the canonical key (it queried with the raw id and always reported zeros);
+  `magicContext/context` no longer throws for an id containing `:`.
+- `0281e49b9` settings: per-model threshold keys must be `provider/model`
+  (<=256 chars, no `__proto__`/`constructor`), at most 64 entries, length cap on
+  `historianModel`.
+- `48b7a7988` historian: failures go through core `incrementHistorianFailure`
+  (real count in the notice, failing state visible in the popover); background
+  passes back off (1 min doubling to 15 min) instead of re-running a full LLM
+  pass on every step above the threshold while the historian model is broken.
+- `2979ddf51` context details: a stale `compartment_in_progress` flag (process
+  killed mid-pass) only counts as "running" while an unexpired
+  `compartment_state_lease` exists.
+- `f1655e966` test-only: the `2979ddf51` test title had unescaped double quotes,
+  a parse error that made CI run 41490193904 fail ("Unhandled error between
+  tests"); the test is verified red against the pre-`2979ddf51` source.
+- `f30066fdf` config hot reload: the agent plane re-reads `magic-context.jsonc`
+  with a 3 s TTL (it read it once at apply time, so after a jsonc edit the
+  settings page showed the new effective enabled/threshold while the agent kept
+  the old values until restart). Mount-time knobs bridged by
+  `bridgeMagicConfig` (memory/dreamer/compaction…) still need a restart.
+- `5f8fe562b` unload/reload: the host entry releases this instance's liveness
+  marker on dispose (an unloaded host in a still-running process kept the core
+  migration guard refusing other processes' migrations); the marker is removed
+  only while it still carries this instance's pid + `started_at`, so a reload
+  that re-applied first keeps its own. The shared DB is intentionally not
+  closed (core keeps one connection per path; a reload reuses it).
+
+Round 15 scans with no confirmed bug (static analysis, plus the one empirical
+check noted): **SQLite concurrency** — every DSH write goes through the one
+connection opened by core `openDatabaseAsync` (WAL, `synchronous=NORMAL`,
+`busy_timeout=5000`); core's tracked `db.transaction()` defaults writable
+handles to `BEGIN IMMEDIATE` (verified: a second connection with
+`busy_timeout=0` gets "database is locked" while a DSH transaction has only
+run a SELECT), and the historian publish uses an explicit `BEGIN IMMEDIATE`,
+so there is no deferred read→write upgrade (`SQLITE_BUSY_SNAPSHOT`) path.
+Benign: `foldLegacyBareMessageTags` and the feedback watermark read before
+their transaction (idempotent writes). **Unload** — dreamer interval (unref +
+clear via `ctx.effect`), historian drain, system-guidance / remote disposers,
+abort listeners and timers in embed/recomp/worker/auto-search are all
+released. **Core boundary** — see "Upstream v0.49.35" under Open
+compatibility points.
 
 ## CI (`.github/workflows/dsh-ci.yml`)
 
@@ -118,6 +178,14 @@ apicall github workflow_run_artifacts_list owner=ceyirelehe47 repo=magic-context
 前提：仓库 secret `OPENCODE_API_KEY`（只通过 step 的 `env` 传入；GitHub 会在日志里把它
 显示成 `***`；`ci-e2e.sh` 不用 `set -x`，也不打印环境变量）。没有设置这个 secret 时，
 `e2e` 会在第一轮之前报错退出。
+
+注意：`typecheck:dsh` 不覆盖 `*.test.ts`。测试文件里的语法错误只会在 `dsh-plugin tests`
+一步表现为 `# Unhandled error between tests`（整个文件不运行，Summary 里多 1 fail），
+round 15 的 run 41490193904 就是这样失败的。
+
+Round 15：push run 41495367987 @ `5f8fe562b`（`checks` 全绿：dsh-plugin 447 / adapter-api 15 /
+contracts 98，两个 typecheck 0 错误）；dispatch run 41497195497（`e2e=true`，`checks` + `e2e`
+全部 PASS，35 项检查无 FAIL）。
 
 首次结果（round 14）：push run 41464023149（`checks` 全绿：dsh-plugin 425 / adapter-api 15 /
 contracts 98，typecheck:dsh 和 core typecheck 均 0 错误）；dispatch run 41464255692
@@ -269,7 +337,9 @@ workflow 一起禁用。**不要修改上游的 workflow 文件**：每次改动
 额外的冲突面。禁用是仓库设置，不在 git 里，同步不会影响它。`upstream-sync (DSH)`
 保持启用。
 
-### S6 已知限制：`dsh_pressure_truncations` 不会被清理
+### S6（已在 round 15 `5b595e807` 修复）：`dsh_pressure_truncations` 不会被清理
+
+> 现在 adapter 启动时会在一个 IMMEDIATE 事务里删除 tag 已 dropped/compacted 的行和已无任何 tag 的会话的行（保留 active tag 的行、tag 行缺失的行，以及每个会话 `basis_usage_seq` 最大的那一行）。下面是修复前的描述，仅供参考。
 
 压力截断的决定按 `(session_id, tag_number)` 持久化在 `dsh_pressure_truncations`
 （见下文 Known limitations 中的压力截断一条），之后每一轮都按这些行逐字节重放。
@@ -865,6 +935,26 @@ the client requires `@deepseek-ai/dsh-client-store` (the nonexistent
    is still not used by any production path. DSH's own
    `ChildComposition.toolFilter` (`applyChildComposition`) may be the cleaner
    route.
+**Upstream v0.49.35 (checked in round 15, static; the fork is still on
+v0.49.34, no tag pushed).** 42 commits, no migration / schema-fence / storage-db
+change. Of the 89 core modules the DSH layer imports, 7 changed, all
+backward-compatible: `features/magic-context/search` (optional
+`autoSearchDiagnostics`), `hooks/magic-context/apply-operations` (new
+`prepareAgedToolSkeletonConversions` only), `compartment-runner-validation`
+(issue 774: compartment text keeps only commit hashes present in its own raw
+lines — safe because DSH builds the chunk with core `readSessionChunk`, which
+now fills `commitHashes`, and `rawCommitHashes` scans any part shape; a DSH
+path that built validation chunks by hand would silently lose every hash),
+`event-resolvers` (proven input floor read path, internal),
+`read-session-chunk` (optional `workerSource` /
+`readMessageIdOrdinalsForRangeOffThread` on `RawMessageProvider`, consumed
+only by core's ctx-expand tools, which DSH does not use — DSH's own
+`ctx_expand` stays on the serving thread), `read-session-formatting` (optional
+`commitHashes`), `tools/ctx-expand/render` (optional `attachments` argument;
+`file` and `image` parts now render an attachment notice instead of
+`[file]` / `[image]`). Re-run this check against the newest tag at the next
+bump.
+
 3. **Removed upstream, removed here:** `/ctx-aug` (sidekick),
    `/ctx-session-upgrade`, `runManagedUpgrade`, `runMigration`. `/ctx-recomp
    --upgrade` answers with the core deprecation text.
