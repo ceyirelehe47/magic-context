@@ -94,10 +94,22 @@ export function magicWorkerActivation(
 export function restrictChildTools(child: Agent, allow: readonly string[]): boolean {
   const scoped = (child as unknown as { ctx?: { get?: (name: string) => unknown; tools?: unknown } }).ctx;
   const tools = (scoped?.tools ?? scoped?.get?.("tools")) as
-    | { restrict?: (filter: ToolRestriction) => () => void }
+    | {
+        restrict?: (filter: ToolRestriction) => () => void;
+        get?: (name: string) => unknown;
+      }
     | undefined;
   if (typeof tools?.restrict !== "function") return false;
-  tools.restrict({ allow: [...allow] });
+  // rc.5 `tools.restrict()` throws on ANY unknown global name, so a default
+  // allowlist naming a tool this install lacks (e.g. `fs_search`, which rc.5
+  // splits into `grep`/`glob`) would fail the worker closed forever. Keep only
+  // names the registry knows; an empty result still fails closed.
+  const known =
+    typeof tools.get === "function"
+      ? allow.filter((name) => tools.get?.(name) !== undefined)
+      : [...allow];
+  if (known.length === 0) return false;
+  tools.restrict({ allow: known });
   return true;
 }
 

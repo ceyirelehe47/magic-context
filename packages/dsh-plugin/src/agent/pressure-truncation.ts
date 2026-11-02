@@ -253,7 +253,7 @@ export function applyPressureTruncation(
 }
 
 /** Count of persisted truncations (details popover / diagnostics). */
-export function countPressureTruncations(db: Database, sessionId: string): number {
+export function countPressureTruncations(db: Pick<Database, "prepare"> | { prepare(sql: string): { get(...params: unknown[]): unknown } }, sessionId: string): number {
   try {
     const row = db.prepare("SELECT COUNT(*) AS n FROM dsh_pressure_truncations WHERE session_id = ?").get(sessionId) as
       | { n: number }
