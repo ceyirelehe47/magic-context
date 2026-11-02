@@ -108,6 +108,23 @@ unless noted):
   that re-applied first keeps its own. The shared DB is intentionally not
   closed (core keeps one connection per path; a reload reuses it).
 
+Round 16 fixes (each with a unit test that was red before):
+- 子会话撞上下文上限的压缩路径对齐上游（`child-session-compaction.test.ts`）：上游 core
+  对 `isSubagent` 会话不跑 historian（`event-handler.ts` 溢出时只记 `reportedLimit`）。
+  DSH 里原生 `compaction-basic` 被 `MagicCompactionEngine` 替换（默认 `auto=true`），
+  它的 `summarize()` 对所有会话都调 MC historian hook，于是子会话撞限时 historian 会
+  给未打标的子会话写 `compartments` / `compartment_history_versions` /
+  `dsh_context_compaction_marker`（修复前测试实测各 +1）。现在
+  `MagicCompactionEngine.summarize()` 对子会话（`compat/dsh-0.1/child-session.ts`
+  的 `isDshChildSession`，`isMagicChildSession` 现在直接委托它，同一个判定：
+  `origin === 'subagent'` 或 `delegationDepth ≥ 1`）调 `super.summarize()`，即
+  compaction-basic 自带的 LLM 摘要器（替换前的 stock 行为，经 `ctx.llm`，
+  `purpose: "compaction"`），MC 不读不写库；`registerMagicHistorianPlane` 注册的
+  wrapper 再加一道防线，收到子会话直接拒绝（不触库）。主会话路径不变。
+  **待决「子会话撞限路径」由此关闭。** 上游的 reduced mode（子会话打标 / 对子会话
+  开放 `ctx_reduce`）**暂未移植**：DSH 子会话仍完全跳过 MC 处理，只在压缩时走 stock
+  摘要。
+
 Round 15 scans with no confirmed bug (static analysis, plus the one empirical
 check noted): **SQLite concurrency** — every DSH write goes through the one
 connection opened by core `openDatabaseAsync` (WAL, `synchronous=NORMAL`,

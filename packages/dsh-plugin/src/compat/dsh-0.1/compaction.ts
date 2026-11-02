@@ -24,6 +24,7 @@ import {
   type CompactionEngine,
 } from "@deepseek-ai/dsh-compaction";
 import type { Context } from "@deepseek-ai/cordis";
+import { isDshChildSession } from "./child-session";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { ContentBlock, Message, TokenUsage, ToolSchema } from "@deepseek-ai/dsh-llm";
 
@@ -99,6 +100,12 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     agent: Agent,
     signal?: AbortSignal,
   ): Promise<SummaryResult> {
+    // Upstream parity (core event-handler: subagent sessions never run the
+    // historian). A DSH child session (subagent origin / delegation depth ≥ 1)
+    // is outside Magic's per-session machinery, so its compaction falls back
+    // to the stock compaction-basic summarizer (the pre-replacement
+    // behaviour) and Magic writes nothing (no compartments / marker / lease).
+    if (isDshChildSession(agent)) return super.summarize(input, agent, signal);
     const hook = this.magicSummarize ?? readHostSummarizeHook(this.ctx);
     if (hook === undefined) {
       throw new Error(

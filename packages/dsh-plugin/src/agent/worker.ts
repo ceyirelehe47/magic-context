@@ -21,6 +21,7 @@ import { randomUUID } from "node:crypto";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { textBlock } from "../compat/dsh-0.1/session";
+import { isDshChildSession } from "../compat/dsh-0.1/child-session";
 import {
   appendDelegatedPolicyOverrides,
   captureDelegatedPolicyOverrides,
@@ -37,11 +38,8 @@ const LEADING_MAGIC_TAG = /^(?:§\d+§\s*)+/u;
 
 /** Whether a session is a CHILD session (subagent origin or delegation depth). */
 export function isMagicChildSession(agent: Agent): boolean {
-  const header = agent.session?.header as
-    | { origin?: string; delegationDepth?: number }
-    | undefined;
-  if (header?.origin === "subagent") return true;
-  return typeof header?.delegationDepth === "number" && header.delegationDepth >= 1;
+  // Same predicate the compaction engine uses (compat/dsh-0.1/child-session).
+  return isDshChildSession(agent);
 }
 
 /** One worker run result. */

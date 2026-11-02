@@ -26,6 +26,7 @@ import {
   buildCompartmentAgentPrompt,
 } from "@magic-context/core/hooks/magic-context/compartment-prompt";
 import { readDshTranscript } from "./transcript";
+import { isMagicChildSession } from "./worker";
 import {
   createMagicSummarizeHook,
   type DshSummarizeCall,
@@ -294,6 +295,14 @@ export function registerMagicHistorianPlane(
 
   const wrapper: MagicSummarizeHook = async (input, agent, signal) => {
     const a = agent as Agent;
+    // Defence in depth: MagicCompactionEngine already routes child sessions
+    // to the stock summarizer; any other caller must not run the historian
+    // (or touch the DB) for a child session either (upstream parity).
+    if (isMagicChildSession(a)) {
+      throw new Error(
+        "magic-context: historian does not run for child (subagent) sessions — use the stock summarizer",
+      );
+    }
     const sessionId = deps.host.canonicalKey(a.id);
     const bootstrap = await deps.host.ready;
     if (bootstrap.kind !== "ok") {
