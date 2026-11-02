@@ -221,7 +221,12 @@ describe("dsh outbox (saga records + recovery)", () => {
       expect(getOutboxRecord(db, "op-ack")?.status).toBe("committed");
       expect(getOutboxRecord(db, "op-stale")?.status).toBe("abandoned");
 
-      // Generation unchanged → retryable stays pending for a later retry.
+      // Generation unchanged → retryable. Round 15: plans are not persisted
+      // (random opId, re-derived from the live surface every pass), so nothing
+      // ever retries the row — it used to stay `pending` forever and the MC
+      // details popover counted it as a pending op on every restart. The
+      // reconcile now closes it (abandoned, reason recorded); the next pass
+      // re-derives the same drops under a new opId.
       insertOutboxPending(db, pendingInput({ opId: "op-retry2", sessionId, generation: 4 }));
       const outcomes2 = reconcileSessionOutbox(
         db,
@@ -229,7 +234,12 @@ describe("dsh outbox (saga records + recovery)", () => {
         { hasSeq: () => false, generation: 4 },
       );
       expect(outcomes2["op-retry2"]).toBe("retryable");
-      expect(getOutboxRecord(db, "op-retry2")?.status).toBe("pending");
+      const retried = getOutboxRecord(db, "op-retry2");
+      expect(retried?.status).toBe("abandoned");
+      expect(retried?.errorDetail).toContain("retryable");
+      expect(listOutboxBySession(db, sessionId, ["pending", "applied"])).toHaveLength(0);
+      // Idempotent: a second reconcile has nothing left to classify.
+      expect(reconcileSessionOutbox(db, sessionId, { hasSeq: () => false, generation: 4 })).toEqual({});
       db.close();
     } finally {
       await env.cleanup();

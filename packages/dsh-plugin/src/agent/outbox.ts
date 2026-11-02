@@ -303,6 +303,12 @@ export function reconcileSessionOutbox(
       markOutboxCommitted(db, record.opId);
     } else if (outcome === "stale-input" || outcome === "conflict-recompute") {
       markOutboxAbandoned(db, record.opId, `reconcile: ${outcome}`);
+    } else if (outcome === "retryable") {
+      // Plans are not persisted (random opId; every pass re-derives its drops
+      // from the live surface), so nothing can ever re-run this record. Left
+      // `pending`, it stayed forever and was counted as a pending op on every
+      // restart (round 15). Close it; the next pass re-derives the work.
+      markOutboxAbandoned(db, record.opId, "reconcile: retryable (plan not persisted; re-derived from the live surface)");
     }
   }
   return outcomes;
