@@ -25,6 +25,7 @@ import {
   captureDelegatedPolicyOverrides,
   MAGIC_WORKER_READONLY_TOOLS,
   magicWorkerActivation,
+  childVisibleToolNames,
   restrictChildTools,
   subagentsOf,
 } from "../compat/dsh-0.1/subagent";
@@ -56,6 +57,12 @@ export interface MagicWorkerDeps {
   readonly allow?: readonly string[];
   /** Optional system prompt for the worker. */
   readonly systemPrompt?: string;
+  /**
+   * Diagnostics: called once the child is restricted, with the tool names the
+   * child can call (`tools.view(child).visible`). Used by the env-gated
+   * worker self-test only.
+   */
+  readonly onChildRestricted?: (info: { visible: readonly string[] | undefined }) => void;
   readonly signal: AbortSignal;
   /** Hard timeout (default 120s). */
   readonly timeoutMs?: number;
@@ -110,6 +117,7 @@ export async function runMagicWorker(
       try {
         appendDelegatedPolicyOverrides(child.session as never, overrides);
         restricted = restrictChildTools(child, allow);
+        if (restricted) deps.onChildRestricted?.({ visible: childVisibleToolNames(child) });
       } catch (error) {
         restricted = false;
         log(`[magic-context] worker child policy setup failed: ${error instanceof Error ? error.message : String(error)}`);

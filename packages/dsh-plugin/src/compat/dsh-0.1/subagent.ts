@@ -115,6 +115,25 @@ export function restrictChildTools(child: Agent, allow: readonly string[]): bool
   return true;
 }
 
+/**
+ * The tool names a child agent can call after its restriction (rc.5
+ * `tools.view(child).visible`, sorted). Diagnostics only (worker self-test);
+ * undefined when the registry exposes no view.
+ */
+export function childVisibleToolNames(child: Agent): string[] | undefined {
+  const scoped = (child as unknown as { ctx?: { get?: (name: string) => unknown; tools?: unknown } }).ctx;
+  const tools = (scoped?.tools ?? scoped?.get?.("tools")) as
+    | { view?: (scope?: unknown) => { visible?: ReadonlyMap<string, unknown> } | undefined }
+    | undefined;
+  if (typeof tools?.view !== "function") return undefined;
+  try {
+    const visible = tools.view(child)?.visible;
+    return visible === undefined ? undefined : [...visible.keys()].sort();
+  } catch {
+    return undefined;
+  }
+}
+
 function knownRestrictableNames(
   tools: {
     get?: (name: string, scope?: unknown) => unknown;

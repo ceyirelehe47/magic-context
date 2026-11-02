@@ -104,6 +104,7 @@ import { onNoteTrigger } from "@magic-context/core/hooks/magic-context/note-nudg
 import { TERMINAL_STATUSES } from "@magic-context/core/hooks/magic-context/todo-view";
 import { unwrapImitatedReducedArgs } from "@magic-context/core/tools/unwrap-imitated-reduced-args";
 import { registerTool } from "../compat/dsh-0.1/tools";
+import { createWorkerSelftestTool, workerSelftestEnabled } from "./worker-selftest";
 import { sessionEvents, textBlock } from "../compat/dsh-0.1/session";
 import { convertDshEventsToRawMessages } from "./transcript";
 import { observedProtectionWindow } from "./protection";
@@ -1598,6 +1599,10 @@ export function registerCtxTools(ctx: Context, opts: CtxToolsOptions = {}): () =
     }
     if (!opts.sessionScopedToolsDisabled && !opts.compactionOff) {
       disposers.push(registerTool(ctx, createCtxReduceTool(ctx, opts)));
+    }
+    // Diagnostics only (env-gated): real-host trigger for the Magic worker path.
+    if (workerSelftestEnabled()) {
+      disposers.push(registerTool(ctx, createWorkerSelftestTool(ctx, (m) => (ctx as unknown as { logger?: { info?: (s: string) => void } }).logger?.info?.(m))));
     }
   } catch (error) {
     for (const dispose of disposers) {
