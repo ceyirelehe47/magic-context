@@ -271,6 +271,42 @@ window.__ModuleLoader__.load({
 		var SAVE_GIVE_UP_MS = 20000;
 
 		/**
+		 * One save's watchdog: the "still saving" hint at SAVE_SLOW_MS, then
+		 * give up (stop blocking, reload) at SAVE_GIVE_UP_MS. `settle()` (the
+		 * reply arrived) and `dispose()` (the form unmounted) clear both timers
+		 * so neither fires into an unmounted component. `settle()` answers
+		 * whether the reply beat the give-up deadline.
+		 */
+		function createSaveWatchdog(handlers, timers) {
+			var set = timers && timers.set ? timers.set : function (fn, ms) { return setTimeout(fn, ms); };
+			var clear = timers && timers.clear ? timers.clear : function (id) { clearTimeout(id); };
+			var gaveUp = false;
+			var finished = false;
+			var slowTimer = set(function () { if (!finished) handlers.onSlow(); }, SAVE_SLOW_MS);
+			var giveUpTimer = set(function () {
+				if (finished) return;
+				gaveUp = true;
+				finished = true;
+				clear(slowTimer);
+				handlers.onGiveUp();
+			}, SAVE_GIVE_UP_MS);
+			function stop() { finished = true; clear(slowTimer); clear(giveUpTimer); }
+			return {
+				settle: function () { var inTime = !gaveUp; stop(); return inTime; },
+				dispose: stop
+			};
+		}
+
+		/**
+		 * Draft after a successful save reply: the saved view's values when the
+		 * reply is current; a late reply (after give-up / a newer save) keeps the
+		 * user's draft — the diff against the new view still shows what is unsaved.
+		 */
+		function draftAfterSave(current, draft, view) {
+			return current ? draftFromView(view) : draft;
+		}
+
+		/**
 		 * The reading the ring shows: the projection, with the thresholds /
 		 * enabled flag of a fresher `magicContext/context` read while the
 		 * projection has not moved since that read was started (`live.base`).
@@ -495,10 +531,22 @@ window.__ModuleLoader__.load({
 			var savingState = react.useState(false);
 			var saving = savingState[0], setSaving = savingState[1];
 			var saveSeq = react.useRef(0);
+			var mountedRef = react.useRef(true);
+			var watchdogRef = react.useRef(null);
+			// Unmount: no timer and no late reply may touch this component.
+			react.useEffect(function () {
+				mountedRef.current = true;
+				return function () {
+					mountedRef.current = false;
+					if (watchdogRef.current) watchdogRef.current.dispose();
+					watchdogRef.current = null;
+				};
+			}, []);
 
 			var load = react.useCallback(function (keepDraft) {
 				setVs(function (prev) { return { state: prev.view ? "ready" : "loading", view: prev.view, error: null }; });
 				return callRemote(connection, "settings", {}).then(function (result) {
+					if (!mountedRef.current) return;
 					if (result.ok === true) {
 						setVs({ state: "ready", view: result.value, error: null });
 						if (!keepDraft) setDraft(draftFromView(result.value));
@@ -564,19 +612,24 @@ window.__ModuleLoader__.load({
 				// already written). Say so after SAVE_SLOW_MS; after
 				// SAVE_GIVE_UP_MS stop blocking the form and reload the real
 				// state (the draft is kept). A late reply still lands below.
-				var slowTimer = setTimeout(function () {
-					if (saveSeq.current === seq) setNotice({ tone: "info", text: L("savingSlow") });
-				}, SAVE_SLOW_MS);
-				var giveUpTimer = setTimeout(function () {
-					if (saveSeq.current !== seq) return;
-					saveSeq.current = seq + 1;
-					setSaving(false);
-					setNotice({ tone: "err", text: L("savingGaveUp") });
-					load(true);
-				}, SAVE_GIVE_UP_MS);
+				if (watchdogRef.current) watchdogRef.current.dispose();
+				var watchdog = createSaveWatchdog({
+					onSlow: function () {
+						if (mountedRef.current && saveSeq.current === seq) setNotice({ tone: "info", text: L("savingSlow") });
+					},
+					onGiveUp: function () {
+						if (!mountedRef.current || saveSeq.current !== seq) return;
+						saveSeq.current = seq + 1;
+						setSaving(false);
+						setNotice({ tone: "err", text: L("savingGaveUp") });
+						load(true);
+					}
+				});
+				watchdogRef.current = watchdog;
 				callRemote(connection, "updateSettings", { ops: plan.ops, expectedRevision: view.revision }).then(function (result) {
-					clearTimeout(slowTimer);
-					clearTimeout(giveUpTimer);
+					watchdog.settle();
+					if (watchdogRef.current === watchdog) watchdogRef.current = null;
+					if (!mountedRef.current) return;
 					var current = saveSeq.current === seq;
 					if (current) setSaving(false);
 					if (result.ok !== true) {
@@ -586,7 +639,7 @@ window.__ModuleLoader__.load({
 					var value = result.value;
 					if (value.ok === true) {
 						setVs({ state: "ready", view: value.view, error: null });
-						setDraft(draftFromView(value.view));
+						setDraft(function (prev) { return draftAfterSave(current, prev, value.view); });
 						setNotice({ tone: "ok", text: L("saved") });
 						// Thresholds / enabled changed: refresh the composer ring now.
 						bumpSettingsEpoch();
@@ -976,7 +1029,7 @@ window.__ModuleLoader__.load({
 		exports.inject = ["slots", "connection"];
 		exports.apply = apply;
 		/* test seams (pure helpers; no DOM) */
-		exports.__test = { opsFromDraft: opsFromDraft, draftFromView: draftFromView, parseField: parseField, meterTone: meterTone, callRemote: callRemote, withLiveThresholds: withLiveThresholds, settingsEpoch: settingsEpoch, bumpSettingsEpoch: bumpSettingsEpoch, SAVE_SLOW_MS: SAVE_SLOW_MS, SAVE_GIVE_UP_MS: SAVE_GIVE_UP_MS };
+		exports.__test = { opsFromDraft: opsFromDraft, draftFromView: draftFromView, parseField: parseField, meterTone: meterTone, callRemote: callRemote, withLiveThresholds: withLiveThresholds, settingsEpoch: settingsEpoch, bumpSettingsEpoch: bumpSettingsEpoch, SAVE_SLOW_MS: SAVE_SLOW_MS, SAVE_GIVE_UP_MS: SAVE_GIVE_UP_MS, createSaveWatchdog: createSaveWatchdog, draftAfterSave: draftAfterSave };
 		return module.exports;
 	}
 });

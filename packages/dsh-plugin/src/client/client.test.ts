@@ -194,3 +194,56 @@ describe("indicator refresh after Save (round 11)", () => {
     expect(SAVE_GIVE_UP_MS).toBeLessThanOrEqual(30000);
   });
 });
+
+describe("save watchdog lifecycle (round 12)", () => {
+  const t = () => loadClient().mod.__test as Record<string, any>;
+  function fakeTimers() {
+    let next = 1;
+    const live = new Map<number, () => void>();
+    return {
+      live,
+      set: (fn: () => void, _ms: number) => {
+        const id = next++;
+        live.set(id, fn);
+        return id;
+      },
+      clear: (id: number) => void live.delete(id),
+      fireAll: () => {
+        for (const [id, fn] of [...live]) {
+          live.delete(id);
+          fn();
+        }
+      },
+    };
+  }
+  it("dispose (unmount) clears both timers: no late hint, no give-up reload", () => {
+    const { createSaveWatchdog } = t();
+    const timers = fakeTimers();
+    const events: string[] = [];
+    const dog = createSaveWatchdog({ onSlow: () => events.push("slow"), onGiveUp: () => events.push("giveUp") }, timers);
+    expect(timers.live.size).toBe(2);
+    dog.dispose();
+    expect(timers.live.size).toBe(0);
+    timers.fireAll();
+    expect(events).toEqual([]);
+  });
+  it("settle reports whether the reply beat the give-up deadline", () => {
+    const { createSaveWatchdog } = t();
+    const timers = fakeTimers();
+    const events: string[] = [];
+    const onTime = createSaveWatchdog({ onSlow: () => events.push("slow"), onGiveUp: () => events.push("giveUp") }, timers);
+    expect(onTime.settle()).toBe(true);
+    expect(timers.live.size).toBe(0);
+    const late = createSaveWatchdog({ onSlow: () => events.push("slow"), onGiveUp: () => events.push("giveUp") }, timers);
+    timers.fireAll();
+    expect(events).toEqual(["slow", "giveUp"]);
+    expect(late.settle()).toBe(false);
+  });
+  it("a late successful reply keeps the draft the user edited after the give-up", () => {
+    const { draftAfterSave, draftFromView } = t();
+    const view = { revision: 2, fields: [] };
+    const edited = { marker: "user edits after give-up" };
+    expect(draftAfterSave(true, edited, view)).toEqual(draftFromView(view));
+    expect(draftAfterSave(false, edited, view)).toBe(edited);
+  });
+});
