@@ -42,10 +42,26 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 13, 2026-11-02, DSH 0.2.1-rc.5, bun 1.4.4, filtered install above):
-`typecheck:dsh` **0 errors**, `adapter-api` **15 pass**, `dsh-plugin`
-**425 pass**, `contracts:dsh` **98 pass**, 0 fail everywhere. The filtered
-install is enough for a clean typecheck; nothing else has to be installed.
+Baseline (round 14, 2026-11-02, DSH 0.2.1-rc.5, CI `dsh-ci.yml` on bun 1.4.2
+with the filtered install above, run 41474648027 @ `19d79cb24`):
+`typecheck:dsh` **0 errors**, core typecheck (`packages/plugin`) **0 errors**,
+`adapter-api` **15 pass**, `dsh-plugin` **433 pass**, `contracts:dsh`
+**98 pass**, 0 fail everywhere; the real-model `e2e` job passed every check.
+The filtered install is enough for a clean typecheck; nothing else has to be
+installed. (Round 13 local baseline on bun 1.4.4: 425 / 15 / 98.)
+
+Round 14 fixes (each with a unit test that was red before):
+`--version` reads `package.json` (was a stale `0.2.0` copy);
+Settings overlay — a DSH per-model threshold in the DSH-native spelling
+(`deepseek-official/…`) now beats a jsonc key of the same model in the
+canonical spelling (`deepseek/…`); dreamer re-discovers projects on every
+tick (a fresh DB / a project first seen while the process runs used to stay
+unscheduled until restart); `agent/created` session tracking writes the
+resolved project identity instead of the raw cwd (the two writers used to
+flip `session_projects.project_path`; existing raw-path rows are not
+migrated); the compaction summarize hook is built per call (a cached hook
+held the transcript snapshot of the first compaction, so a second compaction
+of the same session in one process failed "summarize range unresolvable").
 
 ## CI (`.github/workflows/dsh-ci.yml`)
 
