@@ -272,3 +272,34 @@ describe("dsh outbox (saga records + recovery)", () => {
     }
   });
 });
+
+describe("pruneTerminalOutboxRows (round 15)", () => {
+  it("deletes committed/abandoned rows older than the cutoff; never pending/applied or recent rows", async () => {
+    const { pruneTerminalOutboxRows } = await import("./outbox");
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const sessionId = "dsh:abc123:s1";
+      for (const id of ["old-c", "old-a", "old-p", "old-ap", "new-c"]) {
+        insertOutboxPending(db, pendingInput({ opId: id, sessionId, generation: 1 }));
+      }
+      markOutboxCommitted(db, "old-c");
+      markOutboxAbandoned(db, "old-a", "x");
+      markOutboxApplied(db, "old-ap", 5);
+      markOutboxCommitted(db, "new-c");
+      const day = 86_400_000;
+      const now = Date.now();
+      db.prepare("UPDATE dsh_context_outbox SET updated_at = ? WHERE op_id LIKE 'old-%'").run(now - 30 * day);
+      expect(pruneTerminalOutboxRows(db, 14 * day, now)).toBe(2);
+      const left = (db.prepare("SELECT op_id FROM dsh_context_outbox ORDER BY op_id").all() as Array<{ op_id: string }>).map(
+        (r) => r.op_id,
+      );
+      expect(left).toEqual(["new-c", "old-ap", "old-p"]);
+      expect(pruneTerminalOutboxRows(db, 14 * day, now)).toBe(0);
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+});

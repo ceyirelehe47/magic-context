@@ -394,3 +394,27 @@ export function clearDshCompactionMarkerIf(
   })();
   return changed;
 }
+
+/** Default retention of terminal outbox rows (diagnostics only). */
+export const OUTBOX_TERMINAL_RETENTION_MS = 14 * 86_400_000;
+
+/**
+ * Delete terminal (`committed` / `abandoned`) outbox rows last touched before
+ * `now - maxAgeMs` (round 15: every applied plan left one row forever).
+ * Terminal rows are diagnostics only: plan ids are random per pass, so CAS 1
+ * never looks an old one up again, and reconciliation reads only
+ * `pending` / `applied` rows, which are never deleted here.
+ */
+export function pruneTerminalOutboxRows(
+  db: Database,
+  maxAgeMs: number = OUTBOX_TERMINAL_RETENTION_MS,
+  now: number = Date.now(),
+): number {
+  initializeDshAdapterTables(db);
+  const result = db
+    .prepare(
+      "DELETE FROM dsh_context_outbox WHERE status IN ('committed', 'abandoned') AND updated_at < ?",
+    )
+    .run(now - maxAgeMs) as { changes?: number };
+  return result.changes ?? 0;
+}

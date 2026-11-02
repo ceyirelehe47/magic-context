@@ -48,6 +48,7 @@ import {
 import { createHistorianDrain, UNLOAD_DRAIN_MS } from "./historian-drain";
 import { dshDreamSeams, registerDshDreamer } from "./dreamer";
 import { prunePressureTruncations } from "./pressure-truncation";
+import { pruneTerminalOutboxRows } from "./outbox";
 import { createRecompSeams } from "./recomp";
 import { createEmbedSeam } from "./embed";
 import { dshModelRefToCanonical } from "dsh-magic-context-adapter";
@@ -509,6 +510,12 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
       if (deleted > 0) log(`[magic-context] pressure truncations: pruned ${deleted} unreplayable row(s)`);
     } catch (error) {
       log(`[magic-context] pressure truncation prune failed (fail-open): ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      const pruned = pruneTerminalOutboxRows(bootstrap.db);
+      if (pruned > 0) log(`[magic-context] outbox: pruned ${pruned} terminal row(s) older than 14 days`);
+    } catch (error) {
+      log(`[magic-context] outbox prune failed (fail-open): ${error instanceof Error ? error.message : String(error)}`);
     }
   }), log, "dreamer/recomp seam setup");
   registerCtxCommands(ctx, {
