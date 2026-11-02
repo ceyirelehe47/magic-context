@@ -168,10 +168,12 @@ export async function runMagicWorker(
         run.result,
         new Promise<null>((resolve) => {
           timer = setTimeout(() => {
+            log(`[magic-context] worker timed out after ${timeout}ms; child disposed`);
             void run.dispose().catch(() => {});
             resolve(null);
           }, timeout);
           onAbort = () => {
+            log("[magic-context] worker cancelled by parent signal; child disposed");
             void run.dispose().catch(() => {});
             resolve(null);
           };
@@ -186,6 +188,7 @@ export async function runMagicWorker(
     if (result === null) return null;
     const stopReason = (result as { stopReason?: string }).stopReason;
     if (stopReason === "error" || stopReason === "aborted" || stopReason === "refusal") {
+      log(`[magic-context] worker stopped: ${stopReason}`);
       return null;
     }
     const text = result.output
@@ -197,7 +200,10 @@ export async function runMagicWorker(
       // must never reach the parent (round 13, real rc.5).
       .replace(LEADING_MAGIC_TAG, "")
       .trim();
-    if (text.length === 0) return null;
+    if (text.length === 0) {
+      log("[magic-context] worker returned no text");
+      return null;
+    }
     return {
       text,
       durationMs: Date.now() - started,

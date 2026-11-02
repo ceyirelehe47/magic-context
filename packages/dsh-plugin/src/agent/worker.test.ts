@@ -220,4 +220,80 @@ describe("recursion isolation (PLAN §9)", () => {
     controller.abort();
     expect(disposed).toBe(0);
   });
+  it("a timed-out worker disposes the child and logs WHY it returned null (round 13 run-32: report had no reason)", async () => {
+    let ctxRef: ReturnType<typeof makeCtx> | undefined;
+    const sub = fakeSubagents({ emitCreated: (a) => ctxRef!.emitCreated(a) });
+    let disposed = 0;
+    const start = sub.service.startActivation;
+    sub.service.startActivation = async (spec: Record<string, unknown>) => {
+      const run = await start(spec);
+      return { ...run, result: new Promise<never>(() => {}), dispose: async () => void (disposed += 1) };
+    };
+    const ctx = makeCtx(sub.service);
+    ctxRef = ctx;
+    const logs: string[] = [];
+    const result = await runMagicWorker(ctx as never, {
+      parent: makeParent(),
+      label: "magic-worker-timeout",
+      prompt: "p",
+      allow: ["read"],
+      signal: new AbortController().signal,
+      timeoutMs: 20,
+      log: (m) => logs.push(m),
+    });
+    expect(result).toBeNull();
+    expect(disposed).toBe(1);
+    expect(logs.some((m) => m.includes("worker timed out after 20ms"))).toBe(true);
+  });
+
+  it("a parent-aborted worker disposes the child and logs the cancel", async () => {
+    let ctxRef: ReturnType<typeof makeCtx> | undefined;
+    const sub = fakeSubagents({ emitCreated: (a) => ctxRef!.emitCreated(a) });
+    let disposed = 0;
+    const start = sub.service.startActivation;
+    sub.service.startActivation = async (spec: Record<string, unknown>) => {
+      const run = await start(spec);
+      return { ...run, result: new Promise<never>(() => {}), dispose: async () => void (disposed += 1) };
+    };
+    const ctx = makeCtx(sub.service);
+    ctxRef = ctx;
+    const logs: string[] = [];
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 10);
+    const result = await runMagicWorker(ctx as never, {
+      parent: makeParent(),
+      label: "magic-worker-abort",
+      prompt: "p",
+      allow: ["read"],
+      signal: controller.signal,
+      timeoutMs: 5_000,
+      log: (m) => logs.push(m),
+    });
+    expect(result).toBeNull();
+    expect(disposed).toBe(1);
+    expect(logs.some((m) => m.includes("worker cancelled"))).toBe(true);
+  });
+
+  it("a child that stopped with error/aborted logs the stopReason", async () => {
+    let ctxRef: ReturnType<typeof makeCtx> | undefined;
+    const sub = fakeSubagents({ emitCreated: (a) => ctxRef!.emitCreated(a) });
+    const start = sub.service.startActivation;
+    sub.service.startActivation = async (spec: Record<string, unknown>) => {
+      const run = await start(spec);
+      return { ...run, result: Promise.resolve({ stopReason: "aborted", output: [] }) };
+    };
+    const ctx = makeCtx(sub.service);
+    ctxRef = ctx;
+    const logs: string[] = [];
+    const result = await runMagicWorker(ctx as never, {
+      parent: makeParent(),
+      label: "magic-worker-stop",
+      prompt: "p",
+      allow: ["read"],
+      signal: new AbortController().signal,
+      log: (m) => logs.push(m),
+    });
+    expect(result).toBeNull();
+    expect(logs.some((m) => m.includes("worker stopped: aborted"))).toBe(true);
+  });
 });
