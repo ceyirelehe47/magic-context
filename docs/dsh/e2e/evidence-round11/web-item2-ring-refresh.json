@@ -1,0 +1,171 @@
+{
+ "0_attempt_0": 1,
+ "0_path": "/",
+ "0_ring_before": [
+  {
+   "cls": "ckmc-meter ",
+   "text": "58%",
+   "title": "Magic Context: 58% of context used · Execute threshold 65% · Force threshold 85%"
+  }
+ ],
+ "0_target_threshold": 54,
+ "1_set_save_timeline": [
+  [
+   0.42,
+   "Saving…",
+   []
+  ],
+  [
+   2.47,
+   "Saving…",
+   [
+    "Saved — applied live."
+   ]
+  ]
+ ],
+ "1_set_save_seconds": 2.47,
+ "1_set_ring_after_save_no_step": [
+  [
+   3.47,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   3.99,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   4.51,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   5.02,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   5.54,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   6.06,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ]
+ ],
+ "1_set_patch_magic_host": [
+  "- id: magic-host\n  name: dsh-magic-context\n  config:\n    executeThresholdPercentage: 54\n"
+ ],
+ "2_inherit_save_timeline": [
+  [
+   0.52,
+   "Saving…",
+   []
+  ],
+  [
+   1.96,
+   "Save",
+   [
+    "Saved — applied live."
+   ]
+  ]
+ ],
+ "2_inherit_save_seconds": 1.97,
+ "2_inherit_ring_after_save_no_step": [
+  [
+   2.72,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   3.25,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   3.77,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   4.3,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   4.82,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   5.34,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "58%",
+     "title": "Magic Context: 58% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ]
+ ],
+ "2_inherit_patch_magic_host": [],
+ "console_errors": []
+}

@@ -1,0 +1,184 @@
+{
+ "0_ring_before": [
+  {
+   "cls": "ckmc-meter ",
+   "text": "58%",
+   "title": "Magic Context: 58% of context used · Execute threshold 65% · Force threshold 85%"
+  }
+ ],
+ "0_target_threshold": 54,
+ "0_turn_sent_at": 1793598053.56061,
+ "3_set_during_turn_save_timeline": [
+  [
+   1.33,
+   "Saving…",
+   []
+  ],
+  [
+   4.01,
+   "Saving…",
+   [
+    "Still saving — DSH applies profile edits between agent steps; this can take a moment while a turn is running."
+   ]
+  ],
+  [
+   4.94,
+   "Save",
+   [
+    "Saved — applied live."
+   ]
+  ]
+ ],
+ "3_set_during_turn_save_seconds": 4.94,
+ "3_set_during_turn_ring_after_save_no_step": [
+  [
+   5.45,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   5.96,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   6.5,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   7.07,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   7.62,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   8.15,
+   [
+    {
+     "cls": "ckmc-meter ckmc-warn",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 54% · Force threshold 85%"
+    }
+   ]
+  ]
+ ],
+ "3_set_during_turn_patch_magic_host": [
+  "- id: magic-host\n  name: dsh-magic-context\n  config:\n    executeThresholdPercentage: 54\n"
+ ],
+ "4_ring_after_turn": [
+  {
+   "cls": "ckmc-meter ckmc-warn",
+   "text": "59%",
+   "title": "Magic Context: 59% of context used · Execute threshold 54% · Force threshold 85%"
+  }
+ ],
+ "5_inherit_after_turn_save_timeline": [
+  [
+   0.46,
+   "Saving…",
+   []
+  ],
+  [
+   1.84,
+   "Save",
+   [
+    "Saved — applied live."
+   ]
+  ]
+ ],
+ "5_inherit_after_turn_save_seconds": 1.84,
+ "5_inherit_after_turn_ring_after_save_no_step": [
+  [
+   2.39,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   2.9,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   3.41,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   3.93,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   4.45,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ],
+  [
+   4.96,
+   [
+    {
+     "cls": "ckmc-meter ",
+     "text": "59%",
+     "title": "Magic Context: 59% of context used · Execute threshold 65% · Force threshold 85%"
+    }
+   ]
+  ]
+ ],
+ "5_inherit_after_turn_patch_magic_host": [],
+ "console_errors": []
+}
