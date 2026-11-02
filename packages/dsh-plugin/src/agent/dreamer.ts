@@ -16,8 +16,8 @@
  *      `toolCallCount = 0` synthetic tool parts — the Pi facade's trick).
  *
  *   2. `registerDshDreamer(ctx, deps)` — project discovery from
- *      `session_projects` (deduped, DSH-harness only) + one fiber-owned
- *      interval per project running the core scheduler pass
+ *      `session_projects` (deduped, DSH-harness only, re-read every tick) +
+ *      one fiber-owned interval running the core scheduler pass per project
  *      (`runDueTasksForProject` with the shared facade). Call from the agent
  *      plane apply.
  *
@@ -484,9 +484,9 @@ function defaultIntervalFactory(fn: () => void, ms: number): () => void {
 let intervalFactory: IntervalFactory = defaultIntervalFactory;
 
 /**
- * Register the DSH dreamer plane: await host.ready → discover projects from
- * session_projects → one ctx-owned interval per project (default 15 min)
- * running the core scheduler pass, plus an immediate initial pass per project
+ * Register the DSH dreamer plane: await host.ready → one ctx-owned interval
+ * (default 15 min) that re-discovers projects from session_projects and runs
+ * the core scheduler pass for each, plus an immediate initial pass
  * (mirrors the core timer's startup sweep). Every side effect is fiber-owned
  * via one ctx.effect; disposal stops the timers.
  *
@@ -551,28 +551,38 @@ export function registerDshDreamer(ctx: Context, deps: DreamerWiringDeps): void 
     }
     try {
       const db = boot.db;
-      const projects = discoverDreamProjects(db);
-      if (projects.length === 0) {
-        log("[dreamer] no projects discovered from session_projects — timer idle");
-        return;
-      }
       const facade = (state.facade ??= createDshDreamClient(ctx, { db, log }));
       const executor = buildDreamExecutor(facade, state);
-      for (const projectIdentity of projects) {
-        disposers.push(
-          intervalFactory(() => {
-            void runDreamTick(db, projectIdentity, executor, state, log);
-          }, tickMs),
-        );
-        log(
-          `[dreamer] registered schedule timer for ${projectIdentity} (every ${Math.round(tickMs / 60_000)}m; projects=${projects.length})`,
-        );
-      }
-      // Initial pass per project (the core timer's startup sweep equivalent) so
-      // a fresh install does not wait a full tick for seeding.
-      for (const projectIdentity of projects) {
-        void runDreamTick(db, projectIdentity, executor, state, log);
-      }
+      // ONE ctx-owned interval; every tick re-discovers the projects, so a
+      // project whose first DSH session appears while this process runs (a
+      // fresh install, a long-running web server) is scheduled on the next
+      // tick instead of only after a restart (round 14: discovery used to run
+      // once at startup and an empty DB left the timer idle for good).
+      const known = new Set<string>();
+      const tick = (): void => {
+        if (stopped) return;
+        let projects: string[];
+        try {
+          projects = discoverDreamProjects(db);
+        } catch (error) {
+          log(`[dreamer] project discovery failed: ${describeError(error).brief}`);
+          return;
+        }
+        for (const projectIdentity of projects) {
+          if (!known.has(projectIdentity)) {
+            known.add(projectIdentity);
+            log(
+              `[dreamer] registered schedule timer for ${projectIdentity} (every ${Math.round(tickMs / 60_000)}m; projects=${projects.length})`,
+            );
+          }
+          void runDreamTick(db, projectIdentity, executor, state, log);
+        }
+      };
+      disposers.push(intervalFactory(tick, tickMs));
+      // Initial pass (the core timer's startup sweep equivalent) so a fresh
+      // install does not wait a full tick for seeding.
+      tick();
+      if (known.size === 0) log("[dreamer] no projects discovered from session_projects yet — re-checked every tick");
     } catch (error) {
       log(`[dreamer] registration failed: ${describeError(error).brief}`);
     }

@@ -367,7 +367,7 @@ describe("dshDreamSeams (/ctx-dream seam)", () => {
 });
 
 describe("registerDshDreamer (schedule timer)", () => {
-  it("registers one interval per discovered project; ticks seed the scheduler state", async () => {
+  it("registers one interval covering every discovered project; ticks seed the scheduler state", async () => {
     const { db, cleanup } = await openDb();
     const captured = captureIntervals();
     try {
@@ -387,8 +387,9 @@ describe("registerDshDreamer (schedule timer)", () => {
       });
       await flush();
 
-      expect(captured.set).toHaveLength(2);
-      expect(captured.set.map((interval) => interval.ms)).toEqual([1000, 1000]);
+      expect(captured.set).toHaveLength(1);
+      expect(captured.set.map((interval) => interval.ms)).toEqual([1000]);
+      expect(logs.some((m) => m.includes(`registered schedule timer for ${PROJECT_B}`))).toBe(true);
       expect(logs.some((m) => m.includes(`registered schedule timer for ${PROJECT_A}`))).toBe(true);
 
       // The immediate initial pass already ran the core scheduler. Core ≥0.49
@@ -421,6 +422,44 @@ describe("registerDshDreamer (schedule timer)", () => {
       expect(getTaskScheduleStatesForProject(db, PROJECT_A)).toHaveLength(seededCount.get(PROJECT_A)!);
 
       // Fiber disposal stops every interval.
+      for (const dispose of disposers) dispose();
+      expect(captured.set.every((interval) => interval.disposed)).toBe(true);
+    } finally {
+      __test.reset();
+      db.close();
+      await cleanup();
+    }
+  });
+
+  it("a fresh DB with no projects still gets a timer; projects that appear later are scheduled on the next tick", async () => {
+    // Round 14 scan: discovery ran once at startup, so a fresh install (or a
+    // long-running web server that sees a new project) logged "timer idle"
+    // and never scheduled the dreamer until the process restarted.
+    const { db, cleanup } = await openDb();
+    const captured = captureIntervals();
+    try {
+      const logs: string[] = [];
+      const { ctx, disposers } = makeFakeCtx({});
+      registerDshDreamer(ctx, {
+        host: {
+          ready: Promise.resolve({ kind: "ok", db, storageDir: "/tmp", livenessPath: "/tmp/l" }),
+          canonicalKey: (id: string) => `dsh:abc:${id}`,
+        },
+        directory: "/workspace",
+        config: { enabled: true, tickMs: 1000 },
+        log: (message) => logs.push(message),
+      });
+      await flush();
+      expect(captured.set).toHaveLength(1);
+      expect(getTaskScheduleStatesForProject(db, PROJECT_A)).toHaveLength(0);
+
+      // The first DSH session of a project lands while the process runs.
+      insertSessionProject(db, "s1", "dsh", PROJECT_A);
+      captured.set[0]!.fn();
+      await flush();
+      expect(getTaskScheduleStatesForProject(db, PROJECT_A).length).toBeGreaterThan(0);
+      expect(logs.some((m) => m.includes(`registered schedule timer for ${PROJECT_A}`))).toBe(true);
+
       for (const dispose of disposers) dispose();
       expect(captured.set.every((interval) => interval.disposed)).toBe(true);
     } finally {
