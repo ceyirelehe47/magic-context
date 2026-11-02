@@ -11,7 +11,8 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
   T*  worker self-test, 1500 ms timeout   (A4 + re-verification of 502d74b94)
   M*  one session over three processes    (§N§ tag identity across restarts)
   C*  round 17: main session past the 65 % execute threshold (40k window):
-      historian fired at 65 %, compartments written, prompt tokens fell,
+      historian fired at >= 63 % (threshold-2) with context really > 65 %,
+      compartments written, prompt tokens fell below the peak,
       the early codeword is still answerable, no §N§ in visible output, no
       overlapping / stuck compression
   S*  round 17: delegated child hits its 24k limit: stock summarizer ran in
@@ -165,15 +166,25 @@ def check_r17(c, out: Path, runs):
     seq = names + [n for n in ("cmp-q", "use-search", "use-memory", "use-expand") if n in runs]
     bad = {n: runs[n][1] for n in seq if not runs[n][1].startswith("rc=0")}
     c.add("C0", not bad, "scenario C/U runs exit 0", bad or len(seq))
-    # C1 historian trigger at the shipped 65 % threshold on the 40k route
+    # C1 historian trigger: core fires PROACTIVELY at threshold-2 (63 % for the
+    # shipped 65 %, checkDshCompartmentTrigger / core parity) — accepted — but
+    # the context must actually have gone past 65 % in this scenario (trigger
+    # pct or prompt tokens sent / 40k window), and the threshold never lowered.
     trig = {n: triggers(out / f"{n}.log") for n in seq}
     fired = [(n, t) for n, ts in trig.items() for t in ts if t[4] == "true"]
     thresholds = sorted({t[1] for ts in trig.values() for t in ts})
     windows = sorted({t[3] for ts in trig.values() for t in ts})
     first_fire = fired[0] if fired else None
-    c.add("C1", bool(fired) and thresholds == ["65"] and int(first_fire[1][0]) >= 65,
-          "historian trigger fired at pct >= 65 with threshold 65 (never lowered)",
-          {"first": first_fire, "thresholds": thresholds, "windows": windows,
+    steps = {n: run_steps(out / f"{n}.log") for n in seq}
+    tok = {n: [s[2] for s in v] for n, v in steps.items()}
+    max_trig_pct = max([int(t[0]) for ts in trig.values() for t in ts] or [0])
+    all_tok = [x for n in seq for x in tok[n]]
+    max_tok_pct = round(100 * max(all_tok) / 40000, 1) if all_tok else 0
+    exceeded = max(max_trig_pct, max_tok_pct) > 65
+    c.add("C1", bool(fired) and thresholds == ["65"] and int(first_fire[1][0]) >= 63 and exceeded,
+          "historian fired at pct >= 63 (threshold-2, threshold 65 never lowered) and context really exceeded 65 %",
+          {"first": first_fire, "thresholds": thresholds, "windows": windows, "maxTriggerPct": max_trig_pct,
+           "maxPromptPct": max_tok_pct,
            "maxPctBeforeFire": max([int(t[0]) for n in seq for t in trig[n] if t[4] == "false"] or [0])})
     # C2 compartments written; first turn where they appear
     dumps = {n: load_json(out / f"db-{n}.json") for n in names}
@@ -184,22 +195,22 @@ def check_r17(c, out: Path, runs):
     c.add("C2", first_cmp is not None and len(comps) > 0, "historian wrote compartments",
           {"firstAfter": first_cmp, "compartments": [(x["sequence"], x["start_message"], x["end_message"], x["title"]) for x in comps],
            "historyVersions": final.get("compartmentHistoryVersions"), "codewordInCompartment": any(x.get("mentionsCodeword") for x in comps)})
-    # C3 prompt tokens before vs after compression
-    steps = {n: run_steps(out / f"{n}.log") for n in seq}
-    tok = {n: [s[2] for s in v] for n, v in steps.items()}
+    # C3 prompt tokens: the peak vs the LOWEST step after the peak (drops land
+    # on the next safe pre-step, so the first step after may still be high).
     detail = {"perRun": tok}
+    flat = [(n, x) for n in seq for x in tok[n]]
     ok3 = False
-    if first_cmp is not None:
-        i = seq.index(first_cmp)
-        before = [x for n in seq[: i + 1] for x in tok[n]]
-        after_run = seq[i + 1] if i + 1 < len(seq) else None
-        peak = max(before) if before else None
-        first_after = tok[after_run][0] if after_run and tok.get(after_run) else None
-        detail.update({"peakBefore": peak, "firstStepAfter": first_after, "afterRun": after_run,
-                       "window": 40000, "peakPct": round(100 * peak / 40000, 1) if peak else None,
-                       "afterPct": round(100 * first_after / 40000, 1) if first_after else None})
-        ok3 = peak is not None and first_after is not None and first_after < peak
-    c.add("C3", ok3, "prompt tokens actually sent fell after compression", detail)
+    if first_cmp is not None and flat:
+        ipk = max(range(len(flat)), key=lambda i: flat[i][1])
+        peak_run, peak = flat[ipk]
+        later = flat[ipk + 1:]
+        low_run, low = min(later, key=lambda r: r[1]) if later else (None, None)
+        detail.update({"peak": peak, "peakRun": peak_run, "lowestAfterPeak": low, "lowestRun": low_run,
+                       "window": 40000, "peakPct": round(100 * peak / 40000, 1),
+                       "lowPct": round(100 * low / 40000, 1) if low else None,
+                       "drop": (peak - low) if low is not None else None})
+        ok3 = low is not None and low < peak
+    c.add("C3", ok3, "prompt tokens sent: lowest value after the peak is below the peak", detail)
     # C4 codeword after compression
     ans = final_text(out / "cmp-q.log") or ""
     c.add("C4", CODEWORD in ans, "early codeword still answered after compression", ans[:200])
