@@ -187,7 +187,7 @@ describe("pressure truncation of protected large tool results (24k window deadlo
   });
 
   it("a ctx_reduce drop of a truncated result lands once it leaves the protection window (drop wins over the replay)", async () => {
-    await scenario(async ({ db, session, step, pressure, rows }) => {
+    await scenario(async ({ db, session, step, pressure, rows, newState }) => {
       addRead(session, 1, fileBody("alpha"));
       addRead(session, 2, fileBody("beta"));
       addRead(session, 3, fileBody("gamma"));
@@ -214,6 +214,21 @@ describe("pressure truncation of protected large tool results (24k window deadlo
       expect(texts.some((t) => t.includes("1: alpha line 1 "))).toBe(false);
       const status = db.prepare("SELECT status FROM tags WHERE session_id = ? AND tag_number = ?").get(KEY, first.tag_number) as { status: string };
       expect(status.status).toBe("dropped");
+
+      // Round 15 / S6: pruning the dropped tag's row (startup cleanup) changes
+      // nothing the model sees — before or after a restart.
+      const before = surface(session);
+      const rowsBefore = rows();
+      const { prunePressureTruncations } = await import("./pressure-truncation");
+      prunePressureTruncations(db);
+      const rowsAfter = rows();
+      if (rowsBefore.length > 1) expect(rowsAfter.length).toBeLessThan(rowsBefore.length);
+      expect(rowsAfter.some((r) => r.tag_number === first.tag_number) && rowsAfter.length > 1).toBe(false);
+      await step();
+      expect(surface(session)).toEqual(before);
+      newState();
+      await step();
+      expect(surface(session)).toEqual(before);
     });
   });
 });

@@ -280,3 +280,81 @@ export function countPressureTruncations(db: Pick<Database, "prepare"> | { prepa
     return 0;
   }
 }
+
+/**
+ * S6 cleanup (round 15): delete persisted truncations that can never be
+ * replayed again, without changing what any later pass renders.
+ *
+ *   - a row whose tag is `dropped` / `compacted` in core `tags` — such a tag is
+ *     never a candidate again (no core path turns it back to active; the drop
+ *     replaces the content), so its row only mattered for the batch latch;
+ *   - every row of a session that has no `tags` rows at all (session cleared
+ *     or deleted; a re-tagged session gets new numbers and the digest check
+ *     would skip the old rows anyway).
+ *
+ * Kept on purpose: rows of active tags (the byte-identical replay), rows whose
+ * tag row is missing while the session still has tags (ambiguous), and — per
+ * session — one row carrying the max `basis_usage_seq` (the one-batch-per-
+ * pressure-sample latch reads the max over the session's rows; deleting it
+ * would let a stale sample decide a second batch).
+ * Idempotent; one IMMEDIATE transaction, safe with concurrent processes.
+ */
+export function prunePressureTruncations(db: Database): { deleted: number } {
+  initPressureTruncationTable(db);
+  let deleted = 0;
+  db.transaction(() => {
+    const orphanSessions = db
+      .prepare(
+        `DELETE FROM dsh_pressure_truncations
+          WHERE NOT EXISTS (SELECT 1 FROM tags t WHERE t.session_id = dsh_pressure_truncations.session_id)`,
+      )
+      .run() as { changes?: number };
+    deleted += orphanSessions.changes ?? 0;
+    const dead = db
+      .prepare(
+        `SELECT p.session_id, p.tag_number, p.basis_usage_seq
+           FROM dsh_pressure_truncations p
+           JOIN tags t ON t.session_id = p.session_id AND t.tag_number = p.tag_number
+          WHERE t.status IN ('dropped', 'compacted')`,
+      )
+      .all() as Array<{ session_id: string; tag_number: number; basis_usage_seq: number }>;
+    if (dead.length === 0) return;
+    const deadKeys = new Set(dead.map((r) => `${r.session_id}\0${r.tag_number}`));
+    const all = db
+      .prepare(
+        `SELECT session_id, tag_number, basis_usage_seq FROM dsh_pressure_truncations
+          WHERE session_id IN (SELECT DISTINCT p.session_id FROM dsh_pressure_truncations p
+                                 JOIN tags t ON t.session_id = p.session_id AND t.tag_number = p.tag_number
+                                WHERE t.status IN ('dropped', 'compacted'))`,
+      )
+      .all() as Array<{ session_id: string; tag_number: number; basis_usage_seq: number }>;
+    const bySession = new Map<string, typeof all>();
+    for (const r of all) {
+      const list = bySession.get(r.session_id) ?? [];
+      list.push(r);
+      bySession.set(r.session_id, list);
+    }
+    const del = db.prepare("DELETE FROM dsh_pressure_truncations WHERE session_id = ? AND tag_number = ?");
+    for (const [sessionId, rows] of bySession) {
+      const max = rows.reduce((m, r) => Math.max(m, r.basis_usage_seq), -Infinity);
+      const latchSurvives = rows.some(
+        (r) => r.basis_usage_seq === max && !deadKeys.has(`${sessionId}\0${r.tag_number}`),
+      );
+      // Keep the highest-numbered dead row at the latch when no live row holds it.
+      const latchKeeper = latchSurvives
+        ? undefined
+        : rows
+            .filter((r) => r.basis_usage_seq === max)
+            .reduce((best, r) => (best === undefined || r.tag_number > best.tag_number ? r : best), undefined as
+              | (typeof rows)[number]
+              | undefined);
+      for (const r of rows) {
+        if (!deadKeys.has(`${sessionId}\0${r.tag_number}`)) continue;
+        if (latchKeeper !== undefined && r.tag_number === latchKeeper.tag_number) continue;
+        const res = del.run(sessionId, r.tag_number) as { changes?: number };
+        deleted += res.changes ?? 0;
+      }
+    }
+  }).immediate();
+  return { deleted };
+}

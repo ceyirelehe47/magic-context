@@ -47,6 +47,7 @@ import {
 } from "./historian";
 import { createHistorianDrain, UNLOAD_DRAIN_MS } from "./historian-drain";
 import { dshDreamSeams, registerDshDreamer } from "./dreamer";
+import { prunePressureTruncations } from "./pressure-truncation";
 import { createRecompSeams } from "./recomp";
 import { createEmbedSeam } from "./embed";
 import { dshModelRefToCanonical } from "dsh-magic-context-adapter";
@@ -500,6 +501,15 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
       }),
     );
     seams.set("recomp", createRecompSeams({ ctx, host, directory, db: bootstrap.db, log }));
+    // S6 (round 15): one startup prune of pressure-truncation rows that can
+    // never be replayed again (dropped/compacted tags, cleared sessions).
+    // Never touches rows of active tags, so replay stays byte-identical.
+    try {
+      const { deleted } = prunePressureTruncations(bootstrap.db);
+      if (deleted > 0) log(`[magic-context] pressure truncations: pruned ${deleted} unreplayable row(s)`);
+    } catch (error) {
+      log(`[magic-context] pressure truncation prune failed (fail-open): ${error instanceof Error ? error.message : String(error)}`);
+    }
   }), log, "dreamer/recomp seam setup");
   registerCtxCommands(ctx, {
     ...runtime,
