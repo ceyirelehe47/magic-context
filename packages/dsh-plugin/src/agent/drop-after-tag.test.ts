@@ -113,6 +113,49 @@ describe("drops land on messages that were already tagged (op copies are expande
     });
   });
 
+  it("round 17: two dropped tool arcs of ONE parallel-call step render one placeholder each", async () => {
+    // Real rc.5 (round 17 e2e, session seq 125): an assistant step with two
+    // tool calls folds into one copy whose parts are [call A, call B,
+    // result A, result B]; dropping both tags rendered
+    // "[dropped §6§]\n\n[dropped §7§]\n\n[dropped §6§]\n\n[dropped §7§]".
+    await scenario(async ({ db, session, step, tags }) => {
+      const u = createUserMessage({ content: [{ type: "text", text: "question 0" }], source: { kind: "user" } });
+      session.append("user/message", u as never, { surfaceOp: "append" });
+      const calls = createAssistantMessage({
+        content: [
+          { type: "text", text: "two calls" },
+          { type: "tool-call", id: "call-a", name: "read_file", arguments: "{}" },
+          { type: "tool-call", id: "call-b", name: "read_file", arguments: "{}" },
+        ],
+        provider: "d",
+        model: "m",
+        source: { kind: "model" },
+      });
+      session.append("assistant/message", { turn: 0, step: 1, message: calls } as never, { surfaceOp: "append" });
+      for (const id of ["call-a", "call-b"]) {
+        const result = createToolResultMessage({ callId: id, content: [{ type: "text", text: `${id} `.repeat(400) }], isError: false });
+        session.append("tool/result", { turn: 0, step: 1, message: result } as never, { surfaceOp: "append" });
+      }
+      const reply = createAssistantMessage({ content: [{ type: "text", text: "answer 0" }], provider: "d", model: "m", source: { kind: "model" } });
+      session.append("assistant/message", { turn: 0, step: 2, message: reply } as never, { surfaceOp: "append" });
+      await step();
+      for (let i = 1; i <= 4; i += 1) {
+        addToolTurn(session, i, 3000);
+        await step();
+      }
+      const toolTags = tags().filter((t) => t.type === "tool").slice(0, 2);
+      expect(toolTags.length).toBe(2);
+      for (const t of toolTags) queuePendingOp(db, KEY, t.tag_number, "drop", Date.now());
+      await step();
+      const after = new Map(tags().map((t) => [t.tag_number, t.status]));
+      const all = surface(session).join("\n");
+      for (const t of toolTags) {
+        expect(after.get(t.tag_number)).toBe("dropped");
+        expect(all.split(`[dropped \u00a7${t.tag_number}\u00a7]`).length - 1).toBe(1);
+      }
+    });
+  });
+
   it("steady state: once tagged, further passes write nothing and keep every number (no churn)", async () => {
     await scenario(async ({ session, step, applied, tags }) => {
       for (let i = 1; i <= 3; i += 1) {

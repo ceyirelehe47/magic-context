@@ -1272,12 +1272,19 @@ export class RecordingMessage implements TranscriptMessage {
   /** Full Magic-rendered text of this message in its CURRENT (recorded) state. */
   render(): string {
     const out: string[] = [];
+    const sentinels = new Set<string>();
     for (const part of this.parts) {
       const value = part.render();
       if (value === null || value.length === 0) continue;
       // A dropped tool arc puts the same `[dropped §N§]` sentinel on its call
       // AND its result part (DSH folds both into one copy): render it once.
-      if (DROPPED_SENTINEL_PATTERN.test(value) && out[out.length - 1] === value) continue;
+      // The parts need not be adjacent: a parallel-call step folds as
+      // [call A, call B, result A, result B] (round 17 real rc.5 showed
+      // "[dropped §6§] [dropped §7§] [dropped §6§] [dropped §7§]").
+      if (DROPPED_SENTINEL_PATTERN.test(value)) {
+        if (sentinels.has(value)) continue;
+        sentinels.add(value);
+      }
       out.push(value);
     }
     return out.join("\n\n");

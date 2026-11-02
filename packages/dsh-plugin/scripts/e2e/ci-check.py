@@ -228,7 +228,7 @@ def check_r17(c, out: Path, runs):
         calls, results = tool_calls(out / f"{run}.log", tool)
         okr = [r for r in results if r.get("status") == "completed" and str(r.get("result", "")).strip()]
         c.add(cid, bool(calls) and bool(okr), f"{tool} called and returned a result",
-              {"calls": [x.get("input", "")[:160] for x in calls], "result": [str(r.get("result", ""))[:200] for r in results]})
+              {"calls": [str(x.get("input", ""))[:160] for x in calls], "result": [str(r.get("result", ""))[:200] for r in results]})
     c.add("U2b", ((final.get("memoryCodeword") or {}).get("n") or 0) >= 1, "ctx_memory write landed in memories",
           final.get("memoryCodeword"))
     # U4 settings-page readout and /ctx-status agree with the DB
