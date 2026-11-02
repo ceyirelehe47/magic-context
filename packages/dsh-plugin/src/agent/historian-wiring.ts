@@ -277,40 +277,39 @@ export function transcriptRawMessageProvider(
 }
 
 /**
- * Register the summarize hook on the host service. Per-session hooks are
- * created lazily (the compacting agent carries the session identity) and
- * cached for the process lifetime.
+ * Register the summarize hook on the host service. The per-session hook is
+ * built per compaction call from the compacting agent: its raw-message
+ * provider is a SNAPSHOT of the transcript (`transcriptRawMessageProvider`),
+ * so caching it would serve a later compaction of the same session the
+ * messages of the first one ("summarize range unresolvable", round 14). The
+ * hook itself is a cheap closure; every durable state (lease, compartments,
+ * marker) lives in the DB.
  */
 export function registerMagicHistorianPlane(
   ctx: Context,
   deps: MagicHistorianWiringDeps,
 ): void {
-  const hooksBySession = new Map<string, SummarizeHook>();
   const summarize = createLlmSummarizeCall(ctx, deps.model);
   const log = deps.log ?? (() => {});
 
   const wrapper: MagicSummarizeHook = async (input, agent, signal) => {
     const a = agent as Agent;
     const sessionId = deps.host.canonicalKey(a.id);
-    let hook = hooksBySession.get(sessionId);
-    if (hook === undefined) {
-      const bootstrap = await deps.host.ready;
-      if (bootstrap.kind !== "ok") {
-        throw new Error(
-          `magic-context: compaction summarize unavailable — host bootstrap ${bootstrap.kind}`,
-        );
-      }
-      hook = createMagicSummarizeHook({
-        db: bootstrap.db,
-        sessionId,
-        ctx,
-        provider: transcriptRawMessageProvider(a, sessionId),
-        summarize,
-        directory: deps.directory,
-        log,
-      } satisfies MagicSummarizeDeps);
-      hooksBySession.set(sessionId, hook);
+    const bootstrap = await deps.host.ready;
+    if (bootstrap.kind !== "ok") {
+      throw new Error(
+        `magic-context: compaction summarize unavailable — host bootstrap ${bootstrap.kind}`,
+      );
     }
+    const hook = createMagicSummarizeHook({
+      db: bootstrap.db,
+      sessionId,
+      ctx,
+      provider: transcriptRawMessageProvider(a, sessionId),
+      summarize,
+      directory: deps.directory,
+      log,
+    } satisfies MagicSummarizeDeps);
     return hook(input as Parameters<SummarizeHook>[0], a, signal);
   };
   deps.host.registerSummarizeHook(wrapper);
