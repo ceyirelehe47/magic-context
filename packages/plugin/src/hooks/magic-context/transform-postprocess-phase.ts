@@ -95,6 +95,7 @@ import {
     type ConvertedToolDropMode,
     foldBustsServedPrefix,
     foldChangesServedPrefix,
+    prepareAgedToolSkeletonConversions,
     prepareLegacyToolSkeletonConversions,
     renderConvertedToolSkeletons,
 } from "./apply-operations";
@@ -3562,6 +3563,31 @@ export async function runPostTransformPhase(
                 }
             }
         }
+        if (!args.fullFeatureMode && canEditWholePrefix && !compactionOff) {
+            const thinkingStrippedIds = new Set([...bindingThinking, ...removedReasoningIds]);
+            for (const id of getMergedReasoningStrippedIds(args.db, args.sessionId)) {
+                if (id.startsWith(THINKING_BINDING_RECOVERY_FROZEN_PREFIX))
+                    thinkingStrippedIds.add(
+                        id.slice(THINKING_BINDING_RECOVERY_FROZEN_PREFIX.length),
+                    );
+            }
+            const conversions = prepareAgedToolSkeletonConversions(
+                args.db,
+                args.sessionId,
+                newTargets,
+                { thinkingStrippedIds },
+            );
+            args.db
+                .transaction(() => {
+                    if (!conversions.isCurrent(args.db))
+                        throw new Error("Subagent skeleton candidates changed before commit");
+                    conversions.persist(args.db);
+                })
+                .immediate();
+            convertedToolSkeletonsDidMutate =
+                renderConvertedToolSkeletons(newTargets, conversions.converted) ||
+                convertedToolSkeletonsDidMutate;
+        }
         const tBatchFinalize = performance.now();
         args.batch?.finalize();
         // Only outputs with three newer user turns or a quarter-window of newer
@@ -4402,6 +4428,23 @@ export async function runPostTransformPhase(
             autoSearchCompletedThisPass &&
             countAutoSearchHints(args.db, args.sessionId) !== autoSearchHintsBefore;
         logTransformTiming(args.sessionId, "pp.autoSearchHint", tAutoSearch);
+    } else if (
+        args.fullFeatureMode &&
+        args.autoSearch &&
+        !args.autoSearch.enabled &&
+        args.projectPath
+    ) {
+        await runAutoSearchHint({
+            sessionId: args.sessionId,
+            db: args.db,
+            messages: args.messages,
+            options: {
+                enabled: false,
+                scoreThreshold: args.autoSearch.scoreThreshold,
+                minPromptChars: args.autoSearch.minPromptChars,
+                projectPath: args.projectPath,
+            },
+        });
     }
 
     if (args.fullFeatureMode && canEditWholePrefix) {

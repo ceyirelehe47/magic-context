@@ -19,7 +19,7 @@ Provenance: imported verbatim from the community port
 
 Pinned versions: `@deepseek-ai/dsh*` **0.2.1-rc.5** (exact, devDependencies +
 peers), `@deepseek-ai/cordis ~4.0.5`, core = the upstream tag the branch is
-based on (currently **v0.49.34**). `doctor` checks the installed DSH against
+based on (currently **v0.49.35**, merged in round 16). `doctor` checks the installed DSH against
 `DSH_COMPAT_EXPECTED_VERSION` in `src/doctor/env.ts`.
 
 ## Commands
@@ -274,17 +274,18 @@ core 原样来自上游 release tag，DSH 层（`packages/adapter-api`、`packag
 
 ### 版本命名
 
-- 发行版版本：`<upstream>-dsh.N`，例如 `0.49.34-dsh.1`。`<upstream>` 是 core 所基于的
+- 发行版版本：`<upstream>-dsh.N`，例如 `0.49.35-dsh.1`。`<upstream>` 是 core 所基于的
   上游 tag（去掉 `v`），`N` 在同一上游版本上的每次 DSH 发布递增，换上游版本时重置为 1。
   DSH 基线（当前 0.2.1-rc.5）写进发布说明，不进版本号。
-- git tag 用 `dsh/<upstream>-dsh.N`（例如 `dsh/0.49.34-dsh.1`）。**不要用 `v*` 或
+- git tag 用 `dsh/<upstream>-dsh.N`（例如 `dsh/0.49.35-dsh.1`）。**不要用 `v*` 或
   `dashboard-v*`**：fork 里保留着上游的 `release.yml`（`push: tags: v*`）和
   `dashboard-release.yml`（`dashboard-v*`），这类 tag 一推就会在 fork 上跑上游的发布流程。
-- `packages/dsh-plugin/package.json` 的版本号已按此规则改为 `0.49.34-dsh.1`（round 14），
-  打 tag 时用同一个号（`dsh/0.49.34-dsh.1`）。`dsh-magic-context --version` 直接读
+- `packages/dsh-plugin/package.json` 的版本号按此规则：round 14 为 `0.49.34-dsh.1`，
+  round 16 合并上游 v0.49.35 后为 `0.49.35-dsh.1`，打 tag 时用同一个号（`dsh/0.49.35-dsh.1`）。`dsh-magic-context --version` 直接读
   `package.json`，不再单独维护一份；`src/doctor/cli-version.test.ts` 同时检查版本号符合
-  `<upstream>-dsh.N`。注意 `bun.lock` 里 workspace 条目的 `version` 仍是 `0.2.0`，下次
-  需要改 lockfile 时用 `bun install --lockfile-only` 一并刷新（本轮约定不动 lockfile）。
+  `<upstream>-dsh.N`。`bun.lock` 里 workspace 条目的 `version` 在 round 16 手工对齐
+  （`dsh-magic-context` 0.49.35-dsh.1，cli / plugin / pi-plugin 0.49.35，只改这 4 行；
+  v0.49.35 没有依赖变化，所以没有重新生成 lockfile）。
 
 ### 同步节奏
 
@@ -318,7 +319,7 @@ core 原样来自上游 release tag，DSH 层（`packages/adapter-api`、`packag
 
 ### 上游 core 改动清单（冲突面）
 
-对比上游 tag `v0.49.34`（`git diff --numstat v0.49.34 dsh-integration`，排除
+对比上游 tag `v0.49.35`（`git diff --numstat v0.49.35 dsh-integration`，round 16 合并后复核，仍是这 3 个文件，排除
 `packages/dsh-plugin`、`packages/adapter-api`、`docs/dsh`）：
 
 | 文件 | 改动 | 说明 |
@@ -922,7 +923,7 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
 | `host/*`, `entries/*`, `client/client.js`, `cordis.patch.yml` | cordis plugin entry points, storage bootstrap (shared SQLite, `harness='dsh'`), Typert remote + web client panel |
 | `doctor/*` | `dsh-magic-context setup|doctor` CLI (preset generation, install/version/profile/DB checks) |
 
-## Open compatibility points (as of DSH 0.2.1-rc.5 / core v0.49.34)
+## Open compatibility points (as of DSH 0.2.1-rc.5 / core v0.49.35)
 
 Resolved since the import (kept here so nobody re-opens them): the nudge
 baseline now feeds core's real tail-hygiene walk with the DSH transcript
@@ -952,8 +953,8 @@ the client requires `@deepseek-ai/dsh-client-store` (the nonexistent
    is still not used by any production path. DSH's own
    `ChildComposition.toolFilter` (`applyChildComposition`) may be the cleaner
    route.
-**Upstream v0.49.35 (checked in round 15, static; the fork is still on
-v0.49.34, no tag pushed).** 42 commits, no migration / schema-fence / storage-db
+**Upstream v0.49.35 (checked in round 15, static; merged in round 16 with
+`git merge --no-ff`, no conflicts, no tag pushed).** 42 commits, no migration / schema-fence / storage-db
 change. Of the 89 core modules the DSH layer imports, 7 changed, all
 backward-compatible: `features/magic-context/search` (optional
 `autoSearchDiagnostics`), `hooks/magic-context/apply-operations` (new
@@ -971,6 +972,17 @@ only by core's ctx-expand tools, which DSH does not use — DSH's own
 `file` and `image` parts now render an attachment notice instead of
 `[file]` / `[image]`). Re-run this check against the newest tag at the next
 bump.
+
+v0.49.35 features **not wired into DSH** (round 16): the OpenCode 2 idle host
+fold (#632) and failed-step overflow recovery (#827) are OpenCode-2-only; the
+subagent tool-skeleton retirement (#643) acts on subagent sessions, which DSH
+keeps out of Magic entirely (reduced mode not ported, see Round 16 fixes);
+the proven-floor-on-reload fix (#826) reaches DSH only through the internal
+read path of core `event-resolvers` (DSH keeps its own threshold; not
+separately verified on DSH); auto-search
+diagnostics (#773) are an optional field DSH does not log. v0.49.35 has no
+"proactive card" feature (checked against `.cortexkit/release-notes/v0.49.35.md`
+and the 42 commits), so there was nothing of that name to wire.
 
 3. **Removed upstream, removed here:** `/ctx-aug` (sidekick),
    `/ctx-session-upgrade`, `runManagedUpgrade`, `runMigration`. `/ctx-recomp

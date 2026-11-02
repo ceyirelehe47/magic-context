@@ -14,7 +14,7 @@ the composer.
 > `docs/DSH-MAINTENANCE.md`.
 
 Compatibility baseline: DSH **0.2.1-rc.5** (exact; `doctor` checks it), Magic
-Context core **0.49.34** (shared schema; see `docs/dsh/FEATURES.md`).
+Context core **0.49.35** (shared schema; see `docs/dsh/FEATURES.md`).
 
 ## Install
 

@@ -55,7 +55,7 @@
 ## 验证状态
 
 - 兼容基线：DSH **0.2.1-rc.5**（精确匹配，`doctor` 检查）、Magic Context core
-  **0.49.34**（共享 schema 与该版本一致）。
+  **0.49.35**（共享 schema 与该版本一致）。
 - 每次提交运行 `bun run typecheck:dsh`、`bun run test:dsh`（adapter-api +
   dsh-plugin，含长会话 tag 身份回归测试）、`bun run contracts:dsh`。
 - 真实 rc.5 验证（证据见 `docs/dsh/e2e/evidence-*`）：§N§ 不重复、drop 落地、
