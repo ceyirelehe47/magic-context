@@ -478,6 +478,8 @@ window.__ModuleLoader__.load({
 			draft.executeThresholdByModel.forEach(function (row) {
 				var key = String(row.model).trim();
 				if (key === "") return;
+				// Same rule as the host validator: provider/model, <= 256 chars.
+				if (key.length > 256 || !/^[^\s/]+\/\S+$/.test(key) || key === "__proto__" || key === "constructor" || key === "prototype") { invalid.push("executeThresholdByModel:" + key); return; }
 				var parsed = parseField("executeThresholdPercentage", row.value, bounds);
 				if (!parsed.ok) { invalid.push("executeThresholdByModel:" + key); return; }
 				next[key] = parsed.value;

@@ -391,6 +391,15 @@ export type MagicSettingsOp =
  * overlay fields, bounded values, and at most one level below
  * `executeThresholdByModel`. Returns an error string or undefined.
  */
+/** `provider/model` model ref accepted as a historian model or per-model key. */
+const MODEL_REF = /^[^\s/]+\/\S+$/;
+const MODEL_REF_MAX = 256;
+const PER_MODEL_MAX_ENTRIES = 64;
+const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+function badModelRef(key: string): boolean {
+  return key.length > MODEL_REF_MAX || !MODEL_REF.test(key) || RESERVED_KEYS.has(key);
+}
+
 export function validateMagicSettingsOps(ops: unknown): string | undefined {
   if (!Array.isArray(ops)) return "ops must be an array";
   if (ops.length === 0) return "ops is empty";
@@ -414,7 +423,9 @@ export function validateMagicSettingsOps(ops: unknown): string | undefined {
         if (typeof v !== "boolean") return "enabled must be boolean";
         break;
       case "historianModel":
-        if (typeof v !== "string" || !/^[^\s/]+\/\S+$/.test(v.trim())) return "historianModel must be provider/model";
+        if (typeof v !== "string" || v.trim().length > MODEL_REF_MAX || !MODEL_REF.test(v.trim())) {
+          return `historianModel must be provider/model (at most ${MODEL_REF_MAX} characters)`;
+        }
         break;
       case "historianAwaitAtTurnEndMs":
         if (!inRange(v, b.historianAwaitAtTurnEndMs.min, b.historianAwaitAtTurnEndMs.max) || !Number.isInteger(v)) {
@@ -428,13 +439,17 @@ export function validateMagicSettingsOps(ops: unknown): string | undefined {
         break;
       case "executeThresholdByModel":
         if (sub !== undefined) {
+          if (badModelRef(sub)) return `per-model key ${JSON.stringify(sub.slice(0, 64))} must be provider/model`;
           if (!inRange(v, b.executeThresholdPercentage.min, b.executeThresholdPercentage.max)) {
             return `per-model threshold must be in [${b.executeThresholdPercentage.min}, ${b.executeThresholdPercentage.max}]`;
           }
         } else {
           if (v === null || typeof v !== "object" || Array.isArray(v)) return "executeThresholdByModel must be an object";
-          for (const [key, n] of Object.entries(v as Record<string, unknown>)) {
+          const entries = Object.entries(v as Record<string, unknown>);
+          if (entries.length > PER_MODEL_MAX_ENTRIES) return `executeThresholdByModel has more than ${PER_MODEL_MAX_ENTRIES} entries`;
+          for (const [key, n] of entries) {
             if (key.trim() === "") return "empty model key";
+            if (badModelRef(key)) return `per-model key ${JSON.stringify(key.slice(0, 64))} must be provider/model`;
             if (!inRange(n, b.executeThresholdPercentage.min, b.executeThresholdPercentage.max)) {
               return `per-model threshold for ${key} out of range`;
             }
