@@ -1,0 +1,39 @@
+# Round 23b scenario X (ci-e2e.sh / local): the DETERMINISTIC mock model
+# (mock-llm.mjs, started by the driver on MOCK_LLM_PORT). E2E ONLY.
+#   mock-24k   main route, 24k window ENFORCED by the mock (real BPE count)
+#   mock-200k  historian route (the mock answers historian prompts with an
+#              empty, invalid output: no compartments are produced here)
+- id: llm-pi-ai
+  config:
+    providers:
+      mock-24k:
+        displayName: Mock (24k, enforced)
+        apiKeyEnv: MOCK_LLM_KEY
+        api: openai-completions
+        baseURL: !!js "'http://127.0.0.1:' + (process.env.MOCK_LLM_PORT ?? '18577') + '/w24000/v1'"
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: mock-model
+            contextWindow: 24000
+            maxTokens: 4096
+      mock-200k:
+        displayName: Mock (200k, historian)
+        apiKeyEnv: MOCK_LLM_KEY
+        api: openai-completions
+        baseURL: !!js "'http://127.0.0.1:' + (process.env.MOCK_LLM_PORT ?? '18577') + '/w200000/v1'"
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: mock-model
+            contextWindow: 200000
+            maxTokens: 16384
+- id: agent-default-model
+  config:
+    provider: mock-24k
+    model: mock-model
+- id: magic-agent
+  config:
+    historian:
+      model: mock-200k/mock-model
+      executeThresholdPercentage: !!js Number(process.env.MC_HISTORIAN_THRESHOLD ?? 65)
