@@ -91,6 +91,15 @@ export function e2eSay(line: string): void {
  * `runDshHistorian` that sleeps until `holdMs` after `acquiredAt`, or
  * undefined (production: no hook at all).
  */
+/** Round 23b: active e2e holds (sessionId → hold end), read by the /compact-at-idle line. */
+const activeHolds = new Map<string, number>();
+
+/** Remaining ms of an active e2e historian hold on `sessionId` (0 when none). */
+export function e2eHoldRemainingMs(sessionId: string, now = Date.now()): number {
+  const until = activeHolds.get(sessionId);
+  return until === undefined ? 0 : Math.max(0, until - now);
+}
+
 export function e2eHistorianHold(
   env: Env = process.env,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -99,8 +108,13 @@ export function e2eHistorianHold(
   if (holdMs === undefined) return undefined;
   return async ({ sessionId, acquiredAt }) => {
     const remaining = acquiredAt + holdMs - Date.now();
+    activeHolds.set(sessionId, acquiredAt + holdMs);
     e2eSay(`historian holding the compartment lease of ${sessionId} before publish (hold ${holdMs}ms, sleeping ${Math.max(0, remaining)}ms)`);
-    if (remaining > 0) await sleep(remaining);
+    try {
+      if (remaining > 0) await sleep(remaining);
+    } finally {
+      activeHolds.delete(sessionId);
+    }
   };
 }
 
@@ -130,6 +144,8 @@ export interface CompactAtIdleDeps {
    * Returns the release function, or undefined when it could not acquire.
    */
   fakeLease?(agent: unknown, ms: number): (() => void) | undefined;
+  /** Round 23b: remaining ms of the e2e historian hold on this agent's session (0 = none). */
+  holdRemainingMs?(agent: unknown): number;
   env?: Env;
   say?: (line: string) => void;
 }
@@ -174,7 +190,8 @@ export function registerE2eCompactAtIdle(deps: CompactAtIdleDeps): (() => unknow
     if (fake && fakeMs !== undefined) releaseTimer = setTimeout(releaseOnce, fakeMs);
     const busy = deps.historianBusy(agent);
     const started = Date.now();
-    say(`/compact at idle: start historianBusy=${busy} fakeLease=${fake ? `${fakeMs}ms` : "no"}`);
+    const holdLeft = deps.holdRemainingMs?.(agent) ?? 0;
+    say(`/compact at idle: start historianBusy=${busy} fakeLease=${fake ? `${fakeMs}ms` : "no"} holdRemainingMs=${holdLeft}`);
     // Synchronous up to compactNow → agent.runMaintenance (see module doc).
     let pending: Promise<unknown>;
     try {

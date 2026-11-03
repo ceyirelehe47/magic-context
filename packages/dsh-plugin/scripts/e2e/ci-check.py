@@ -577,6 +577,9 @@ def check_r22_lock(c, out: Path, runs):
     done_b = e2e_lines(lb, "/compact at idle: done")
     waits = re.findall(r"summarize: lease wait ended after (\d+)ms \(([^)]*)\)", text_b)
     busy_b = bool(start_b) and "historianBusy=true" in start_b[0]
+    # Round 23b: the e2e hold must still be in effect when /compact starts.
+    hold_m = re.search(r"holdRemainingMs=(\d+)", start_b[0]) if start_b else None
+    busy_b = busy_b and hold_m is not None and int(hold_m.group(1)) > 0
     cmd_done = [(e.get("data") or {}) for e in evs if e.get("type") == "command/done"]
     ok_b = busy_b and bool(waits) and all(int(w[0]) <= 45000 for w in waits) and bool(done_b) and "kind=success" in done_b[0]
     c.add("R12", ok_b,

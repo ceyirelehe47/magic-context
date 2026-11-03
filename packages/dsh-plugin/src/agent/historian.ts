@@ -176,7 +176,11 @@ export interface HistorianDeps {
   /**
    * Round 22, E2E ONLY (`agent/e2e-hooks.ts` `e2eHistorianHold`): awaited
    * after a successful pass, before publication, while the lease is held.
-   * Production passes none.
+   * Round 23b: a pass that ends WITHOUT publishing (noop / failed / threw)
+   * awaits it too, before releasing the lease, so the e2e hold is
+   * deterministic (scenario L lock-b: the background pass found nothing new,
+   * released at once and `/compact` never met the lease — run 41628590609
+   * R12). Production passes none.
    */
   readonly beforePublish?: (info: { sessionId: string; acquiredAt: number }) => Promise<void>;
   readonly log?: (message: string) => void;
@@ -689,6 +693,7 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
     return false;
   }
   const acquiredAt = Date.now();
+  let e2eHeld = false;
 
   const telemetry: Partial<HistorianRunInput> = { runKind: "incremental", status: "failed" };
   let completedSuccessfully = false;
@@ -740,7 +745,10 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
         return;
       }
 
-      if (deps.beforePublish !== undefined) await deps.beforePublish({ sessionId, acquiredAt });
+      if (deps.beforePublish !== undefined) {
+        e2eHeld = true;
+        await deps.beforePublish({ sessionId, acquiredAt });
+      }
       const publish = publishHistorianResult({
         db,
         sessionId,
@@ -807,6 +815,13 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
       // notify must never break the fire-and-forget contract
     }
   } finally {
+    if (deps.beforePublish !== undefined && !e2eHeld) {
+      try {
+        await deps.beforePublish({ sessionId, acquiredAt });
+      } catch {
+        // e2e-only hold; never blocks the release
+      }
+    }
     try {
       releaseCompartmentLease(db, sessionId, holderId);
     } catch (error) {

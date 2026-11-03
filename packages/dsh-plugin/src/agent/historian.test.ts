@@ -314,6 +314,57 @@ describe("runDshHistorian repair retry (upstream runHistorianPrompt parity)", ()
   });
 });
 
+describe("e2e hold on a pass that does not publish (round 23b)", () => {
+  // Real rc.5 e2e 41628590609 (lock-b): the background pass published nothing,
+  // released the lease at once, and /compact at idle saw historianBusy=false —
+  // R12 never exercised the lease wait. The e2e-only hold now also applies
+  // before the lease is released on a non-publishing pass.
+  it("awaits the hold while still holding the lease, then releases it", async () => {
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      const busyDuringHold: boolean[] = [];
+      const deps = historianDeps(db, session, {
+        summarize: async () => validHistorianXml([{ start: 1, end: 3, title: "intro" }], 1),
+        beforePublish: async ({ sessionId }: { sessionId: string; acquiredAt: number }) => {
+          busyDuringHold.push(isDshHistorianBusy(db, sessionId));
+        },
+      });
+      expect(await runDshHistorian(deps)).toBe(false);
+      expect(busyDuringHold).toEqual([true]);
+      expect(isDshHistorianBusy(db, SESSION_ID)).toBe(false);
+      expect(getCompartments(db, SESSION_ID).length).toBe(0);
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it("a publishing pass is held exactly once", async () => {
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      let holds = 0;
+      const deps = historianDeps(db, session, {
+        summarize: async () =>
+          validHistorianXml([{ start: 1, end: 3, title: "intro" }, { start: 4, end: 7, title: "work" }], 8),
+        beforePublish: async () => {
+          holds += 1;
+        },
+      });
+      expect(await runDshHistorian(deps)).toBe(true);
+      expect(holds).toBe(1);
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+});
+
 describe("concurrent historian passes on one session (round 20)", () => {
   // Real rc.5 e2e 41599626978 (cmp-04): the trigger fires on every step while
   // the session sits above the threshold, and every pass used the SAME

@@ -10,7 +10,7 @@ import { readEpochFloorSnapshot } from "@magic-context/core/features/magic-conte
 import type { Database } from "@magic-context/core/shared/sqlite";
 import type { MagicContextHostService } from "../index";
 import type { PendingRestartChange } from "../settings/config-load";
-import { e2eGateOpen, e2eSay, registerE2eCompactAtIdle, registerE2eStatusDump } from "./e2e-hooks";
+import { e2eGateOpen, e2eHoldRemainingMs, e2eSay, registerE2eCompactAtIdle, registerE2eStatusDump } from "./e2e-hooks";
 import { isMagicChildSession } from "./worker";
 
 export interface E2eWiringDeps {
@@ -54,6 +54,7 @@ export function registerE2eWiring(ctx: Context, deps: E2eWiringDeps): void {
     commands,
     isChild,
     historianBusy: deps.busy,
+    holdRemainingMs: (agent) => e2eHoldRemainingMs(keyOf(agent)),
     fakeLease: (agent, _ms) => {
       const db = deps.db();
       if (db === undefined) return undefined;

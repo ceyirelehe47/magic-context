@@ -326,8 +326,15 @@ if [[ -n "$LSID" ]]; then
   MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_HISTORIAN_HOLD_MS=15000 MC_HISTORIAN_THRESHOLD=30 EXTRA_PATCH="$LP" \
     run lock-a "Use the read tool to read each of these eight files, one read call per step, in this order (whole file each): $(lfiles 17 18 19 20 21 22 23 24). Do not call ctx_reduce or any tool other than read. After the last file reply with the single word: DONE." "$LSID"
   r17_db session "$DB" "$LSID" 30 "$L_MODEL_KEY" > "$OUT/db-lock-a.json"
-  MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_HISTORIAN_HOLD_MS=25000 MAGIC_CONTEXT_DSH_E2E_COMPACT_AT_IDLE=1 \
-    MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS=0 MC_HISTORIAN_THRESHOLD=20 EXTRA_PATCH="$LP" \
+  # Round 23b: run 41628590609 R12 FAIL — the 36 % backstop compacted at
+  # lock-b's first pre-step, the background pass then had nothing to publish
+  # and released the lease at once (the hold only applied before a
+  # publication), so /compact at idle saw historianBusy=false. Now the e2e
+  # hold also applies to a non-publishing pass, lock-b runs with the 90 %
+  # backstop (lock-c patch) so nothing natively races the pass, and the
+  # idle line reports holdRemainingMs (R12 requires > 0).
+  MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_HISTORIAN_HOLD_MS=30000 MAGIC_CONTEXT_DSH_E2E_COMPACT_AT_IDLE=1 \
+    MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS=0 MC_HISTORIAN_THRESHOLD=20 EXTRA_PATCH="$HERE/patch-r22-lock-c.yml" \
     run lock-b "Reply with the single word: ok." "$LSID"
   r17_db session "$DB" "$LSID" 20 "$L_MODEL_KEY" > "$OUT/db-lock-b.json"
   MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_COMPACT_AT_IDLE=1 MAGIC_CONTEXT_DSH_E2E_FAKE_LEASE_MS=20000 \

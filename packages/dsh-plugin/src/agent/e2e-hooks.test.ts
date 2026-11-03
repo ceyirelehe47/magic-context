@@ -7,6 +7,7 @@ import {
   E2E_STATUS_DUMP_ENV,
   E2E_SUMMARIZE_LEASE_WAIT_ENV,
   e2eHistorianHold,
+  e2eHoldRemainingMs,
   e2eSummarizeLeaseWaitMs,
   registerE2eCompactAtIdle,
   registerE2eStatusDump,
@@ -84,6 +85,26 @@ describe("e2eHistorianHold", () => {
     expect(slept[0]!).toBeGreaterThan(5500);
     expect(slept[0]!).toBeLessThanOrEqual(6000);
   });
+
+  it("round 23b: reports the remaining hold while sleeping, 0 after", async () => {
+    let release: (() => void) | undefined;
+    const hold = e2eHistorianHold({ [E2E_GATE_ENV]: "1", [E2E_HISTORIAN_HOLD_ENV]: "30000" }, () =>
+      new Promise<void>((r) => {
+        release = r;
+      }))!;
+    const orig = console.error;
+    console.error = quiet;
+    try {
+      const p = hold({ sessionId: "s23b", acquiredAt: Date.now() });
+      expect(e2eHoldRemainingMs("s23b")).toBeGreaterThan(29000);
+      expect(e2eHoldRemainingMs("other")).toBe(0);
+      release!();
+      await p;
+      expect(e2eHoldRemainingMs("s23b")).toBe(0);
+    } finally {
+      console.error = orig;
+    }
+  });
 });
 
 describe("registerE2eCompactAtIdle", () => {
@@ -133,7 +154,7 @@ describe("registerE2eCompactAtIdle", () => {
     expect(h.calls).toEqual([{ agent: { id: "a" }, line: "/compact" }]);
     h.emit({ id: "a" }, "idle");
     expect(h.calls).toHaveLength(1);
-    expect(h.said.some((l) => /start historianBusy=true fakeLease=no/.test(l))).toBe(true);
+    expect(h.said.some((l) => /start historianBusy=true fakeLease=no holdRemainingMs=0/.test(l))).toBe(true);
     h.settle({ commandId: "c", result: { kind: "success", text: "Compacted 4 history items" } });
     await new Promise((r) => setTimeout(r, 5));
     expect(h.said.some((l) => /done kind=success/.test(l))).toBe(true);
