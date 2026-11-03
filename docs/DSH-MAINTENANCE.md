@@ -42,6 +42,29 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
+Baseline (round 23c, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; release tags
+unchanged; push run 41640091776 and dispatch run 41640093586 (`e2e=true`) @ `96c27be69`; final e2e: see `evidence-round23c/README.md`):
+`typecheck:dsh` **0 errors**, core typecheck **0 errors**, `dsh-plugin`
+**552 pass** (round 23c +8 over round 23b's 544: crash-recovery 6, lease-liveness 2),
+`adapter-api` **15 pass**, `contracts:dsh` **100 pass**, 0 fail; `e2e`
+**92/93 PASS on 41640093586 (R10 FAIL — intermittent backstop "summary is not smaller" on a tiny region, real model, see known limitation 18 (f))** (round 23b's 87 = 79 + scenario X (X1–X8); round 23c adds
+scenario Y (Y1–Y6, kill -9 during a historian hold)).
+Evidence: `docs/dsh/e2e/evidence-round23c/` (23b: `evidence-round23b/`).
+
+Round 23b/23c fixes (adapter only, red test first):
+- **P0-1** `dd6900465` (red `c22f13669`, e2e scenario X `6c7364093`):
+  pressure truncation prices dense output like the provider — DSH's
+  4-chars/token meter under-counted a 50 KB Chinese read (27 700 real tokens
+  into a 24k window, the session stuck re-sending it).
+- **P0-2** `e37619117` (red `4d8746309`): a compartment lease whose owner
+  process is confirmed dead (SIGKILL mid-pass) no longer reads as a running
+  historian pass (`isDshHistorianBusy`: backstop deferral, `/compact` lease
+  wait, busy probe; `/magic-context` status "running") — before, up to the
+  5-min TTL. `agent/lease-liveness.ts` uses core's reclaim rule (local pid
+  probe, only ESRCH = gone).
+- e2e scenario fixes: X6 hashed after the redact step (`fa309b67d`);
+  scenario Y (`615dabcb4`, `96c27be69`).
+
 Baseline (round 23, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; release tags
 unchanged — `dsh/0.49.35-dsh.2` → `7848c0430`; push run 41628170286 @ `a39dc5ea7` and
 dispatch run 41628590609 (`e2e=true`)):
@@ -1420,6 +1443,55 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       change; **C** upstream DSH: a `ManualCompactionError` code such as
       `deferred` with plugin-supplied text, which would make B clean.
       **待用户决定。**
+
+18. **Round 23b/23c (2026-11-03) — status (P0-1, P0-2).**
+    - **P0-1 fixed** (`dd6900465`, see the baseline block): dense tool output
+      under pressure. Verified: unit `pressure-dense` 4/4 (was 1/4); local
+      real-rc.5 + mock repro (27 700-token request → 10 205 after the fix;
+      the stuck session recovered); e2e scenario X X1–X8.
+    - **P0-2 crash points** (e2e-only fault injection
+      `MAGIC_CONTEXT_DSH_E2E_CRASH_AT`, inert without `MAGIC_CONTEXT_DSH_E2E=1`):
+      outbox-pending and surface-applied (the coordinator saga) were already
+      recoverable — the next process settles the row, tag numbers/message ids
+      unchanged, no `§N§` duplicated; historian-publish rolls back with the
+      process (no half-published compartment/marker) and the rerun publishes
+      exactly once; historian-published keeps the single publication, no
+      duplicate on rerun; two processes on one DB: the other session is
+      untouched and `integrity_check` is ok. **Bug found and fixed**
+      (`e37619117`): the dead owner's lease read as busy/"running" for up to
+      5 min (the next acquire already reclaimed it — core's
+      `acquireCompartmentLease` checks the pid — so publication itself never
+      stuck; the read-only probes did).
+    - **Real DSH kill -9 (scenario Y):** verified that a SIGKILL during the
+      hold leaves an unexpired lease of the dead pid, the restarted process's
+      first pass takes the lease at once (no TTL wait), the session resumes
+      from the DSH log, the next pass publishes once, outbox settled,
+      `integrity_check` ok, the other session unchanged.
+    - **Known limits (not changed):** (a) liveness is a same-machine pid
+      probe — a DB shared across machines/containers with separate pid
+      namespaces is not supported (a foreign pid can read "dead" or "alive"
+      by accident; core has the same assumption); (b) pid reuse can only make
+      a dead owner look alive → back to the TTL wait (≤ 5 min), never a false
+      "free"; (c) an "inconclusive" probe (EPERM in sandboxes) also keeps the
+      TTL behaviour; (d) the e2e kill lands after the first read (the hold
+      starts at the first trigger), so Y covers one interrupted pass, not a
+      kill between several published passes — the unit cases cover the
+      after-COMMIT point; (e) in real DSH the busy probe's dead-owner branch
+      is not directly observable at the first step (the first pass already
+      reclaimed the row before the step observer runs); it is covered by the
+      cross-process unit cases; (f) **observed once, not fixed (P1
+      candidate):** e2e 41640093586 R10 — in scenario L two consecutive
+      backstop checks at 38.2 % / 39.6 % (≥ 36 % on that route) right after a
+      committed compaction failed with compaction-basic's "summary is not
+      smaller than the shadowed content (423 estimated framed tokens >= 239)":
+      the region since the fresh checkpoint was one step of output (239
+      tokens) while Magic's rendered compartments were 423. The next checks
+      compacted normally and the turn completed (rc 0); the error is only a
+      failed `compaction/end` event. Model-dependent (R10 passed on
+      41636248583 and in round 23); unrelated to the P0-2 change (the lease
+      holder there is the live process itself). Option for later: skip the MC
+      main backstop when the region after the last checkpoint is smaller than
+      the Magic summary would be.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
