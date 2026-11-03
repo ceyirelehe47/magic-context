@@ -1,0 +1,36 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/message-history-search.test.ts:
+91 |       await runContextPlaneStep(createContextPlaneState(), deps, { agent: agent as never, messages: [] as never }, async () => ({ reject: false, messages: [] }) as never);
+92 |       const indexed = await waitFor(() => {
+93 |         const row = db.prepare("SELECT last_indexed_ordinal AS n FROM message_history_index WHERE session_id = ?").get(KEY(sid)) as { n: number } | null;
+94 |         return (row?.n ?? 0) >= view.length;
+95 |       });
+96 |       expect(indexed).toBe(true);
+                           ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/message-history-search.test.ts:96:23)
+(fail) ctx_search over DSH message history (P1-1) > finds each early fact by its codeword with the right ordinal (source) after the pre-step ran [4264.04ms]
+134 |       await waitFor(() => ((db.prepare("SELECT last_indexed_ordinal AS n FROM message_history_index WHERE session_id = ?").get(KEY(a)) as { n: number } | null)?.n ?? 0) >= view.length);
+135 |       const { ctx, registered } = toolsCtx();
+136 |       registerCtxTools(ctx, { db, canonicalKey: KEY, resolveProjectIdentity: () => "git:/tmp/dsh-proj", embeddingEnabled: false, memoryEnabled: true } as never);
+137 |       const search = registered.find((d) => d.name === "ctx_search")!;
+138 |       const own = ((await search.execute({ query: "ARCH-ORCA-5521" }, { agent: { id: a, options: {}, session: { header: { id: a, cwd: "/tmp/dsh-proj" } } }, signal: new AbortController().signal } as never)) as { text: string }).text;
+139 |       expect(own).toMatch(/\[message\][^\n]*\n[^\n]*ARCH-ORCA-5521/);
+                        ^
+error: expect(received).toMatch(expected)
+
+Expected substring or pattern: /\[message\][^\n]*\n[^\n]*ARCH-ORCA-5521/
+Received: "No results found for \"ARCH-ORCA-5521\" across notes, memories, primers, git commits, or message history."
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/message-history-search.test.ts:139:19)
+(fail) ctx_search over DSH message history (P1-1) > does not leak another session's history (search scope = the canonical session) [4605.08ms]
+
+ 0 pass
+ 2 fail
+ 2 expect() calls
+Ran 2 tests across 1 file. [9.55s]
