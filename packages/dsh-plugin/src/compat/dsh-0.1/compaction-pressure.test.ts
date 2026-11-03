@@ -112,10 +112,12 @@ describe("native pressure threshold: MC leads on main sessions (round 19)", () =
     expect((await probe({ window: 128_000, maxTokens: 4_096, pct: 0.5 })).fired).toBe(false);
   });
 
-  it("128k main session: still quiet at MC's 65 % / 80 %, native backstop fires at MC's force band (85 %)", async () => {
+  it("128k main session: still quiet at MC's 65 % / 80 % / 85 % force band, native backstop fires at 90 %", async () => {
     expect((await probe({ window: 131_072, maxTokens: 8_192, pct: 0.66 })).fired).toBe(false);
     expect((await probe({ window: 131_072, maxTokens: 8_192, pct: 0.8 })).fired).toBe(false);
-    expect((await probe({ window: 131_072, maxTokens: 8_192, pct: 0.86 })).fired).toBe(true);
+    expect((await probe({ window: 131_072, maxTokens: 8_192, pct: 0.86 })).fired).toBe(false);
+    expect((await probe({ window: 131_072, maxTokens: 8_192, pct: 0.89 })).fired).toBe(false);
+    expect((await probe({ window: 131_072, maxTokens: 8_192, pct: 0.91 })).fired).toBe(true);
   });
 
   it("the agent plane's per-route force percentage drives the backstop", async () => {
@@ -132,7 +134,7 @@ describe("native pressure threshold: MC leads on main sessions (round 19)", () =
   for (const window of [24_576, 40_960]) {
     it(`small main window ${window}: no TargetPressureConfigError, legal threshold`, async () => {
       expect((await probe({ window, maxTokens: 2_048, pct: 0.5 })).fired).toBe(false);
-      expect((await probe({ window, maxTokens: 2_048, pct: 0.9 })).fired).toBe(true);
+      expect((await probe({ window, maxTokens: 2_048, pct: 0.92 })).fired).toBe(true);
     });
 
     it(`small child window ${window}: no TargetPressureConfigError, native 0.8 ratio`, async () => {
@@ -180,12 +182,12 @@ describe("native pressure threshold: MC leads on main sessions (round 19)", () =
 });
 
 describe("pressure-policy view for setup/doctor (round 19)", () => {
-  it("default magic-compaction row: main MC-led (85 % on 128k, legal on 24k/40k), child DSH native with small-window fallback", async () => {
+  it("default magic-compaction row: main MC-led (90 % on 128k, legal on 24k/40k), child DSH native with small-window fallback", async () => {
     const { describePressurePolicy, effectivePressurePolicy, thresholdPercent } = await import("./pressure-policy");
     const p = effectivePressurePolicy({ auto: true } as never);
-    expect(p.main).toEqual({ thresholdRatio: 0.85, headroomTokens: 0, source: "magic" });
-    expect(thresholdPercent(131_072, 8_192, p.main)).toBe(85);
-    expect(thresholdPercent(24_576, 2_048, p.main)).toBe(85);
+    expect(p.main).toEqual({ thresholdRatio: 0.9, headroomTokens: 0, source: "magic" });
+    expect(thresholdPercent(131_072, 8_192, p.main)).toBe(90);
+    expect(thresholdPercent(24_576, 2_048, p.main)).toBe(90);
     // DSH default on 128k: 131072 − 8192 − 65536 = 57344 → 43.8 %
     expect(thresholdPercent(131_072, 8_192, p.child)).toBe(43.8);
     expect(thresholdPercent(24_576, 2_048, p.child)).toBeNull();
@@ -197,7 +199,7 @@ describe("pressure-policy view for setup/doctor (round 19)", () => {
     expect(thresholdPercent(100_000, 4_096, p.child)).toBe(30.4);
     const d = describePressurePolicy({});
     expect(d.preemptsMagic).toBe(false);
-    expect(d.text).toContain("128k 85%");
+    expect(d.text).toContain("128k 90%");
   });
 
   it("user-set headroom 65536 is flagged as pre-empting MC", async () => {
@@ -205,5 +207,15 @@ describe("pressure-policy view for setup/doctor (round 19)", () => {
     const d = describePressurePolicy({ headroomTokens: 65_536 });
     expect(d.preemptsMagic).toBe(true);
     expect(d.text).toContain("user-set");
+  });
+});
+
+describe("nativeBackstopPercentage (user decision 2026-11-03: native at 90 %)", () => {
+  it("is 90 at MC's default force band, stays 5 above a higher band, caps at 98", async () => {
+    const { nativeBackstopPercentage } = await import("./pressure-policy");
+    expect(nativeBackstopPercentage(85)).toBe(90);
+    expect(nativeBackstopPercentage(80)).toBe(90);
+    expect(nativeBackstopPercentage(88)).toBe(93);
+    expect(nativeBackstopPercentage(97)).toBe(98);
   });
 });

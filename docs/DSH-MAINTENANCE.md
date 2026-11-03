@@ -57,9 +57,11 @@ Round 19 fixes (adapter only, no core change):
   compaction never fired) and a 128k window fired at ≈ 44–46 %, before MC's
   65 % execute threshold. `MagicCompactionEngine` now overrides
   `compactIfNeeded` for the `pressure` trigger only: an MC-managed **main**
-  session gets `headroomTokens: 0` and `thresholdRatio` = MC's
-  force-materialization band for the route (core `escalationBands`:
-  `max(85, execute + 2)` → 85 % at 65 %), registered by the agent plane on
+  session gets `headroomTokens: 0` and `thresholdRatio` = the native
+  backstop for the route, `max(90, MC force band + 5)` capped at 98 (force band
+  = core `escalationBands` `max(85, execute + 2)`; → **90 %** at 65 %, raised
+  from 85 % by user decision 2026-11-03 so MC's own 85 % force path always runs
+  first), registered by the agent plane on
   `magicContextHost.nativePressurePercentage` (live-disabled MC → DSH
   defaults); a **child** session keeps the native policy (round 16) and only
   retries with headroom 0 when the default headroom makes it illegal.
@@ -95,7 +97,7 @@ the same session climbed to **77.9 %** with **0** native compactions while
 MC's historian fired first at **74 %** (runs 41591017319, 41592114076). On the
 80k route the old default was not even legal (retain ≥ threshold → never
 fired; run 41589483637); on the 40k / 24k routes it threw "no pressure
-budget". After: 24k/40k/80k/100k/128k main → 85 %; child 24k/40k/80k → 80 %
+budget". After (round 19 e2e runs, policy then 85 %; now 90 %): 24k/40k/80k/100k/128k main → 85 % (90 % since the follow-up commit); child 24k/40k/80k → 80 %
 (headroom-0 fallback), child 100k/128k → DSH native 30.4 % / 43.8 %.
 
 Previous baseline (round 18, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; push run
@@ -522,9 +524,9 @@ effective native pressure policy; `doctor` reports it as
 `native-pressure.<profile>` (merged over every `magic-compaction` row of the
 patch layer, nested inserts included):
 
-- main sessions: MC-led — `headroomTokens 0`, `thresholdRatio` = MC's force
-  band for the route (85 % at the default 65 % execute threshold; per route
-  `max(85, execute + 2)`), so native compaction is only the backstop behind
+- main sessions: MC-led — `headroomTokens 0`, `thresholdRatio` = native
+  backstop for the route (90 % at the default 65 % execute threshold; per route
+  `max(90, MC force band + 5)`, cap 98), so native compaction is only the backstop behind
   MC's historian / drops;
 - child sessions: DSH native (`0.8` / `65 536`), with headroom 0 when that is
   illegal for the window (24k/40k/80k → 80 %);
@@ -1080,7 +1082,7 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       below the threshold. The defaults left ≤ ~70k windows with no pressure
       budget, ≈ 70–82k windows with an illegal retention, and fired at
       ≈ 30 % (100k) / 44–46 % (128k) — real rc.5: 44.0 % on 100k. Now MC-led
-      on main sessions (85 % backstop), legal on small child windows, user
+      on main sessions (90 % backstop; 85 % in the round 19 e2e runs), legal on small child windows, user
       values respected; `doctor` shows the effective policy. Remaining: the
       backstop percentage follows the global/per-model execute threshold via
       the agent plane; a session-level `/ctx` override is not consulted.

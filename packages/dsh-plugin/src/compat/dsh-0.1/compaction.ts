@@ -118,7 +118,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
    *  - MC-managed MAIN session: MC leads. Unless the user set them, the native
    *    defaults become `headroomTokens: 0` and `thresholdRatio` = MC's
    *    force-materialization band for the route (core `escalationBands`,
-   *    85 % for the default 65 % execute threshold), supplied by the agent
+   *    90 % native backstop for the default 65 % execute threshold, above MC's 85 % force band), supplied by the agent
    *    plane through `magicContextHost.nativePressurePercentage`. Native
    *    pressure compaction is then only the backstop behind MC.
    *  - CHILD session (round 16: stock summarizer): native policy unchanged;

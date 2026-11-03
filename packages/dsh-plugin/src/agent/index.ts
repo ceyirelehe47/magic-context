@@ -19,6 +19,7 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import { escalationBands } from "@magic-context/core/shared/escalation-bands";
+import { nativeBackstopPercentage } from "../compat/dsh-0.1/pressure-policy";
 import { setDshHarness } from "dsh-magic-context-adapter";
 import { fireAndForget } from "./fire-and-forget";
 import { loadPluginConfig, type MagicContextPluginConfig } from "@magic-context/core/config";
@@ -436,12 +437,13 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   };
 
   // Round 19: DSH-native pressure compaction stays BEHIND MC on main sessions
-  // — the compaction engine prices its threshold at MC's force-materialization
-  // band for the route (core escalationBands: max(85, execute + 2)). A
+  // — the compaction engine prices its threshold at the native backstop for the
+  // route: max(90, MC force band + 5), cap 98 (force band = core escalationBands:
+  // max(85, execute + 2)). A
   // context-disabled row / live-disabled MC returns undefined → native defaults.
   host.registerNativePressurePercentage?.((agent) => {
     if (rowContext?.enabled === false || !liveEnabled()) return undefined;
-    return escalationBands(resolveExecuteThreshold(agent)).forceMaterializationPercentage;
+    return nativeBackstopPercentage(escalationBands(resolveExecuteThreshold(agent)).forceMaterializationPercentage);
   });
 
   // Context plane FIRST, so the knowledge gate below stays the outermost

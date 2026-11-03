@@ -14,8 +14,22 @@ export const DSH_DEFAULT_THRESHOLD_RATIO = 0.8;
 export const DSH_DEFAULT_HEADROOM_TOKENS = 65_536;
 export const DSH_DEFAULT_RETAIN_RATIO = 0.16;
 
-/** MC's default force-materialization band (core escalationBands(65)). */
-export const DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE = 85;
+/**
+ * Native backstop on MC-managed main sessions (user decision 2026-11-03):
+ * 90 % by default, i.e. above MC's force-materialization band (85 % at
+ * execute 65 %) so MC's own emergency path always gets the first chance.
+ */
+export const DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE = 90;
+const NATIVE_BACKSTOP_MARGIN = 5;
+const NATIVE_BACKSTOP_CAP = 98;
+
+/** Native backstop for a route given MC's force band: max(90, force + 5), capped at 98. */
+export function nativeBackstopPercentage(forceMaterializationPercentage: number): number {
+  return Math.min(
+    NATIVE_BACKSTOP_CAP,
+    Math.max(DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE, forceMaterializationPercentage + NATIVE_BACKSTOP_MARGIN),
+  );
+}
 
 /**
  * Pure mirror of compaction-basic's pressure threshold, or `null` when the
@@ -113,7 +127,7 @@ export function describePressurePolicy(row: PressureRowConfig | undefined, execu
   const preemptsMagic = main128 !== null && main128 < executePercentage;
   const mainHow =
     p.main.source === "magic"
-      ? `MC-led (headroom 0, ratio = MC force band, ${DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE}% at execute 65%; per route max(85, execute+2))`
+      ? `MC-led (headroom 0, ratio = native backstop ${DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE}% at execute 65%; per route max(90, MC force band + 5), cap 98)`
       : `user-set (thresholdRatio ${p.main.thresholdRatio}, headroomTokens ${p.main.headroomTokens})`;
   const childHow = p.child.smallWindowFallback
     ? `DSH native (ratio ${p.child.thresholdRatio}, headroom ${p.child.headroomTokens}; headroom 0 when that leaves no budget)`

@@ -17,6 +17,7 @@ import {
   type DshStorageBootstrap,
 } from "./host/bootstrap";
 import { canonicalSessionKey, parseDshSessionKey } from "dsh-magic-context-adapter";
+import { DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE } from "./compat/dsh-0.1/pressure-policy";
 import {
   buildMagicHostConfigSchema,
   readMagicOverrides,
@@ -126,7 +127,7 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
     },
     nativePressurePercentage(agent: unknown): number | undefined {
       // No agent plane yet: MC's default force band (the engine's own default).
-      return nativePressure === undefined ? 85 : nativePressure(agent);
+      return nativePressure === undefined ? DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE : nativePressure(agent);
     },
     overrides(): MagicDshOverrides {
       return readMagicOverrides(config);

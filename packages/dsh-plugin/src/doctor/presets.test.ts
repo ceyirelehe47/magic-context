@@ -144,7 +144,7 @@ describe("doctor per-preset report", () => {
       const pressure = report.checks.find((check) => check.id === "native-pressure.web")!;
       expect(pressure.status).toBe("ok");
       expect(pressure.detail).toContain("MC-led");
-      expect(pressure.detail).toContain("128k 85%");
+      expect(pressure.detail).toContain("128k 90%");
 
       const expecting = await runDshDoctor(["--preset", "minimal", "--disable-preset", "standard"], {
         dshHome,
