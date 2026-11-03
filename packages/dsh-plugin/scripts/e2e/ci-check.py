@@ -234,6 +234,18 @@ def check_r17(c, out: Path, runs):
     used = [t for t in ("ctx_search", "ctx_expand", "ctx_memory") if tool_calls(out / "cmp-q.log", t)[0]]
     c.add("C8", CODEWORD in ans and not used and (m0.get("mentionsCodeword") is True),
           "codeword answered from <session-history> without ctx_search/ctx_expand", {"toolsUsed": used, "answer": ans[:120]})
+    # C9 (f27757b6b) every [dropped §N§] placeholder appears once per tag per
+    # event of the decoded main session (round 17: parallel calls doubled them)
+    import collections as _co
+    dup, placeholders = [], 0
+    for e in session_events(out / "cmp-session.jsonl"):
+        tags = re.findall(r"\[dropped §(\d+)§\]", json.dumps(e.get("data"), ensure_ascii=False))
+        placeholders += len(tags)
+        rep = {k: v for k, v in _co.Counter(tags).items() if v > 1}
+        if rep:
+            dup.append((e.get("seq"), e.get("type"), rep))
+    c.add("C9", (out / "cmp-session.jsonl").exists() and not dup,
+          "no repeated [dropped §N§] for one tag inside one session event", {"placeholders": placeholders, "dups": dup[:5]})
     # C5 no §N§ in user-visible output of any round 17 turn
     leaks = {}
     for n in seq + ["child-parent"]:
