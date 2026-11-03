@@ -1,0 +1,29 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/injected-history.test.ts:
+140 |       expect(indexed).toBe(true);
+141 | 
+142 |       // 1. the FTS index holds no injected block, and every real message keeps its view ordinal
+143 |       const rows = db.prepare("SELECT message_ordinal AS o, message_id AS id, role, content FROM message_history_fts WHERE session_id = ? ORDER BY message_ordinal").all(KEY(sid)) as { o: number; id: string; role: string; content: string }[];
+144 |       const polluted = rows.filter((row) => INJECTED_MARKERS.some((marker) => row.content.includes(marker))).map((row) => row.o);
+145 |       expect(polluted).toEqual([]);
+                             ^
+error: expect(received).toEqual(expected)
+
+- []
++ [
++   9,
++   11,
++   14,
++ ]
+
+- Expected  - 1
++ Received  + 5
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/injected-history.test.ts:145:24)
+(fail) Magic-injected messages are not history (P1-1, round 24c) > message index, ctx_search message lane and historian input carry no injected block; ordinals unchanged [355.40ms]
+
+ 0 pass
+ 1 fail
+ 3 expect() calls
+Ran 1 test across 1 file. [1369.00ms]

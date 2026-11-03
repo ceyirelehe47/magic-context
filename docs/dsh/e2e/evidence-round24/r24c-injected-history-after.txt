@@ -1,0 +1,8 @@
+
+src/agent/injected-history.test.ts:
+(pass) Magic-injected messages are not history (P1-1, round 24c) > message index, ctx_search message lane and historian input carry no injected block; ordinals unchanged [645.17ms]
+
+ 1 pass
+ 0 fail
+ 46 expect() calls
+Ran 1 test across 1 file. [1.81s]
