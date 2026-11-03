@@ -307,7 +307,8 @@ unset MC_E2E_MAIN_PROVIDER
 #   lock-c  timeout branch, cheap: five uncovered reads (backstop back at
 #           90 %, patch-r22-lock-c.yml), a fake stuck lease (20 s) and the
 #           summarize wait shortened to 3 s — `/compact` must fail closed with the
-#           "retry once it finishes" message and leave no lease behind.
+#           "retry once it finishes" message and leave no lease behind;
+#   lock-d  (round 23, R14) the second native compaction at idle, lease free.
 # Every switch below is e2e-only (MAGIC_CONTEXT_DSH_E2E=1 gate).
 export MC_E2E_MAIN_PROVIDER=opencode-go-40k
 L_MODEL_KEY="opencode-go-40k/deepseek-v4.1-flash"
@@ -334,7 +335,19 @@ if [[ -n "$LSID" ]]; then
     MC_HISTORIAN_THRESHOLD=95 EXTRA_PATCH="$HERE/patch-r22-lock-c.yml" \
     run lock-c "Use the read tool to read each of these five files, one read call per step (whole file each): $(lfiles 27 28 29 30 31). Do not call ctx_reduce. After the last file reply with the single word: DONE." "$LSID"
   r17_db session "$DB" "$LSID" 95 "$L_MODEL_KEY" > "$OUT/db-lock-c.json"
+  # Round 23 (check R14): the SECOND native compaction of this session. lock-b's
+  # /compact was the first; lock-d compacts again at idle with the lease free,
+  # so the summarize hook must see lock-c's reads as NOT covered (history
+  # ordinals stay stable across the first checkpoint) and summarize them —
+  # run 41619627652 replayed compartments 1–17 instead and shadowed them.
+  MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_COMPACT_AT_IDLE=1 MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS=0 \
+    MC_HISTORIAN_THRESHOLD=95 EXTRA_PATCH="$HERE/patch-r22-lock-c.yml" \
+    run lock-d "Reply with the single word: ok." "$LSID"
+  r17_db session "$DB" "$LSID" 95 "$L_MODEL_KEY" > "$OUT/db-lock-d.json"
   decode_session "$LSID" "$OUT/lock-session.jsonl"
+  [[ -f "$OUT/lock-session.jsonl" && -f "$OUT/db-lock-d.json" ]] && \
+    bun "$HERE/ci-history.ts" "$OUT/lock-session.jsonl" "$OUT/db-lock-d.json" "read each of these five files" \
+      > "$OUT/history-lock.json" 2> "$OUT/history-lock.err"
 fi
 unset MC_E2E_MAIN_PROVIDER
 

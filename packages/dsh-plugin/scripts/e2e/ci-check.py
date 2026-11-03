@@ -599,6 +599,33 @@ def check_r22_lock(c, out: Path, runs):
            "released": bool(released), "liveLeases": live})
 
 
+def check_r23_history(c, out: Path, runs):
+    """R14 (round 23): after the SECOND native compaction of the lock session,
+    the lock-c prompt and every checksum read in lock-c are still on the
+    model-visible surface or inside a published compartment (ctx_expand of its
+    start..end shows them) — nothing was shadowed without a summary. Run
+    41619627652 failed this: /compact #2 replayed compartments 1–17 over them."""
+    rc = runs.get("lock-d", ("", "missing"))[1]
+    done = e2e_lines(out / "lock-d.log", "/compact at idle: done")
+    h = load_json(out / "history-lock.json") or {}
+    files = h.get("files") if isinstance(h.get("files"), list) else []
+    prompt = h.get("prompt") if isinstance(h.get("prompt"), dict) else {}
+    comps = h.get("compactions") if isinstance(h.get("compactions"), list) else []
+    items = ([("prompt", prompt)] if prompt.get("found") else []) + [(f.get("file"), f) for f in files]
+    lost = [n for n, it in items if not it.get("onSurface") and not it.get("coveredBy")]
+    shadowed = [it.get("historyOrdinal") for _, it in items if not it.get("onSurface") and it.get("historyOrdinal")]
+    last = comps[-1] if comps else {}
+    reaches = not shadowed or (last.get("summaryMaxEnd") or 0) >= max(shadowed)
+    ok = rc.startswith("rc=0") and bool(done) and "kind=success" in done[0] and len(comps) >= 2 \
+        and bool(prompt.get("found")) and bool(files) and bool(shadowed) and not lost and reaches
+    c.add("R14", ok,
+          "second native compaction (lock-d): lock-c's prompt and checksums stay visible or inside a compartment (recoverable by ctx_expand); the summary reaches them",
+          {"lockD": rc, "done": [d[-160:] for d in done[:1]], "compactions": [(x.get("seq"), len(x.get("shadowedSeqs") or []), x.get("summaryCompartmentRanges")) for x in comps][:4],
+           "lastCompartmentEnd": h.get("lastCompartmentEnd"),
+           "prompt": prompt, "files": [{k: f.get(k) for k in ("file", "checksum", "historyOrdinal", "coveredBy", "onSurface")} for f in files][:6],
+           "lost": lost, "error": (out / "history-lock.err").read_text(errors="replace")[-300:] if (out / "history-lock.err").exists() else ""})
+
+
 def k_rows(out: Path):
     p1, p2 = [], []
     path = out / "k-dump.jsonl"
@@ -776,6 +803,7 @@ def check(out: Path) -> int:
     check_r17_child(c, out, runs)
     check_r19(c, out, runs)
     check_r22_lock(c, out, runs)
+    check_r23_history(c, out, runs)
     check_r22_k(c, out, runs)
 
     # --- P: process hygiene
