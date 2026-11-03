@@ -1,0 +1,11 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/historian-memory-identity.test.ts:
+(pass) DSH historian memory promotion uses the project identity (U21) > a re-extracted copy of an ARCHIVED (corrected) fact is not re-activated, and promoted rows carry the identity [959.07ms]
+(pass) DSH historian memory promotion uses the project identity (U21) > the historian is given the project's ACTIVE memories as <project-memory> (dedup context), not archived ones [261.83ms]
+(pass) DSH historian memory promotion uses the project identity (U21) > the production summarize call puts that block into the compartment prompt [1.61ms]
+
+ 3 pass
+ 0 fail
+ 16 expect() calls
+Ran 3 tests across 1 file. [2.34s]

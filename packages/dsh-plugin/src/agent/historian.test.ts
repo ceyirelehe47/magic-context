@@ -41,6 +41,9 @@ import {
 } from "./historian";
 
 const SESSION_ID = "dsh:a1b2c3d4:sess-historian";
+// Round 25: memory promotion now resolves the project identity (core parity),
+// which needs an EXISTING directory — a real (non-git → `dir:`) project dir.
+const PROJECT_DIR = mkdtempSync(join(tmpdir(), "dsh-magic-historian-project-"));
 const DSH_SESSION_ID = "sess-historian";
 
 async function cleanupDir(dir: string): Promise<void> {
@@ -185,7 +188,7 @@ function historianDeps(
   return {
     db,
     sessionId: SESSION_ID,
-    directory: "C:/work/project",
+    directory: PROJECT_DIR,
     provider: providerOf(session),
     summarize: async () => "",
     boundarySnapshot: makeBoundary(messages),
@@ -798,7 +801,7 @@ describe("createMagicSummarizeHook (Magic 压缩策略)", () => {
       ctx: {},
       provider: providerOf(session),
       summarize,
-      directory: "C:/work/project",
+      directory: PROJECT_DIR,
       leaseHolderId: "lease-hook",
     };
   }
@@ -959,7 +962,7 @@ describe("createMagicSummarizeHook: waits for a busy lease (round 21)", () => {
       ctx: {},
       provider: providerOf(session),
       summarize,
-      directory: "C:/work/project",
+      directory: PROJECT_DIR,
       leaseHolderId: "lease-hook",
       ...extra,
     } as MagicSummarizeDeps;

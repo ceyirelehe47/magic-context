@@ -191,7 +191,7 @@ export function createLlmSummarizeCall(
   if (llm === undefined) {
     throw new Error("magic-context: llm service unavailable (historian wiring)");
   }
-  return async (chunk, _priorCompartments, signal, repair) => {
+  return async (chunk, _priorCompartments, signal, repair, memoryContext) => {
     // Resolved per call: the DSH settings overlay edits historian.model live.
     const modelOverride =
       typeof modelOverrideSource === "function" ? modelOverrideSource() : modelOverrideSource;
@@ -204,7 +204,8 @@ export function createLlmSummarizeCall(
     const basePrompt = buildCompartmentAgentPrompt({
       seedExamples: "",
       sessionReferences: "",
-      projectMemory: "",
+      // Round 25 (U21): core's <project-memory> dedup block (empty when none).
+      projectMemory: memoryContext?.projectMemory ?? "",
       inputSource: chunk.text,
       memoryEnabled: true,
     });

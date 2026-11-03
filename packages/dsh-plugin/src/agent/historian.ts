@@ -45,6 +45,9 @@ import {
 import { insertCompartmentEvents } from "@magic-context/core/features/magic-context/compartment-events";
 import { acquireCompartmentLease, getCompartmentLeaseBlocker, isCompartmentLeaseHeld, releaseCompartmentLease } from "@magic-context/core/features/magic-context/compartment-lease";
 import { promoteSessionFactsDurable } from "@magic-context/core/features/magic-context/memory/promotion";
+import { resolveProjectIdentityForSession } from "@magic-context/core/features/magic-context/memory/project-identity";
+import { getMemoriesByProject } from "@magic-context/core/features/magic-context/memory/storage-memory";
+import { orderHistorianMemories, renderHistorianMemoryBlock } from "@magic-context/core/hooks/magic-context/inject-compartments";
 import {
   clearHistorianFailureState,
   getHistorianFailureState,
@@ -122,6 +125,55 @@ function uniqueLeaseHolderId(sessionId: string): string {
 }
 
 /**
+ * Round 25 (U21): the project identity historian facts are promoted under —
+ * the same resolver the ctx_memory tool uses (core runner parity:
+ * `resolveProjectIdentity(promotionDirectory)`). Promoting under the raw
+ * directory put the historian's rows under a second project_path, so core's
+ * exact-hash dedup (which also matches ARCHIVED rows) missed the agent's row
+ * and a corrected fact came back active. Undefined (no promotion) when the
+ * directory has no project identity — e.g. the home directory without
+ * allowHomeProject, where ctx_memory refuses too.
+ */
+export function historianPromotionIdentity(directory: string | undefined): string | undefined {
+  if (directory === undefined || directory.length === 0) return undefined;
+  try {
+    return resolveProjectIdentityForSession(directory) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Share of the historian window the `<project-memory>` block may use (core trims it to fit too). */
+const PROJECT_MEMORY_WINDOW_SHARE = 0.1;
+
+/**
+ * Round 25 (U21): core's historian `<project-memory>` block over the project's
+ * active/permanent memories, highest-priority categories first, trimmed to a
+ * prefix that fits {@link PROJECT_MEMORY_WINDOW_SHARE} of the historian window
+ * (~4 chars/token). Empty string when there are none or on a read failure (the
+ * pass must never fail on its dedup context).
+ */
+export function buildHistorianProjectMemoryBlock(
+  db: Database,
+  identity: string,
+  windowTokens: number,
+): string {
+  try {
+    const ordered = orderHistorianMemories(getMemoriesByProject(db, identity, ["active", "permanent"]));
+    const maxChars = Math.max(2_000, Math.floor(windowTokens * PROJECT_MEMORY_WINDOW_SHARE * 4));
+    let count = ordered.length;
+    let block = renderHistorianMemoryBlock(ordered) ?? "";
+    while (count > 0 && block.length > maxChars) {
+      count = Math.floor(count * 0.8);
+      block = renderHistorianMemoryBlock(ordered.slice(0, count)) ?? "";
+    }
+    return block;
+  } catch {
+    return "";
+  }
+}
+
+/**
  * The injected historian LLM call (production: wraps `ctx.llm.stream()` with
  * the compartment-agent system prompt; tests: stubs). Receives the chunk and
  * the prior compartments and returns the raw historian XML text.
@@ -136,7 +188,19 @@ export type DshSummarizeCall = (
    * buildHistorianRepairPrompt around the original prompt.
    */
   repair?: DshHistorianRepair,
+  /**
+   * Round 25 (U21): the project's active memories as core's historian
+   * `<project-memory>` block (renderHistorianMemoryBlock), for the historian's
+   * "skip facts that overlap" dedup — core parity (compartment-runner passes
+   * `memories` to fitHistorianPrompt). Undefined when promotion is off.
+   */
+  memoryContext?: DshHistorianMemoryContext,
 ) => Promise<string> | string;
+
+/** Project-memory context for one historian prompt (see {@link DshSummarizeCall}). */
+export interface DshHistorianMemoryContext {
+  readonly projectMemory: string;
+}
 
 /** Repair context for the one retry after a validation failure. */
 export interface DshHistorianRepair {
@@ -454,9 +518,15 @@ async function runHistorianPassCore(args: HistPassArgs): Promise<HistPassResult>
     return { ok: false, status: "failed", reason: `chunk coverage: ${chunkCoverageError}` };
   }
 
+  const promotionIdentity = historianPromotionIdentity(args.directory);
+  const memoryContext: DshHistorianMemoryContext | undefined =
+    promotionIdentity === undefined
+      ? undefined
+      : { projectMemory: buildHistorianProjectMemoryBlock(db, promotionIdentity, resolvedWindow) };
+
   let text: string;
   try {
-    text = await summarize(chunk, priorCompartments, args.signal);
+    text = await summarize(chunk, priorCompartments, args.signal, undefined, memoryContext);
   } catch (error) {
     return { ok: false, status: "failed", reason: `llm call failed: ${describeError(error).brief}` };
   }
@@ -481,7 +551,7 @@ async function runHistorianPassCore(args: HistPassArgs): Promise<HistPassResult>
       repaired = await summarize(chunk, priorCompartments, args.signal, {
         previousOutput: text,
         validationError,
-      });
+      }, memoryContext);
     } catch (error) {
       return { ok: false, status: "failed", reason: `${validationError}; repair llm call failed: ${describeError(error).brief}` };
     }
@@ -564,7 +634,8 @@ function publishHistorianResult(args: PublishArgs): PublishResult {
   const markerSummary = buildDshCompactionSummary(args.newCompartments);
   // DSH memory promotion scope: without a directory there is no project
   // identity, so facts are not promoted (mirrors memoryEnabled=false).
-  const projectPath = args.directory ?? null;
+  // Round 25 (U21): the resolved project identity, not the raw directory.
+  const projectPath = historianPromotionIdentity(args.directory) ?? null;
   const promotionActive = projectPath !== null;
   const publishableEvents = (args.validated.events ?? []).filter((event) => {
     if (typeof event.atCompartment !== "number") return true;
