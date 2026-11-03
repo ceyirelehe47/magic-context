@@ -1,0 +1,1 @@
+{"type":"compaction/end","seq":79,"time":1793689734930,"data":{"compactionId":"b54e1eb3-ae79-42db-b0e3-901f1cdfa1be","turn":3,"error":"magic-context: summarize range unresolvable for dsh:7114782d:session-d6431b46-b20e-416b-a25c-c3fa40143a45 (messages d4d24aff-7767-4f93-9163-4dd680a19fe3..8eded582-01db-4c66-b7dd-37d0e8d27669)"}}

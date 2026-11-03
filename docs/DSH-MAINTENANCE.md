@@ -44,10 +44,10 @@ and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
 Baseline (round 20, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; HEAD after
 the round 20 fixes, release tag `dsh/0.49.35-dsh.1` unchanged → `270629e75`;
-push run 41600879637 @ `542c6569e` and dispatch run __E2E_RUN__ (`e2e=true`)):
+push run 41600879637 @ `542c6569e` and dispatch run 41601119332 @ `542c6569e` (`e2e=true`)):
 `typecheck:dsh` **0 errors**, core typecheck **0 errors**, `dsh-plugin`
 **494 pass** (66 files; round 20 +9), `adapter-api` **15 pass**,
-`contracts:dsh` **99 pass**, 0 fail; real-model `e2e` __E2E_RESULT__
+`contracts:dsh` **99 pass**, 0 fail; real-model `e2e` **66/66 PASS** on run 41601119332 (R7: the pold main-session native compaction completed, `outcome=compacted`, 0 `compaction/end` errors; C6/C10 PASS, historian `idle`, 0 failures). Previous run 41599626978 @ `4ee4a04ba` was 64/66 (R7 PASS; C6/C10 FAIL on the lease race fixed by `542c6569e`). Evidence: `docs/dsh/e2e/evidence-round20/`
 (66 judged = round 19's 65 + R7). New informational step: `*.test.ts`
 typecheck (`packages/dsh-plugin/tsconfig.test.json`) — **156 errors**, all in
 test fixtures (DSH branded types `ToolCallId`, `stream` on assistant events,
@@ -1153,7 +1153,10 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       ~3 s (`b5710f7b9`, unit); restart-only jsonc sections silently ignored
       by hot reload — now a one-time restart notice, the values are still
       applied only at startup (`b5710f7b9`, unit); overlapping historian
-      passes double-publishing a compartment sequence (`542c6569e`).
+      passes double-publishing a compartment sequence (`542c6569e`; unit
+      test red→green, real run 41601119332 C6/C10 PASS with no UNIQUE error —
+      the overlap itself is timing-dependent and was not reproduced on demand,
+      no "lease busy" line in that run).
     - **Partly:** `typecheck:dsh` still excludes `*.test.ts`; the new
       informational step type-checks them (156 errors in fixtures:
       branded `ToolCallId`, assistant events without `stream`, untyped
@@ -1166,7 +1169,11 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       jsonc `historian.model` / `protected_tokens` as effective immediately
       while the agent applies them at restart (now announced by the restart
       notice); the first pre-step of a fresh session has no request header
-      (`pct=?` in the native pressure diagnostic) — cosmetic.
+      (`pct=?` in the native pressure diagnostic) — cosmetic; the e2e-only
+      diagnostic `thresholdPct` is an engine instance field, so concurrent
+      main/child checks can print the other session's value (run 41601119332:
+      a child check printed 89.8 while compacting at 72.5 %) — diagnostic
+      only, the effective policy is computed per call.
     - **Side effect to know:** with unique lease holders, `/compact` or the
       90 % backstop on a main session fails closed ("mini-historian lease
       busy") when a background historian pass is running at that moment; the
