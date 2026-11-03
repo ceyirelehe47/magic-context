@@ -68,6 +68,8 @@ for k in range(1, 4):
 plans["y1"].append({"text": "DONE y1"})
 plans["y2"] = [{"text": "DONE y2"}]
 plans["y3"] = [{"text": "DONE y3"}]
+for _k in ("y2b", "y2c", "y2d"):
+    plans[_k] = [{"text": f"DONE {_k}"}]
 plans["xr"] = [{"text": "DONE xr"}]
 json.dump(plans, open(plans_out, "w"), ensure_ascii=False)
 PY
@@ -125,6 +127,7 @@ fi
 #   y-1  three dense reads; historian fires (threshold 30) and holds; SIGKILL
 #        from outside (kill -9 on the node pid) once the hold line is logged
 #   y-2  restart, one turn (status dump: busy probe + lease rows per step)
+#   y-2b…y-2d  three more restarted one-line turns (real user turns, round 24c)
 #   y-3  restart again (rerun must not duplicate anything)
 YMARK="YKILL$$"
 export OPENCODE_SESSION="mc-ci-y-$(date +%s)"
@@ -159,6 +162,12 @@ if [[ -n "$YSID" ]]; then
   MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_STATUS_DUMP="$OUT/y-2-status.jsonl" MC_HISTORIAN_THRESHOLD=30 \
     xrun y-2 "Reply when done. [[MOCK:y2]]" "$YSID"
   xdb "$YSID" y-2
+  # Round 24c: three more real user turns (each a restart) so the interrupted
+  # y-1 turn leaves the 5-user-turn protected tail (core
+  # PROTECTED_TAIL_USER_TURNS) and the y-3 pass has real history to publish.
+  # Before a529b7846 Magic's injected m0 baseline counted as a user turn and Y3
+  # was satisfied by a compartment of that block alone ([1,1] in 41672370986).
+  for yk in y2b y2c y2d; do MC_HISTORIAN_THRESHOLD=30 xrun "y-${yk#y}" "Reply when done. [[MOCK:$yk]]" "$YSID"; done
   MC_HISTORIAN_THRESHOLD=30 xrun y-3 "Reply when done. [[MOCK:y3]]" "$YSID"
   xdb "$YSID" y-3
   [[ -n "$XSID" ]] && xdb "$XSID" x-after-y
