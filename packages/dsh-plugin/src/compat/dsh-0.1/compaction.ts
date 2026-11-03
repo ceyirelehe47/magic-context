@@ -27,7 +27,7 @@ import {
 import type { Context } from "@deepseek-ai/cordis";
 import type { CompactionResult, CompactionTrigger } from "@deepseek-ai/dsh-compaction";
 import { isDshChildSession } from "./child-session";
-import { DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE } from "./pressure-policy";
+import { DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE, nativePressureThresholdTokens } from "./pressure-policy";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { ContentBlock, Message, TokenUsage, ToolSchema } from "@deepseek-ai/dsh-llm";
 
@@ -138,21 +138,101 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     signal: AbortSignal,
   ): Promise<CompactionResult | null> {
     if (trigger !== "pressure") return super.compactIfNeeded(agent, trigger, signal);
+    if (process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN !== "1") return this.pressureCompaction(agent, trigger, signal);
+    // e2e diagnostics (headless prints console.error, not ctx.logger): one
+    // line per pressure check with the pressure, the effective threshold and
+    // the outcome — the evidence that native compaction stays behind MC.
+    const probe = await this.describePressure(agent);
+    const say = (outcome: string) => {
+      try {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[magic-context] native pressure check: child=${isDshChildSession(agent)} pct=${probe.pct ?? "?"} thresholdPct=${this.lastPressureThresholdPct ?? "?"} window=${probe.window ?? "?"} outcome=${outcome}`,
+        );
+      } catch {
+        // diagnostics only
+      }
+    };
+    this.lastPressureThresholdPct = undefined;
+    try {
+      const result = await this.pressureCompaction(agent, trigger, signal, probe);
+      say(result === null ? "none" : "compacted");
+      return result;
+    } catch (error) {
+      say(`error:${(error instanceof Error ? error.message : String(error)).slice(0, 160)}`);
+      throw error;
+    }
+  }
+
+  /** Last effective native threshold (% of window) computed by a debug probe. */
+  private lastPressureThresholdPct: number | undefined;
+
+  private async describePressure(agent: Agent): Promise<{ pct?: number; window?: number; reserved?: number }> {
+    try {
+      const header = (agent.session as unknown as {
+        requestHeader?: () => { config?: { provider?: string; model?: string; maxTokens?: number } } | undefined;
+      }).requestHeader?.()?.config;
+      const ctx = this.ctx as unknown as {
+        tokenMeter?: { measure(s: unknown): { totalTokens: number } };
+        llm?: { resolveModelInfo?(p: string, m: string): Promise<{ context?: { contextWindow?: number }; defaultMaxTokens?: number }> };
+      };
+      if (!header?.provider || !header.model) return {};
+      const info = await ctx.llm?.resolveModelInfo?.(header.provider, header.model);
+      const window = info?.context?.contextWindow;
+      const tokens = ctx.tokenMeter?.measure(agent.session).totalTokens;
+      const reserved = header.maxTokens ?? info?.defaultMaxTokens ?? 0;
+      return {
+        window,
+        reserved,
+        ...(tokens !== undefined && window ? { pct: Math.round((tokens / window) * 1000) / 10 } : {}),
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  private notePressureThreshold(
+    config: ResolvedConfig,
+    agent: Agent,
+    probe?: { window?: number; reserved?: number },
+  ): void {
+    if (probe?.window === undefined) return;
+    const header = (agent.session as unknown as {
+      requestHeader?: () => { config?: { provider?: string; model?: string } } | undefined;
+    }).requestHeader?.()?.config;
+    const override = config.modelPolicies.find((p) => p.provider === header?.provider && p.model === header?.model);
+    const t = nativePressureThresholdTokens(probe.window, probe.reserved ?? 0, {
+      thresholdRatio: override?.thresholdRatio ?? config.thresholdRatio,
+      headroomTokens: override?.headroomTokens ?? config.headroomTokens,
+    });
+    this.lastPressureThresholdPct = t === null ? undefined : Math.round((t / probe.window) * 1000) / 10;
+  }
+
+  private async pressureCompaction(
+    agent: Agent,
+    trigger: CompactionTrigger,
+    signal: AbortSignal,
+    probe?: { window?: number; reserved?: number },
+  ): Promise<CompactionResult | null> {
     const base = this.config;
     if (!isDshChildSession(agent)) {
       const percentage = readHostNativePressurePercentage(this.ctx, agent);
-      if (percentage === null) return super.compactIfNeeded(agent, trigger, signal);
-      return this.withPressureConfig(magicMainPressureConfig(base, this.explicitPressure, percentage), () =>
-        super.compactIfNeeded(agent, trigger, signal),
-      );
+      if (percentage === null) {
+        this.notePressureThreshold(base, agent, probe);
+        return super.compactIfNeeded(agent, trigger, signal);
+      }
+      const main = magicMainPressureConfig(base, this.explicitPressure, percentage);
+      this.notePressureThreshold(main, agent, probe);
+      return this.withPressureConfig(main, () => super.compactIfNeeded(agent, trigger, signal));
     }
+    this.notePressureThreshold(base, agent, probe);
     try {
       return await super.compactIfNeeded(agent, trigger, signal);
     } catch (error) {
       if (this.explicitPressure.headroomTokens || !isNoPressureBudgetError(error)) throw error;
-      return this.withPressureConfig(withConfigOverrides(base, { headroomTokens: 0 }), () =>
-        super.compactIfNeeded(agent, trigger, signal),
-      );
+      const legal = withConfigOverrides(base, { headroomTokens: 0 });
+      this.notePressureThreshold(legal, agent, probe);
+      return this.withPressureConfig(legal, () => super.compactIfNeeded(agent, trigger, signal));
     }
   }
 
@@ -182,9 +262,11 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
           ? (await ctx.llm?.resolveModelInfo?.(target.provider, target.model))?.context?.contextWindow
           : undefined;
       const pct = tokens !== undefined && window ? Math.round((tokens / window) * 1000) / 10 : undefined;
-      ctx.logger?.info?.(
-        `[magic-context] native compaction region: child=${isDshChildSession(agent)} tokens=${tokens ?? "?"} window=${window ?? "?"} pct=${pct ?? "?"}`,
-      );
+      const line = `[magic-context] native compaction region: child=${isDshChildSession(agent)} tokens=${tokens ?? "?"} window=${window ?? "?"} pct=${pct ?? "?"}`;
+      ctx.logger?.info?.(line);
+      // headless prints console.error, not ctx.logger
+      // eslint-disable-next-line no-console
+      if (process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN === "1") console.error(line);
     } catch {
       // observability only
     }

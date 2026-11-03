@@ -40,6 +40,7 @@ from pathlib import Path
 ALLOWED_CHILD_TOOLS = {"read", "grep", "glob", "fs_search"}
 MASKED = ("bash", "write", "edit", "ctx_search", "ctx_reduce")
 TAG_PREFIX = re.compile(r"^\s*§(\d+)§")
+CHECK = re.compile(r"native pressure check: child=(true|false) pct=([0-9.]+|\?) thresholdPct=([0-9.]+|\?) window=(\S+) outcome=(\S+)")
 NATIVE = re.compile(r"native compaction region: child=(true|false) tokens=(\S+) window=(\S+) pct=([0-9.]+|\?)")
 NO_BUDGET = "leaving no pressure budget"
 TRIGGER = re.compile(r"historian trigger: pct=(\d+) threshold=(\d+) budget=(\d+) window=(\d+) fires=(true|false)")
@@ -456,6 +457,18 @@ def check_r19(c, out: Path, runs):
         n = p_.read_text(errors="replace").count(NO_BUDGET)
         if n:
             nobudget[p_.name] = n
+    # R6 (diagnostic) the per-step native pressure checks the engine printed
+    def checks_of(names):
+        rows = []
+        for n in names:
+            p_ = out / f"{n}.log"
+            if p_.exists():
+                rows += [(n,) + tuple(m.groups()) for m in CHECK.finditer(p_.read_text(errors="replace"))]
+        return rows
+    nc, oc = checks_of(pnew), checks_of(pold)
+    c.add("R6", bool(nc) and all(r[3] != "?" and float(r[3]) >= 65 for r in nc if r[1] == "false"),
+          "native pressure checks ran on the MC main session with an effective threshold >= 65 %",
+          {"pnew": [(r[0], r[2], r[3], r[5][:40]) for r in nc][-6:], "pold": [(r[0], r[2], r[3], r[5][:40]) for r in oc][-6:]})
     c.add("R5", not nobudget, "no TargetPressureConfigError ('leaving no pressure budget') in any run log", nobudget or "clean")
 
 

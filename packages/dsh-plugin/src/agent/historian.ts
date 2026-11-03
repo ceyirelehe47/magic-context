@@ -448,6 +448,7 @@ async function runHistorianPassCore(args: HistPassArgs): Promise<HistPassResult>
     // <unprocessed_from>" output put the DSH historian into failure backoff.
     const validationError = validated.error ?? "invalid compartment output";
     log(`[magic-context] historian repair retry: ${validationError}`);
+    debugConsole(`[magic-context] historian repair retry: ${validationError}`);
     let repaired: string;
     try {
       repaired = await summarize(chunk, priorCompartments, args.signal, {
@@ -1006,6 +1007,25 @@ export function maybeCorruptHistorianOutputForE2e(
   } catch {
     return text; // already injected once (or unwritable): never again
   }
-  log(`[magic-context] e2e: historian output corrupted once (${E2E_CORRUPT_HISTORIAN_ENV}); expecting a repair retry`);
+  const line = `[magic-context] e2e: historian output corrupted once (${E2E_CORRUPT_HISTORIAN_ENV}); expecting a repair retry`;
+  log(line);
+  // headless prints console.error, not ctx.logger (e2e evidence; test-only path)
+  try {
+    // eslint-disable-next-line no-console
+    console.error(line);
+  } catch {
+    // diagnostics only
+  }
   return E2E_CORRUPTED_HISTORIAN_OUTPUT;
+}
+
+/** stderr diagnostics under MAGIC_CONTEXT_DEBUG_HISTORIAN=1 (headless prints these; ctx.logger is not shown). */
+function debugConsole(line: string): void {
+  if (process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN !== "1") return;
+  try {
+    // eslint-disable-next-line no-console
+    console.error(line);
+  } catch {
+    // diagnostics only
+  }
 }
