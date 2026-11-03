@@ -42,7 +42,63 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 18, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; push run
+Baseline (round 19, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; push run
+41591790570 @ `6615a8d5b` and dispatch run 41592114076 (`e2e=true`)):
+`typecheck:dsh` **0 errors**, core typecheck **0 errors**, `dsh-plugin`
+**485 pass** (65 files; round 19 +17), `adapter-api` **15 pass**,
+`contracts:dsh` **98 pass**, 0 fail; real-model `e2e` (running at the time of writing; see the round 19 line in the CI section)
+(round 18's 57 + C10 + R0–R6 = 65 judged). Evidence:
+`docs/dsh/e2e/evidence-round19/`.
+
+Round 19 fixes (adapter only, no core change):
+- `b7eb34acf` **native pressure compaction no longer pre-empts MC.**
+  compaction-basic prices pressure at `min(window × 0.8, window − maxTokens −
+  65 536)`: a ≤ ~70k window threw `TargetPressureConfigError` (pressure
+  compaction never fired) and a 128k window fired at ≈ 44–46 %, before MC's
+  65 % execute threshold. `MagicCompactionEngine` now overrides
+  `compactIfNeeded` for the `pressure` trigger only: an MC-managed **main**
+  session gets `headroomTokens: 0` and `thresholdRatio` = MC's
+  force-materialization band for the route (core `escalationBands`:
+  `max(85, execute + 2)` → 85 % at 65 %), registered by the agent plane on
+  `magicContextHost.nativePressurePercentage` (live-disabled MC → DSH
+  defaults); a **child** session keeps the native policy (round 16) and only
+  retries with headroom 0 when the default headroom makes it illegal.
+  Explicit top-level `headroomTokens` / `thresholdRatio` and per-route
+  `modelPolicies` always win. The effective config is swapped in only for
+  compaction-basic's synchronous policy resolution (before its first await),
+  so the summarizer / overflow paths read the original. `setup` prints and
+  `doctor` checks it (`native-pressure.<profile>`, WARN when user values make
+  a 128k main session compact before 65 %). 12 tests (8 red before).
+- `a88385f60` the child fallback also covers the second default-headroom
+  config error the real host showed (run 41589483637, 80k route):
+  `retainTokens (12144) must be less than threshold tokens 10368` (0.16 ×
+  message budget ≥ the shrunken threshold on ≈ 70–82k windows) — unless the
+  retention is user-set. +1 test (red before).
+- `932ffef20` e2e-only one-shot historian corruption
+  (`MAGIC_CONTEXT_DSH_E2E_CORRUPT_HISTORIAN_ONCE` = absolute marker path,
+  O_EXCL, unset/relative/existing = no-op, repair output never touched) so the
+  `f8c663fee` repair retry runs on the real host (C10). +2 tests.
+- `9d16d6fab`, `34e728b60`: headless-visible diagnostics (stderr under
+  `MAGIC_CONTEXT_DEBUG_HISTORIAN=1`: one `native pressure check: child pct
+  thresholdPct window outcome` line per pre-step, `native compaction region`
+  per native compaction, repair-retry / injection lines — `ctx.logger` is not
+  printed by `dsh headless`); e2e scenario P (`opencode-go-100k` route, 40
+  generated fixtures); `cc024e807`, `6615a8d5b` scenario C asks the model not
+  to `ctx_reduce` its reads (+2 pairs) and C9 ignores model-authored text.
+
+Native pressure trigger, before → after (real rc.5, e2e P, 100k route,
+maxTokens 4096): **before** (compaction-basic defaults, set explicitly in
+`patch-r19-dsh-default.yml`; threshold 30.4 %) the MC main session was
+natively compacted at **44.0 %** (first pre-step above 30.4 %; run
+41591017319), i.e. before MC's 65 %; **after** (shipped policy, threshold 85 %)
+the same session climbed to **77.9 %** with **0** native compactions while
+MC's historian fired first at **74 %** (runs 41591017319, 41592114076). On the
+80k route the old default was not even legal (retain ≥ threshold → never
+fired; run 41589483637); on the 40k / 24k routes it threw "no pressure
+budget". After: 24k/40k/80k/100k/128k main → 85 %; child 24k/40k/80k → 80 %
+(headroom-0 fallback), child 100k/128k → DSH native 30.4 % / 43.8 %.
+
+Previous baseline (round 18, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; push run
 41554474179 and dispatch run 41554794748 (`e2e=true`) @ `f8c663fee`):
 `typecheck:dsh` **0 errors**, core typecheck **0 errors**, `dsh-plugin`
 **468 pass** (64 files; round 17 +13, round 18 +4), `adapter-api` **15 pass**,
@@ -84,9 +140,10 @@ Round 18 fixes:
 - `f8c663fee` one historian **repair retry** on invalid XML (upstream
   `runHistorianPrompt` re-prompts once with `buildHistorianRepairPrompt`; the
   DSH pass failed outright — e2e run 41552779443: "output left uncovered
-  messages 11-13 without `<unprocessed_from>`" → failure backoff, C6). Unit
-  tests only so far: the historian produced valid XML first time in run
-  41554794748, so the repair path has not yet been exercised on the real host.
+  messages 11-13 without `<unprocessed_from>`" → failure backoff, C6).
+  Round 19: exercised on the real host through the e2e-only injection (C10,
+  run 41589483637: "Historian returned no usable compartments." → repair →
+  compartment published, 0 failures).
 - e2e harness (`3b73594bc`, `7917d6bc4`, `e9e10eca2`, `ea6cbd2dc`, `0e624bfd0`):
   C1 accepts core's proactive trigger (threshold−2 = 63 %) but requires the
   context to have exceeded 65 % (trigger pct or prompt tokens / 40k); C3 compares
@@ -270,6 +327,10 @@ Round 17/18 新增检查：
 | C0–C9 | 主会话（40k 路由，阈值 65 %，每轮新进程）：C1 historian 在 ≥63 %（阈值−2）触发且上下文确实超过 65 %；C2 写出 compartments；C3 峰值之后的最低 prompt tokens 低于峰值；C4 暗号仍可答出；C5 可见输出无 `§N§`；C6 compartments 连续不重叠、无存活 lease、historian 非 running/failed；C7 缓存 m0 的 `<session-history>` 含 compartments（及暗号那段）；C8 cmp-q 不调用 ctx_search/ctx_expand/ctx_memory 即答出暗号；C9 解码后的会话事件中同一 tag 的 `[dropped §N§]` 不重复 |
 | U1–U6 | ctx_search / ctx_memory / ctx_expand 各调用一次且有结果；设置页 / popover 读数与 DB 一致；`/ctx-status` 与 DB 一致（无 OpenCode DB 横幅、Last input tokens ≠ 0、Last response ≠ never）；doctor 干净 |
 | S0–S7 | 子会话（24k 路由）读 8 个生成的 <8 KB 文件：委派成功；compaction-basic 走到 **summary**（不只是 prune）；摘要不是 MC 输出；子会话在 Magic 表 0 行；父会话增长只属于自己；子会话 completed；≥6/8 个 CHECKSUM 回到父会话或子会话最终回复 |
+| C10 | （round 19）e2e 专用开关把 scenario C 第一次 historian 输出换成截断的 XML（只一次，O_EXCL 标记文件）：之后出现 `historian repair retry`，compartment 仍写出，historian 无失败 |
+| R0–R6 | （round 19）scenario P，100k 主会话路由：R1 MC 管理的主会话里没有低于 65 % 的原生压缩；R2 MC historian 先触发（≥63 %，阈值 65）；R3 会话越过旧默认阈值（30.4 %）时没有原生压缩；R4 旧策略（显式写入 compaction-basic 默认值）实测在 65 % 之前原生压缩；R5 所有日志里没有 "leaving no pressure budget"；R6 引擎每步打印的有效主会话阈值 ≥ 65 % |
+
+Round 19：dispatch run 41586948399 @ `9d16d6fab`（2 FAIL：R2，读结果被截到 ~8 KB 且模型自己 ctx_reduce，P 只到 52 %；R4，headless 不打印 ctx.logger）→ 41589483637 @ `34e728b60`（2 FAIL：R4，80k 上 DSH 默认值本身非法：retain 12144 ≥ 阈值 10368；R6 首个 pre-step 没有 header；C10 **PASS**）→ 41591017319 @ `0eb2e69c4`（R0–R6 **全过**；C 场景因模型每轮 ctx_reduce、峰值 61 % 而失败 8 项）→ 41592114076 @ `6615a8d5b`（(running at the time of writing; see the round 19 line in the CI section)）。
 
 Round 18：dispatch run 41550425336 @ `e9e10eca2`（1 FAIL：C1，主动触发在 61.7 % 就压缩，未超过 65 %）→ 41552779443 @ `0e624bfd0`（1 FAIL：C6，historian XML 无效且没有 repair 重试）→ 41554794748 @ `f8c663fee`（**57/57 PASS**）。注意 41554794748 的 C1 是靠触发点的投影值 66 % 通过的，实际发出的 prompt 峰值 52.5 %（同一 pre-step 的 drop 已落地）；实测 prompt 超过 65 % 的是 41552779443（74.2 %）。
 
@@ -453,6 +514,23 @@ dsh-magic-context setup  [--dsh-home <dir>] [--dsh-install <dir>] [--profile <na
 dsh-magic-context doctor [--dsh-home <dir>] [--dsh-install <dir>] [--profile <name>] [--directory <dir>]
                          [--preset <id>]... [--all-presets] [--disable-preset <id>]...   (expectations)
 ```
+
+### Native pressure compaction (round 19)
+
+`setup` leaves the `magic-compaction` row at `{ auto: true }` and prints the
+effective native pressure policy; `doctor` reports it as
+`native-pressure.<profile>` (merged over every `magic-compaction` row of the
+patch layer, nested inserts included):
+
+- main sessions: MC-led — `headroomTokens 0`, `thresholdRatio` = MC's force
+  band for the route (85 % at the default 65 % execute threshold; per route
+  `max(85, execute + 2)`), so native compaction is only the backstop behind
+  MC's historian / drops;
+- child sessions: DSH native (`0.8` / `65 536`), with headroom 0 when that is
+  illegal for the window (24k/40k/80k → 80 %);
+- user-set top-level `thresholdRatio` / `headroomTokens` / retention and
+  per-route `modelPolicies` win; `doctor` WARNs when they make a 128k main
+  session compact before 65 %.
 
 ### Enabling Magic Context per agent preset
 
@@ -980,28 +1058,37 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     Round 18: the row's `published_at` is now read by the knowledge gate as
     the durable "a publish happened after the cached m0" signal
     (`hasUnmaterializedHistorianPublish`); `status` is still never consumed.
+    Round 19 analysis (read-only, not changed): `status` is written only as
+    `'pending'` (`stageDshCompactionMarker`); the only reader,
+    `applyDshCompactionMarkerIfCovered`, is not wired in production and on
+    success DELETEs the row (CAS clear) instead of writing `'applied'`, so the
+    `'applied'` branch is dead. No consumer is needed today: liveness is
+    "row exists", ordering is `published_at`. If the DSH-native trim above is
+    ever wired, either keep the delete-on-apply and drop `status` from the
+    TS type (schema column stays for compatibility), or write `'applied'` +
+    `dsh_ack_seq` like the outbox and have the knowledge gate skip applied
+    rows — decide in that change, not before.
 
 13. **Small issues recorded in rounds 17/18.**
     - `/ctx-status` "Last response: never" — **fixed** in `43dc2a27e` (see
       round 18 fixes).
-    - **compaction-basic defaults vs MC's 65 % (evaluated, not changed).**
-      compaction-basic's threshold is `min(window × thresholdRatio(0.8),
-      window − request maxTokens − headroomTokens(65 536))`
-      (`resolveCompactSpec`). On a window ≤ 65 536 + maxTokens there is no
-      pressure budget at all: the target throws `TargetPressureConfigError`
-      and pressure compaction never fires (why the round 17/18 child route
-      needs `headroomTokens: 0, thresholdRatio: 0.7` in
-      `patch-r17-child.yml`). On a 128k window it fires at ≈ 44–46 %
-      (131 072 − 8 192 − 65 536 = 57 344 → 43.8 %; 128 000 − 4 096 − 65 536
-      → 45.6 %), i.e. before MC's 65 % historian threshold. In MC sessions the
-      main path goes through `MagicCompactionEngine` (MC historian) so this
-      only matters for child sessions and Magic-disabled presets. Left as
-      DSH's default; a deployment that wants native compaction to stay behind
-      MC should set a `modelPolicies` entry with a smaller `headroomTokens`.
+    - **compaction-basic defaults vs MC's 65 % — fixed in round 19**
+      (`b7eb34acf`, `a88385f60`; see the round 19 fixes and the before/after
+      numbers above). compaction-basic's threshold is `min(window ×
+      thresholdRatio(0.8), window − maxTokens − headroomTokens(65 536))` and it
+      also refuses a default retention (0.16 × message budget) that is not
+      below the threshold. The defaults left ≤ ~70k windows with no pressure
+      budget, ≈ 70–82k windows with an illegal retention, and fired at
+      ≈ 30 % (100k) / 44–46 % (128k) — real rc.5: 44.0 % on 100k. Now MC-led
+      on main sessions (85 % backstop), legal on small child windows, user
+      values respected; `doctor` shows the effective policy. Remaining: the
+      backstop percentage follows the global/per-model execute threshold via
+      the agent plane; a session-level `/ctx` override is not consulted.
     - `ttl_idle` HARD folds can now arm on DSH (they need
       `last_response_time`); a session idle longer than the cache TTL re-folds
       m0 on its next turn, as upstream does.
-    - The historian repair retry (`f8c663fee`) is verified by unit tests only.
+    - The historian repair retry (`f8c663fee`) — **verified on the real host
+      in round 19** (C10, e2e-only one-shot injection).
 
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
