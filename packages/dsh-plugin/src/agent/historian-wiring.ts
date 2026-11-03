@@ -25,6 +25,7 @@ import {
   COMPARTMENT_AGENT_SYSTEM_PROMPT,
   buildCompartmentAgentPrompt,
 } from "@magic-context/core/hooks/magic-context/compartment-prompt";
+import { buildHistorianRepairPrompt } from "@magic-context/core/hooks/magic-context/compartment-runner-validation";
 import { readDshTranscript } from "./transcript";
 import { isMagicChildSession } from "./worker";
 import {
@@ -187,7 +188,7 @@ export function createLlmSummarizeCall(
   if (llm === undefined) {
     throw new Error("magic-context: llm service unavailable (historian wiring)");
   }
-  return async (chunk, _priorCompartments, signal) => {
+  return async (chunk, _priorCompartments, signal, repair) => {
     // Resolved per call: the DSH settings overlay edits historian.model live.
     const modelOverride =
       typeof modelOverrideSource === "function" ? modelOverrideSource() : modelOverrideSource;
@@ -197,13 +198,18 @@ export function createLlmSummarizeCall(
     const { provider, model } = modelOverride !== undefined && modelOverride.includes("/")
       ? { provider: modelOverride.split("/")[0], model: modelOverride.split("/").slice(1).join("/") }
       : currentRoute(ctx);
-    const prompt = buildCompartmentAgentPrompt({
+    const basePrompt = buildCompartmentAgentPrompt({
       seedExamples: "",
       sessionReferences: "",
       projectMemory: "",
       inputSource: chunk.text,
       memoryEnabled: true,
     });
+    // Repair retry: core's exact repair wrapper around the original prompt.
+    const prompt =
+      repair === undefined
+        ? basePrompt
+        : buildHistorianRepairPrompt(basePrompt, repair.previousOutput, repair.validationError);
     const user = createUserMessage({
       content: [{ type: "text", text: prompt }],
       source: { kind: "magic-context", plugin: "magic-context" },

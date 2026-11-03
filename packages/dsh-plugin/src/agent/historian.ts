@@ -111,7 +111,19 @@ export type DshSummarizeCall = (
   chunk: SessionChunk,
   priorCompartments: readonly Compartment[],
   signal?: AbortSignal,
+  /**
+   * Set on the single repair retry (upstream runHistorianPrompt parity): the
+   * invalid XML and its validation error, to be wrapped with core's
+   * buildHistorianRepairPrompt around the original prompt.
+   */
+  repair?: DshHistorianRepair,
 ) => Promise<string> | string;
+
+/** Repair context for the one retry after a validation failure. */
+export interface DshHistorianRepair {
+  readonly previousOutput: string;
+  readonly validationError: string;
+}
 
 /** Inputs to a single background historian pass. */
 export interface HistorianDeps {
@@ -425,7 +437,28 @@ async function runHistorianPassCore(args: HistPassArgs): Promise<HistPassResult>
 
   const maxExistingSequence = priorCompartments.reduce((max, c) => Math.max(max, c.sequence), -1);
   const sequenceOffset = priorCompartments.length === 0 ? 0 : maxExistingSequence + 1;
-  const validated = validateHistorianOutput(text, sessionId, chunk, priorCompartments, sequenceOffset);
+  let validated = validateHistorianOutput(text, sessionId, chunk, priorCompartments, sequenceOffset);
+  if (!validated.ok && args.signal?.aborted !== true) {
+    // Upstream parity (compartment-runner-historian runHistorianPrompt): one
+    // repair retry with the validation error before the pass counts as a
+    // failure. Real rc.5 round 18: a single "left uncovered messages … without
+    // <unprocessed_from>" output put the DSH historian into failure backoff.
+    const validationError = validated.error ?? "invalid compartment output";
+    log(`[magic-context] historian repair retry: ${validationError}`);
+    let repaired: string;
+    try {
+      repaired = await summarize(chunk, priorCompartments, args.signal, {
+        previousOutput: text,
+        validationError,
+      });
+    } catch (error) {
+      return { ok: false, status: "failed", reason: `${validationError}; repair llm call failed: ${describeError(error).brief}` };
+    }
+    if (typeof repaired === "string" && repaired.trim().length > 0) {
+      text = repaired;
+      validated = validateHistorianOutput(text, sessionId, chunk, priorCompartments, sequenceOffset);
+    }
+  }
   if (!validated.ok) {
     return { ok: false, status: "failed", reason: validated.error };
   }

@@ -252,6 +252,66 @@ describe("deferred signals (process-local)", () => {
   });
 });
 
+describe("runDshHistorian repair retry (upstream runHistorianPrompt parity)", () => {
+  it("retries once with the repair context when the first XML fails validation, and publishes the repaired output", async () => {
+    // Real rc.5 (round 18 e2e run 41552779443): the historian model returned
+    // "output left uncovered messages 11-13 without <unprocessed_from>"; the
+    // DSH pass failed outright (historian_failure_count=1, state failed,
+    // backoff) where upstream re-prompts once with buildHistorianRepairPrompt.
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      const calls: Array<{ validationError?: string; previousOutput?: string } | undefined> = [];
+      const invalid = validHistorianXml([{ start: 1, end: 3, title: "intro" }], 1); // 4..10 uncovered, bad unprocessed_from
+      const deps = historianDeps(db, session, {
+        summarize: (async (_chunk: unknown, _prior: unknown, _signal: unknown, repair?: { validationError: string; previousOutput: string }) => {
+          calls.push(repair);
+          return repair === undefined
+            ? invalid
+            : validHistorianXml([{ start: 1, end: 3, title: "intro" }, { start: 4, end: 7, title: "work" }], 8);
+        }) as DshSummarizeCall,
+      });
+      expect(await runDshHistorian(deps)).toBe(true);
+      expect(calls.length).toBe(2);
+      expect(calls[0]).toBeUndefined();
+      expect(calls[1]?.validationError ?? "").not.toBe("");
+      expect(calls[1]?.previousOutput).toBe(invalid);
+      expect(getCompartments(db, SESSION_ID).map((c) => [c.startMessage, c.endMessage])).toEqual([[1, 3], [4, 7]]);
+      const meta = db
+        .query("SELECT historian_failure_count AS n FROM session_meta WHERE session_id = ?")
+        .get(SESSION_ID) as { n: number | null } | null;
+      expect(meta?.n ?? 0).toBe(0);
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it("fails (one failure recorded) when the repaired output is still invalid — exactly one retry", async () => {
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      let calls = 0;
+      const deps = historianDeps(db, session, {
+        summarize: async () => {
+          calls += 1;
+          return validHistorianXml([{ start: 1, end: 3, title: "intro" }], 1);
+        },
+      });
+      expect(await runDshHistorian(deps)).toBe(false);
+      expect(calls).toBe(2);
+      expect(getCompartments(db, SESSION_ID).length).toBe(0);
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+});
+
 describe("runDshHistorian", () => {
   it("publishes atomically: compartments + marker + onPublished + lease released + telemetry", async () => {
     const env = makeEnv();
