@@ -41,6 +41,7 @@ import { registerSessionProjectTracking } from "./session-track";
 import type { SessionTrackOptions } from "./session-track";
 import type { AutoSearchConfig } from "./auto-search";
 import { registerCtxTools, type CtxToolsOptions } from "./tools";
+import { ensureDshProjectRegistered } from "./embedding-wiring";
 import { registerCtxCommands, type CtxCommandsOptions } from "./commands";
 import { e2eHistorianHold, e2eSummarizeLeaseWaitMs } from "./e2e-hooks";
 import { registerE2eWiring } from "./e2e-wiring";
@@ -636,6 +637,8 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   const runtime = {
     canonicalKey: (dshSessionId: string) => host.canonicalKey(dshSessionId),
     resolveProjectIdentity: undefined,
+    // Round 24b (item 2): fill the embedding-registration seam (Pi parity).
+    ensureProjectRegistered: ensureDshProjectRegistered,
     log,
   };
   // withGetters (not a spread) keeps tools.protectedTokens live (round 21).

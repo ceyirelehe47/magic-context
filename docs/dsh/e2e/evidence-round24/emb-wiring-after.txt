@@ -1,0 +1,5 @@
+(pass) DSH embedding registration + automatic compartment embedding (item 2) > registers the provider, auto-embeds the compartments, and ctx_search's compartment lane answers a paraphrase [1952.34ms]
+(pass) DSH embedding registration + automatic compartment embedding (item 2) > with no reachable model it degrades to full-text search with a visible diagnostic (never throws) [495.52ms]
+ 2 pass
+ 0 fail
+Ran 2 tests across 1 file. [4.31s]

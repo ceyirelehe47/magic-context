@@ -357,6 +357,8 @@ export function registerCtxEmbedCommand(ctx: Context, opts: CtxCommandsOptions):
               "## /ctx-embed\n\nThe embedding drain runner is not wired yet (Phase 2 slice C).",
             );
           }
+          // Round 24b (item 2): the drain needs the project's provider registered.
+          if (sub === "start") await opts.ensureProjectRegistered?.(cwd as string, db);
           const { text, level } = await opts.runEmbedDrain({
             agent,
             sessionId,

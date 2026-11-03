@@ -48,6 +48,7 @@ import { createTagger } from "@magic-context/core/features/magic-context/tagger"
 import { markNoteNudgeDelivered, onNoteTrigger, peekNoteNudgeText } from "@magic-context/core/hooks/magic-context/note-nudger";
 import { transcriptRawMessageProvider } from "./historian-wiring";
 import { scheduleDshMessageHistoryIndex } from "./message-index";
+import { scheduleDshAutoEmbed } from "./embedding-wiring";
 import { resolveAwaitAtTurnEndMs, type HistorianDrain } from "./historian-drain";
 import { isMagicChildSession } from "./worker";
 import { deriveTriggerBudget } from "@magic-context/core/hooks/magic-context/derive-budgets";
@@ -853,6 +854,10 @@ export async function runContextPlaneStep(
     // Round 24 (P1-1): keep core's message-history FTS index (ctx_search's
     // message lane) caught up with the DSH log — OpenCode/Pi parity.
     scheduleDshMessageHistoryIndex(db, canonicalSessionId, agent, deps.log);
+    // Round 24b (item 2): register the project's embedding provider and start
+    // the automatic compartment-embedding backfill for the active session
+    // (core-throttled, deferred off the step, fail-open) — OpenCode/Pi parity.
+    scheduleDshAutoEmbed(db, canonicalSessionId, agent, deps.directory, deps.log);
 
     // Historian plane: evaluate the context-pressure trigger and fire the
     // background compartment pass (fire-and-forget; never blocks the step).

@@ -50,6 +50,7 @@ import {
   getProjectEmbeddingSnapshot,
 } from "@magic-context/core/features/magic-context/memory/embedding";
 import { invalidateMemory } from "@magic-context/core/features/magic-context/memory/embedding-cache";
+import { semanticUnavailableNote } from "./embedding-wiring";
 import { computeNormalizedHash } from "@magic-context/core/features/magic-context/memory/normalize-hash";
 import {
   normalizeStoredProjectPath,
@@ -262,6 +263,10 @@ function toolError(message: string): Error {
 
 /* ─────────────────────────────── ctx_search ────────────────────────────── */
 
+function signalAborted(exec: unknown): boolean {
+  return (exec as { signal?: AbortSignal } | undefined)?.signal?.aborted === true;
+}
+
 const DEFAULT_SEARCH_LIMIT = 10;
 const NOTE_EXPAND_HINT =
   "Use ctx_expand(start=N-10, end=N) around any note @msg anchor above to read the surrounding conversation context.";
@@ -426,8 +431,10 @@ export function createCtxSearchTool(ctx: Context, opts: CtxToolsOptions): ToolDe
       const snapshot = getProjectEmbeddingSnapshot(runtime.projectIdentity);
       const memoryEnabled =
         snapshot?.features.memoryEnabled ?? opts.memoryEnabled;
+      // Pi parity: the query embedding follows the provider alone (history
+      // search ignores memory.enabled); each lane applies its own gate.
       const embeddingEnabled = snapshot
-        ? snapshot.enabled || snapshot.gitCommitEnabled
+        ? snapshot.historyEnabled || snapshot.enabled || snapshot.gitCommitEnabled
         : opts.embeddingEnabled;
       const gitCommitsEnabled =
         snapshot?.gitCommitEnabled ?? opts.gitCommitsEnabled ?? false;
@@ -454,13 +461,20 @@ export function createCtxSearchTool(ctx: Context, opts: CtxToolsOptions): ToolDe
         }
       }
 
+      let semanticFailure: string | undefined;
       const results = await unifiedSearch(db, runtime.sessionId, runtime.projectIdentity, query, {
         limit: normalizeLimit(params.limit),
         memoryEnabled,
         embeddingEnabled,
         embedQuery: async (text, signal) => {
-          const result = await embedTextForProject(runtime.projectIdentity as string, text, signal, "query");
-          return result?.vector ?? null;
+          try {
+            const result = await embedTextForProject(runtime.projectIdentity as string, text, signal, "query");
+            if (!result?.vector) semanticFailure = "the provider returned no vector";
+            return result?.vector ?? null;
+          } catch (error) {
+            semanticFailure = error instanceof Error ? error.message : String(error);
+            throw error;
+          }
         },
         isEmbeddingRuntimeEnabled: () => embeddingEnabled === true,
         maxMessageOrdinal: messageOrdinalCutoff,
@@ -469,7 +483,13 @@ export function createCtxSearchTool(ctx: Context, opts: CtxToolsOptions): ToolDe
         visibleMemoryIds,
         explicitSearch: true,
       });
-      return { text: formatSearchResults(query, results, runtime.sessionId) };
+      const text = formatSearchResults(query, results, runtime.sessionId);
+      // Round 24b (item 2): degrade to full-text VISIBLY when no query
+      // embedding could be produced (no model / provider down), never error.
+      if (semanticFailure !== undefined && !signalAborted(exec)) {
+        return { text: `${text}\n\n${semanticUnavailableNote(runtime.projectIdentity, semanticFailure, opts.log)}` };
+      }
+      return { text };
     },
   });
 }
