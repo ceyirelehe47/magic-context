@@ -95,6 +95,8 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
 
   /** Which top-level pressure keys the user set explicitly (those always win). */
   protected readonly explicitPressure: { headroomTokens: boolean; thresholdRatio: boolean; retain: boolean };
+  /** Round 22: sessions whose current historian episode already used its one backstop deferral. */
+  private readonly backstopDeferred = new WeakSet<object>();
 
   constructor(ctx: Context, config: BasicCompactionConfig & { summarize?: SummarizeHook }) {
     super(ctx, { ...config, auto: config.auto ?? true });
@@ -252,16 +254,37 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       // wait, then close compaction/end with "lease busy"). The backstop is
       // DEFERRED instead — no compaction, no error — and the next pressure
       // check (every step) retries once the pass has finished.
+      //
+      // Round 22: ONE deferral per episode. Above MC's threshold the historian
+      // re-fires as soon as a pass publishes, so the lease is held almost
+      // continuously; deferring on every check let a real rc.5 session climb
+      // 32 points past the backstop (scenario L, run 41619627652). The next
+      // over-backstop check compacts even if a pass still runs — the summarize
+      // hook waits (≤ 45 s) for its lease and usually renders what it covered.
+      // The episode ends when a check finds the lease free or the session
+      // back under the backstop.
+      const session = agent.session as unknown as object;
       if (readHostHistorianBusy(this.ctx, agent)) {
         const deferred = await this.backstopWouldFire(main, agent, probe);
         if (deferred) {
-          if (note !== undefined) note.outcome = "deferred:historian-busy";
+          if (!this.backstopDeferred.has(session)) {
+            this.backstopDeferred.add(session);
+            if (note !== undefined) note.outcome = "deferred:historian-busy";
+            logInfo(
+              this.ctx,
+              `[magic-context] native pressure backstop deferred: a historian pass is running for this session (pressure ${deferred.pct ?? "?"} % ≥ ${deferred.thresholdPct} %); the next pressure check retries`,
+            );
+            return null;
+          }
           logInfo(
             this.ctx,
-            `[magic-context] native pressure backstop deferred: a historian pass is running for this session (pressure ${deferred.pct ?? "?"} % ≥ ${deferred.thresholdPct} %); the next pressure check retries`,
+            `[magic-context] native pressure backstop already deferred once for this historian episode (pressure ${deferred.pct ?? "?"} % ≥ ${deferred.thresholdPct} %); compacting now — the summarize hook waits for the historian's lease`,
           );
-          return null;
+        } else {
+          this.backstopDeferred.delete(session);
         }
+      } else {
+        this.backstopDeferred.delete(session);
       }
       return this.withPressureConfig(main, () => super.compactIfNeeded(agent, trigger, signal));
     }

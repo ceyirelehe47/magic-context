@@ -55,6 +55,10 @@ async function probe(opts: {
   /** host historian-busy probe (round 21): undefined = not registered. */
   busy?: (agent: unknown) => boolean;
   logs?: string[];
+  /** Round 22: further pressure checks on the SAME engine/session (pct per check). */
+  thenPcts?: number[];
+  /** Round 22: results of every check, in order (the first is `result`). */
+  results?: Array<{ result: unknown; fired: boolean }>;
 }): Promise<Rig> {
   const rig: Rig = { fired: false, compactRegionCalls: 0, result: undefined };
   const header = {
@@ -109,6 +113,13 @@ async function probe(opts: {
   };
   const agent = { id: "s", session, options: { provider: "p", model: "m" } } as unknown as Agent;
   rig.result = await engine.compactIfNeeded(agent, "pressure", new AbortController().signal);
+  opts.results?.push({ result: rig.result, fired: rig.fired });
+  for (const pct of opts.thenPcts ?? []) {
+    total = Math.floor(opts.window * pct);
+    rig.fired = false;
+    const result = await engine.compactIfNeeded(agent, "pressure", new AbortController().signal);
+    opts.results?.push({ result, fired: rig.fired });
+  }
   return rig;
 }
 
@@ -248,6 +259,32 @@ describe("native pressure backstop while a historian pass runs (round 21)", () =
     busy = false;
     const second = await probe({ window: 131_072, maxTokens: 8_192, pct: 0.91, busy: () => busy });
     expect(second.fired).toBe(true);
+  });
+
+  // Round 22 (real rc.5, scenario L run 41619627652): with the session above
+  // MC's threshold the historian re-fires as soon as a pass publishes, so the
+  // lease is held almost continuously and the backstop deferred on EVERY step
+  // while the context climbed 36.9 % → 68.9 % (backstop 36 %). One deferral
+  // per episode: the next over-backstop check compacts even though the pass
+  // still runs (the summarize hook waits ≤ 45 s for its lease, then usually
+  // renders what the pass covered).
+  it("the deferral is bounded: the next over-backstop check compacts although the historian is still busy", async () => {
+    const logs: string[] = [];
+    const results: Array<{ result: unknown; fired: boolean }> = [];
+    await probe({ window: 131_072, maxTokens: 8_192, pct: 0.91, busy: () => true, logs, thenPcts: [0.93], results });
+    expect(results[0]!.fired).toBe(false);
+    expect(results[0]!.result).toBeNull();
+    expect(results[1]!.fired).toBe(true);
+    expect(logs.filter((l) => /native pressure backstop deferred/.test(l))).toHaveLength(1);
+    expect(logs.some((l) => /already deferred once/.test(l))).toBe(true);
+  });
+
+  it("a new episode (pressure back under the backstop in between) may defer again", async () => {
+    const logs: string[] = [];
+    const results: Array<{ result: unknown; fired: boolean }> = [];
+    await probe({ window: 131_072, maxTokens: 8_192, pct: 0.91, busy: () => true, logs, thenPcts: [0.5, 0.92], results });
+    expect(results.map((r) => r.fired)).toEqual([false, false, false]);
+    expect(logs.filter((l) => /native pressure backstop deferred/.test(l))).toHaveLength(2);
   });
 
   it("below the backstop with the historian busy: no deferral line (status stays 'nothing to do')", async () => {
