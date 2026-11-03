@@ -13,12 +13,14 @@
  * compaction checkpoints expanded back), so a hit's ordinal is directly
  * `ctx_expand`-able and matches the compartment ranges. `getRevision` is the
  * DSH log's append-only seq, so core re-reconciles only after new events.
+ * Round 24c: through `historyContentProvider`, i.e. without Magic's own
+ * injected text (m0 baseline, `<ctx-search-hint>`) — never history.
  * Reconciliation runs off the step (core defers it); fail-open.
  */
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { scheduleReconciliation } from "@magic-context/core/features/magic-context/message-index-async";
 import type { Database } from "@magic-context/core/shared/sqlite";
-import { transcriptRawMessageProvider } from "./historian-wiring";
+import { historyContentProvider } from "./historian-wiring";
 
 export function scheduleDshMessageHistoryIndex(
   db: Database,
@@ -28,7 +30,7 @@ export function scheduleDshMessageHistoryIndex(
 ): void {
   try {
     const source = Object.assign(
-      (sessionId: string) => transcriptRawMessageProvider(agent, sessionId).readMessages(),
+      (sessionId: string) => historyContentProvider(agent, sessionId).readMessages(),
       { getRevision: () => Number((agent.session as unknown as { seq?: unknown }).seq ?? 0) },
     );
     scheduleReconciliation(db, sessionKey, source as never);

@@ -46,7 +46,7 @@ import type { PressureTruncationInput } from "./pressure-truncation";
 import { escalationBands } from "@magic-context/core/shared/escalation-bands";
 import { createTagger } from "@magic-context/core/features/magic-context/tagger";
 import { markNoteNudgeDelivered, onNoteTrigger, peekNoteNudgeText } from "@magic-context/core/hooks/magic-context/note-nudger";
-import { transcriptRawMessageProvider } from "./historian-wiring";
+import { historyContentProvider } from "./historian-wiring";
 import { scheduleDshMessageHistoryIndex } from "./message-index";
 import { scheduleDshAutoEmbed } from "./embedding-wiring";
 import { resolveAwaitAtTurnEndMs, type HistorianDrain } from "./historian-drain";
@@ -368,7 +368,7 @@ function maybeFireHistorian(
         db,
         sessionId,
         directory,
-        provider: transcriptRawMessageProvider(agent as unknown as Agent, sessionId),
+        provider: historyContentProvider(agent as unknown as Agent, sessionId),
         contextWindow,
       });
     }

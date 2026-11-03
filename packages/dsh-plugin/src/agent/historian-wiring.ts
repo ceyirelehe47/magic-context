@@ -27,7 +27,7 @@ import {
   buildCompartmentAgentPrompt,
 } from "@magic-context/core/hooks/magic-context/compartment-prompt";
 import { buildHistorianRepairPrompt } from "@magic-context/core/hooks/magic-context/compartment-runner-validation";
-import { messageNodeSpan, readDshHistory } from "./transcript";
+import { messageNodeSpan, readDshHistory, withoutInjectedText } from "./transcript";
 import { isMagicChildSession } from "./worker";
 import {
   createMagicSummarizeHook,
@@ -358,6 +358,27 @@ export function transcriptRawMessageProvider(
 }
 
 /**
+ * Round 24c: the transcript provider as HISTORY CONTENT for the message-history
+ * index and the historian — Magic's own injected text (m0 baseline,
+ * `<ctx-search-hint>`) removed from knowledge-baseline messages
+ * (`withoutInjectedText`), ordinals / ids / ranges unchanged. OpenCode and Pi
+ * never store those blocks, so their index and historian never see them; on
+ * DSH they are durable `magic-context` user messages in the log (real e2e
+ * 41672370986: the message lane returned the injected `<project-memory>` and
+ * compartments of unrelated turns carried every pinned fact).
+ */
+export function historyContentProvider(agent: Agent, canonicalSessionId: string): DshRawMessageProvider {
+  const base = transcriptRawMessageProvider(agent, canonicalSessionId);
+  const messages = base.readMessages().map(withoutInjectedText);
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  return {
+    ...base,
+    readMessages: () => [...messages],
+    readMessageById: (messageId: string) => byId.get(messageId) ?? null,
+  };
+}
+
+/**
  * Register the summarize hook on the host service. The per-session hook is
  * built per compaction call from the compacting agent: its raw-message
  * provider is a SNAPSHOT of the transcript (`transcriptRawMessageProvider`),
@@ -394,7 +415,7 @@ export function registerMagicHistorianPlane(
       db: bootstrap.db,
       sessionId,
       ctx,
-      provider: transcriptRawMessageProvider(a, sessionId),
+      provider: historyContentProvider(a, sessionId),
       summarize,
       directory: deps.directory,
       ...(deps.leaseWaitMs !== undefined ? { leaseWaitMs: deps.leaseWaitMs } : {}),

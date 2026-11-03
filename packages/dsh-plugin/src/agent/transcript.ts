@@ -472,6 +472,32 @@ export function isKnowledgeBaselineMessage(message: RawMessage): boolean {
   return (message as unknown as Record<string, unknown>)[DSH_KNOWLEDGE_KEY] === true;
 }
 
+/**
+ * Round 24c: the view message without the text Magic itself injected.
+ *
+ * A knowledge-baseline view message (m0/m1 `<session-history>` /
+ * `<project-memory>`, the `<ctx-search-hint>`, any `magic-context`-sourced
+ * user message) carries Magic's OWN text, which OpenCode/Pi add at transform
+ * time only and never store. History consumers (message-history FTS index,
+ * historian chunk) must not read it as conversation. Only the message's own
+ * text blocks are removed: tool results / a tool-call assistant folded into it
+ * stay. Ordinal, id, version and every non-enumerable marker are kept, so
+ * compartment ranges and ctx_expand numbering do not move. Other messages are
+ * returned as is (same object).
+ */
+export function withoutInjectedText(message: RawMessage): RawMessage {
+  if (!isKnowledgeBaselineMessage(message)) return message;
+  const parts = message.parts.filter((part) => {
+    if (part === null || typeof part !== "object") return true;
+    return TEXT_PART_ORIGIN.get(part)?.sourceId !== message.id;
+  });
+  if (parts.length === message.parts.length) return message;
+  const copy = Object.create(Object.getPrototypeOf(message)) as RawMessage;
+  Object.defineProperties(copy, Object.getOwnPropertyDescriptors(message));
+  Object.defineProperty(copy, "parts", { value: parts, enumerable: true, configurable: true, writable: true });
+  return copy;
+}
+
 /** True when the view message is a DSH skill-catalog reminder (dsh-tool-skill). */
 export function isSkillCatalogBaselineMessage(message: RawMessage): boolean {
   return (message as unknown as Record<string, unknown>)[DSH_SKILL_CATALOG_KEY] === true;
