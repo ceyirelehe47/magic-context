@@ -59,6 +59,12 @@ async function probe(opts: {
   thenPcts?: number[];
   /** Round 22: results of every check, in order (the first is `result`). */
   results?: Array<{ result: unknown; fired: boolean }>;
+  /** Round 23: pressure left after each committed compaction (default 0). */
+  afterCompactPct?: number;
+  /** Round 23: compactRegion calls after this many throw like compaction-basic's shrink guard. */
+  regionThrowsAfter?: number;
+  /** Round 23: an error thrown by compactIfNeeded is captured here instead of rejecting. */
+  errors?: string[];
 }): Promise<Rig> {
   const rig: Rig = { fired: false, compactRegionCalls: 0, result: undefined };
   const header = {
@@ -108,11 +114,20 @@ async function probe(opts: {
   });
   (engine as unknown as { compactRegion: () => Promise<unknown> }).compactRegion = async () => {
     rig.compactRegionCalls += 1;
-    total = 0;
+    if (opts.regionThrowsAfter !== undefined && rig.compactRegionCalls > opts.regionThrowsAfter) {
+      throw new Error("summary is not smaller than the shadowed content (626 estimated framed tokens >= 626)");
+    }
+    total = Math.floor(opts.window * (opts.afterCompactPct ?? 0));
     return { shadowedSeqs: [], shadowedRange: { start: 0, end: 0 }, shadowedTokenCount: 0 };
   };
   const agent = { id: "s", session, options: { provider: "p", model: "m" } } as unknown as Agent;
-  rig.result = await engine.compactIfNeeded(agent, "pressure", new AbortController().signal);
+  try {
+    rig.result = await engine.compactIfNeeded(agent, "pressure", new AbortController().signal);
+  } catch (error) {
+    if (opts.errors === undefined) throw error;
+    opts.errors.push(error instanceof Error ? error.message : String(error));
+    rig.result = undefined;
+  }
   opts.results?.push({ result: rig.result, fired: rig.fired });
   for (const pct of opts.thenPcts ?? []) {
     total = Math.floor(opts.window * pct);
@@ -400,5 +415,51 @@ describe("native pressure diagnostics (round 21: P7 race, P8 first-step pct)", (
     expect(lines[0]).toContain("pct=42");
     expect(lines[0]).toContain("window=131072");
     expect(lines[0]).not.toContain("thresholdPct=?");
+  });
+});
+
+// Round 23 (real rc.5, e2e run 41625463298, scenario L lock-a): compaction-basic
+// retries a pressure compaction while the session is still above the threshold.
+// For an MC main session the retry's region is the checkpoint the first attempt
+// just wrote; Magic renders the same compartments for it (history ordinals are
+// stable since round 23), so compaction-basic rejected every retry ("summary is
+// not smaller than the shadowed content (626 … >= 626)") and the whole pressure
+// check failed although the first compaction had committed — 6 of 7 backstop
+// compactions in that run. The backstop now compacts ONCE per check on MC main
+// sessions; what stays above it is the retained tail / already-summarized
+// history, which MC's own pipeline handles, and the next check retries.
+describe("MC main backstop compacts once per pressure check (round 23)", () => {
+  it("still above the backstop after a committed compaction: no retry over the fresh checkpoint, no error, the committed result returns", async () => {
+    const logs: string[] = [];
+    const errors: string[] = [];
+    const rig = await probe({ window: 40_000, maxTokens: 4_096, pct: 0.95, afterCompactPct: 0.93, regionThrowsAfter: 1, hook: () => 90, logs, errors });
+    expect(errors).toEqual([]);
+    expect(rig.compactRegionCalls).toBe(1);
+    expect(rig.result).not.toBeNull();
+    expect(rig.result).toBeDefined();
+    expect(logs.some((l) => /compacted once/.test(l) && /still above/.test(l))).toBe(true);
+  });
+
+  it("a user-set compactionRetries keeps compaction-basic's retry (and its error) on main sessions", async () => {
+    const errors: string[] = [];
+    const rig = await probe({
+      window: 40_000,
+      maxTokens: 4_096,
+      pct: 0.95,
+      afterCompactPct: 0.93,
+      regionThrowsAfter: 1,
+      config: { compactionRetries: 1 },
+      hook: () => 90,
+      errors,
+    });
+    expect(rig.compactRegionCalls).toBe(2);
+    expect(errors.some((e) => /not smaller/.test(e))).toBe(true);
+  });
+
+  it("child sessions keep the native retry policy", async () => {
+    const errors: string[] = [];
+    const rig = await probe({ window: 40_000, maxTokens: 4_096, pct: 0.95, child: true, afterCompactPct: 0.93, regionThrowsAfter: 1, hook: () => 90, errors });
+    expect(rig.compactRegionCalls).toBe(2);
+    expect(errors.some((e) => /not smaller/.test(e))).toBe(true);
   });
 });
