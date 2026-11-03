@@ -711,19 +711,21 @@ core 原样来自上游 release tag，DSH 层（`packages/adapter-api`、`packag
 
 ### 版本命名
 
-- 发行版版本：`<upstream>-dsh.N`，例如 `0.49.35-dsh.2`。`<upstream>` 是 core 所基于的
+- 发行版版本：`<upstream>-dsh.N`，例如 `0.49.35-dsh.4`。`<upstream>` 是 core 所基于的
   上游 tag（去掉 `v`），`N` 在同一上游版本上的每次 DSH 发布递增，换上游版本时重置为 1。
   DSH 基线（当前 0.2.1-rc.5）写进发布说明，不进版本号。
-- git tag 用 `dsh/<upstream>-dsh.N`（例如 `dsh/0.49.35-dsh.2`）。**不要用 `v*` 或
+- git tag 用 `dsh/<upstream>-dsh.N`（例如 `dsh/0.49.35-dsh.4`）。**不要用 `v*` 或
   `dashboard-v*`**：fork 里保留着上游的 `release.yml`（`push: tags: v*`）和
   `dashboard-release.yml`（`dashboard-v*`），这类 tag 一推就会在 fork 上跑上游的发布流程。
 - `packages/dsh-plugin/package.json` 的版本号按此规则：round 14 为 `0.49.34-dsh.1`，
   round 16 合并上游 v0.49.35 后为 `0.49.35-dsh.1`，round 21 发布为 `0.49.35-dsh.2`
-  （tag `dsh/0.49.35-dsh.2`），打 tag 时用同一个号。`dsh-magic-context --version` 直接读
+  （tag `dsh/0.49.35-dsh.2`），round 25 发布为 `0.49.35-dsh.4`（tag `dsh/0.49.35-dsh.4`），打 tag 时用同一个号。
+  注意：`dsh/0.49.35-dsh.3` → `40c5013a5` 发布时漏改版本号，其 package.json 仍为 `0.49.35-dsh.2`；
+  代码与 dsh.4 相同，已发布 tag 不改写，请改用 dsh.4。`dsh-magic-context --version` 直接读
   `package.json`，不再单独维护一份；`src/doctor/cli-version.test.ts` 同时检查版本号符合
   `<upstream>-dsh.N`。`bun.lock` 里 workspace 条目的 `version` 在 round 16 手工对齐
   （`dsh-magic-context` 0.49.35-dsh.1，cli / plugin / pi-plugin 0.49.35，只改这 4 行；
-  v0.49.35 没有依赖变化，所以没有重新生成 lockfile）。round 21 升到 dsh.2 时同样只手改了
+  v0.49.35 没有依赖变化，所以没有重新生成 lockfile）。round 21 升到 dsh.2、round 25 升到 dsh.4 时同样只手改了
   `dsh-magic-context` 这一行。
 
 ### 同步节奏
