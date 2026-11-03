@@ -28,6 +28,7 @@
  * Slice boundary: runRecomp / runWrapup seams are Phase 4 — not exported.
  */
 import type { Agent } from "@deepseek-ai/dsh-agent";
+import { randomUUID } from "node:crypto";
 import { closeSync, openSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import {
@@ -103,6 +104,20 @@ export const DEFAULT_HISTORIAN_CHUNK_TOKENS = 16_000;
 
 /** Default compartment-lease holder id prefix (per-session deterministic). */
 const DEFAULT_LEASE_HOLDER_PREFIX = "dsh-historian";
+
+/**
+ * Round 20: a lease holder id unique per pass. Core's compartment lease
+ * re-grants a lease to its OWN holder (`ON CONFLICT … WHERE holder_id =
+ * excluded.holder_id`), so the old per-session id (`dsh-historian:<session>`)
+ * let every overlapping pass — the trigger fires on each step above the
+ * threshold, plus the compaction mini-historian and other DSH processes on the
+ * same session — "acquire" the same lease and race to publish the same
+ * compartment sequence (real rc.5 e2e 41599626978: UNIQUE constraint failed:
+ * compartments.session_id, compartments.sequence → historian failed).
+ */
+function uniqueLeaseHolderId(sessionId: string): string {
+  return `${DEFAULT_LEASE_HOLDER_PREFIX}:${sessionId}:${process.pid}:${randomUUID().slice(0, 8)}`;
+}
 
 /**
  * The injected historian LLM call (production: wraps `ctx.llm.stream()` with
@@ -639,7 +654,7 @@ function buildDshCompactionSummary(
 export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
   const { db, sessionId } = deps;
   const log = deps.log ?? (() => {});
-  const holderId = deps.leaseHolderId ?? `${DEFAULT_LEASE_HOLDER_PREFIX}:${sessionId}`;
+  const holderId = deps.leaseHolderId ?? uniqueLeaseHolderId(sessionId);
   if (typeof deps.summarize !== "function") {
     log(`[magic-context] historian: missing summarize call for ${sessionId}`);
     return false;
@@ -877,7 +892,7 @@ function defaultResolveModel(agent: Agent): { provider: string; model: string } 
 export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHook {
   const sessionId = deps.sessionId;
   const log = deps.log ?? (() => {});
-  const holderId = deps.leaseHolderId ?? `${DEFAULT_LEASE_HOLDER_PREFIX}:${sessionId}`;
+  const holderId = deps.leaseHolderId ?? uniqueLeaseHolderId(sessionId);
 
   return async (input: SummarizationInput, agent: Agent, signal?: AbortSignal): Promise<SummaryResult> => {
     const { provider, model } = (deps.resolveModel ?? defaultResolveModel)(agent);

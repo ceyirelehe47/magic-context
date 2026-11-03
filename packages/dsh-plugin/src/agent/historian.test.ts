@@ -312,6 +312,55 @@ describe("runDshHistorian repair retry (upstream runHistorianPrompt parity)", ()
   });
 });
 
+describe("concurrent historian passes on one session (round 20)", () => {
+  // Real rc.5 e2e 41599626978 (cmp-04): the trigger fires on every step while
+  // the session sits above the threshold, and every pass used the SAME
+  // compartment-lease holder id (`dsh-historian:<session>`). Core's lease
+  // re-grants a lease to its own holder, so a second pass started while the
+  // first was still waiting on the LLM, both published sequence 1, and the
+  // loser recorded "UNIQUE constraint failed: compartments.session_id,
+  // compartments.sequence" (historian state failed + backoff). The holder id
+  // is now unique per pass: the second pass sees the lease busy and skips.
+  it("a second pass while the first holds the lease skips instead of double-publishing", async () => {
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let calls = 0;
+      const xml = validHistorianXml([{ start: 1, end: 3, title: "intro" }, { start: 4, end: 7, title: "work" }], 8);
+      const deps = historianDeps(db, session, {
+        leaseHolderId: undefined,
+        summarize: async () => {
+          calls += 1;
+          await gate;
+          return xml;
+        },
+      });
+      const first = runDshHistorian(deps);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const second = runDshHistorian({ ...deps });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      release();
+      const results = await Promise.all([first, second]);
+      expect(results).toEqual([true, false]);
+      expect(calls).toBe(1);
+      expect(getCompartments(db, SESSION_ID).map((c) => [c.startMessage, c.endMessage])).toEqual([[1, 3], [4, 7]]);
+      const meta = db
+        .query("SELECT historian_failure_count AS n FROM session_meta WHERE session_id = ?")
+        .get(SESSION_ID) as { n: number | null } | null;
+      expect(meta?.n ?? 0).toBe(0);
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+});
+
 describe("e2e-only historian corruption (round 19)", () => {
   it("is a no-op without the env var / with a relative path, and corrupts exactly once per marker", async () => {
     const { maybeCorruptHistorianOutputForE2e, E2E_CORRUPT_HISTORIAN_ENV, E2E_CORRUPTED_HISTORIAN_OUTPUT } = await import("./historian");
