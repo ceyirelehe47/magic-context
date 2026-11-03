@@ -1,0 +1,16 @@
+e2e 41669354809 @ f3d44e73b — U1 (use-search, real DSH, CI has no local embedding model): full ctx_search tool result
+tool_call  {"query": "codeword"}
+tool_result completed 
+Found 2 results for "codeword":
+
+[1] [message] score=1.00 ordinal=3 range=1-6 role=user
+§1§ Remember this codeword exactly: AMBER-FALCON-7319. It is important; I will ask you for it near the end of this session. For now reply with the single word: noted.
+
+[2] [note] score=0.01 id=#1 status=active today @msg 11
+Codeword to recall on request: AMBER-FALCON-7319 User asked (early in session) that I remember this exact codeword and expect to be asked for it near the end of the session. Recall verbatim when asked.
+
+Use ctx_expand(start, end) with the range from any message result above to read the full conversation context.
+
+Use ctx_expand(start=N-10, end=N) around any note @msg anchor above to read the surrounding conversation context.
+
+Note: semantic search unavailable (embedding provider local (Xenova/all-MiniLM-L6-v2): the provider returned no vector); the results above are full-text (FTS) matches only — summarized history (compartments) is not searched semantically. Check the embedding settings or run /ctx-embed.
