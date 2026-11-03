@@ -145,11 +145,16 @@ if [[ -n "$CSID" ]]; then
   # (run 41550425336: max 61.7 %), so C1 could not show real pressure. A pair
   # takes the context from ~50 % past 65 % inside one turn, before the
   # background historian's fold can land (next process).
+  # Round 19 run 41591017319: the model ctx_reduce'd its own reads every turn
+  # and the context peaked at 61 % (C1/C2 FAIL, a model-side variance — runs
+  # 41586948399/41589483637 reached 81 %/75 %). The read turns now ask it not
+  # to drop anything, and two more pairs are available.
   for pair in "src/agent/outbox.ts src/host/meter.ts" "src/agent/nudge.ts src/agent/pressure-truncation.ts" \
-              "src/agent/coordinator.ts src/agent/worker.ts" "src/agent/auto-search.ts src/agent/session-track.ts"; do
+              "src/agent/coordinator.ts src/agent/worker.ts" "src/agent/auto-search.ts src/agent/session-track.ts" \
+              "src/agent/knowledge-gate.ts src/host/remote.ts" "src/agent/dreamer.ts src/agent/context-plane.ts"; do
     set -- $pair
     name="cmp-$(printf %02d "$k")"
-    run "$name" "Read the file $1 with the read tool (whole file), then read the file $2 with the read tool (whole file), one after the other. Then tell me the name of the first exported function or constant in each. Two short sentences." "$CSID"
+    run "$name" "Read the file $1 with the read tool (whole file), then read the file $2 with the read tool (whole file), one after the other. Do not call ctx_reduce. Then tell me the name of the first exported function or constant in each. Two short sentences." "$CSID"
     r17_db session "$DB" "$CSID" 65 "$MAIN_MODEL_KEY" > "$OUT/db-$name.json"
     if [[ "$(compartments_of "$OUT/db-$name.json")" -gt 0 ]]; then after=$((after + 1)); fi
     [[ "$after" -ge 2 ]] && break
