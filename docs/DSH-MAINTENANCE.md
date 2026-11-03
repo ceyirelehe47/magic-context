@@ -50,7 +50,7 @@ push run 41608723776 green; real e2e for that code: 41601119332 @ `542c6569e`
 `typecheck:dsh` **0 errors**, **test-file typecheck 0 errors (now gating)**,
 core typecheck **0 errors**, `dsh-plugin` **515 pass** (round 21 +21),
 `adapter-api` **15 pass**, `contracts:dsh` **99 pass**, 0 fail; real-model
-`e2e` E2E_RESULT_PLACEHOLDER (67 judged = round 20's 66 + R8).
+`e2e` **67/67 PASS** on run 41611644712 (67 judged = round 20's 66 + R8; R7 1 completed main-session native compaction; R8 4 `compaction/end` events, 0 lease-busy errors, 0 backstop deferrals and 0 `/compact` waits in this run — the overlap did not occur, so the new wait/defer paths are unit-verified only; R6 now has **0** main-session checks with `pct=?`, i.e. P8 verified on real rc.5). Evidence: `docs/dsh/e2e/evidence-round21/`.
 
 Round 21 fixes (adapter only, no core change; each with a red test first):
 - `b27f24410` **lease busy no longer fails native compaction.** (a) The Magic
@@ -1259,7 +1259,8 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       shown as running + pending restart); test-file typecheck 156 → 0 and
       gating (`110acca0d`, `52f33bbf8`, `6ce2603f9`); P7 / P8 diagnostics
       (`a84fb1553`); coordinator caches bounded (`9ab4c3a9e`).
-    - **Verified how:** all by unit tests (red first); real e2e R8 is a
+    - **Verified how:** all by unit tests (red first); real e2e run
+      41611644712 67/67 (R8 PASS, P8 real: 0 `pct=?` main checks). R8 is a
       regression scan — the overlap of a background pass with a native
       compaction is timing-dependent and no e2e scenario issues `/compact`
       (headless has no slash-command step), so the wait path itself is
