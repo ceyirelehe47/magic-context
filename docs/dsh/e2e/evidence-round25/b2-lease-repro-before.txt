@@ -1,1 +1,1 @@
-{"case":"lease of an earlier incarnation with the same pid (acquired 60 s before this process started, TTL 4 min left)","isLeaseOwnerGone":false,"isDshHistorianBusy":true,"acquireCompartmentLease":"null (busy)"}
+{"case":"lease of an earlier incarnation with the same pid (acquired 60 s before this process started, TTL 4 min left)","isLeaseOwnerGone":false,"isDshHistorianBusy":true,"adapterReclaim":"n/a (no adapter reclaim)","acquireAfterReclaim":"null (busy)"}
