@@ -29,7 +29,9 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       the old DSH-default threshold (30.4 %) without native compaction, R4 the
       pre-round-19 policy (explicit DSH defaults) measured firing < 65 %,
       R5 no "leaving no pressure budget" config error in any run, R6 the
-      engine's per-step pressure checks show an effective main threshold >= 65 %
+      engine's per-step pressure checks show an effective main threshold >= 65 %,
+      R7 (round 20) the main-session native compaction completed (no
+      compaction/end error, no "summarize range unresolvable")
   P1  no dsh process left after the runs
 """
 import json
@@ -483,6 +485,17 @@ def check_r19(c, out: Path, runs):
           and any(r[3] != "?" for r in nc),
           "native pressure checks ran on the MC main session with an effective threshold >= 65 %",
           {"pnew": [(r[0], r[2], r[3], r[5][:40]) for r in nc][-6:], "pold": [(r[0], r[2], r[3], r[5][:40]) for r in oc][-6:]})
+    # R7 (round 20) a main-session native compaction (MC summarize hook) must
+    # COMPLETE: round 19's R4 counted compaction/start, but every attempt closed
+    # compaction/end with "summarize range unresolvable" (the system prompt
+    # compaction-basic prepends to the region was not in the transcript view).
+    ends = [(e.get("data") or {}) for name in ("pold", "pnew")
+            for e in session_events(out / f"{name}-session.jsonl") if e.get("type") == "compaction/end"]
+    errs = [str(d.get("error"))[:160] for d in ends if d.get("error")]
+    unresolvable = sum(1 for p_ in sorted(out.glob("*.log")) for _ in re.finditer("summarize range unresolvable", p_.read_text(errors="replace")))
+    c.add("R7", bool(ends) and not errs and unresolvable == 0,
+          "main-session native compaction completed through the MC summarize hook (no compaction/end error)",
+          {"compactionEnds": len(ends), "errors": errs[:3], "unresolvableInLogs": unresolvable})
     c.add("R5", not nobudget, "no TargetPressureConfigError ('leaving no pressure budget') in any run log", nobudget or "clean")
 
 
