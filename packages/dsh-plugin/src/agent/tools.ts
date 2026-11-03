@@ -1237,7 +1237,7 @@ interface CtxExpandArgs {
  * (Phase 3 slice) — OpenCode-shaped parts with tool-result folding, walking
  * the WHOLE log so ctx_expand can recover shadowed/compacted content.
  */
-function readRawMessagesFromAgent(agent: Agent): RawMessage[] {
+export function readRawMessagesFromAgent(agent: Agent): RawMessage[] {
   return convertDshEventsToRawMessages(sessionEvents(agent.session));
 }
 

@@ -36,6 +36,7 @@ import { createTestDb } from "../test-utils";
 import { transcriptRawMessageProvider } from "./historian-wiring";
 import { createMagicSummarizeHook, runDshHistorian, type DshSummarizeCall } from "./historian";
 import { initializeDshAdapterTables } from "./outbox";
+import { readRawMessagesFromAgent } from "./tools";
 
 const FIXTURE = join(import.meta.dir, "fixtures", "rc5-two-native-compactions.session.jsonl");
 const SID = "dsh:7114782d:session-5b23fe35-a0c3-448f-9217-e02fc2c4beec";
@@ -278,5 +279,13 @@ describe("history ordinals across DSH native compactions (real rc.5 log, run 416
     const checkpoint2 = surfaceMessageId(events.find((e) => e.seq === 148)!);
     const p29 = at144.readMessageOrdinalById(fullId(at144.readMessages(), ID_P29_REPLY))!;
     expect(at150.readMessageOrdinalRangeById(checkpoint2)).toEqual({ first: 1, last: p29 - 1 });
+  });
+  it("ctx_expand numbers messages like the compartments (start=/end= of a compartment expand that compartment's messages)", () => {
+    for (const upto of [88, 102, 144, 150]) {
+      const agent = agentOf(sessionUpTo(upto));
+      const history = transcriptRawMessageProvider(agent, SID).readMessages();
+      const expand = readRawMessagesFromAgent(agent);
+      expect(expand.map((m) => [m.ordinal, m.id])).toEqual(history.map((m) => [m.ordinal, m.id]));
+    }
   });
 });
