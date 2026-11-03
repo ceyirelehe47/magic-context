@@ -1,0 +1,97 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/backstop-no-shrink.test.ts:
+135 |   it("A (41642823892): region = only the previous checkpoint copy, covered → no compaction/start, no error, visible skip diagnostic", async () => {
+136 |     const r = await rig("rc5-r10-backstop-checkpoint-only.session.jsonl", "rc5-r10-compartments.json", (c) => c.end <= 7);
+137 |     try {
+138 |       const out = await r.check();
+139 |       // Pre-fix: compaction/start + compaction/end{error:"summary is not smaller … (820 … >= 473)"}.
+140 |       expect(out.compactionEvents.map((e) => [e.type, e.data.error ?? null])).toEqual([]);
+                                                                                    ^
+error: expect(received).toEqual(expected)
+
+- []
++ [
++   [
++     "compaction/start",
++     null,
++   ],
++   [
++     "compaction/end",
++     "summary is not smaller than the shadowed content (820 estimated framed tokens >= 473)",
++   ],
++ ]
+
+- Expected  - 1
++ Received  + 10
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/backstop-no-shrink.test.ts:140:79)
+(fail) R10: MC main backstop over a region that cannot shrink (real rc.5 logs) > A (41642823892): region = only the previous checkpoint copy, covered → no compaction/start, no error, visible skip diagnostic [329.26ms]
+166 |     const comps = JSON.parse(readFileSync(join(FIX, "rc5-r10b-compartments.json"), "utf8")) as Comp[];
+167 |     const r = await rig("rc5-r10b-backstop-checkpoint-uncovered.session.jsonl", "rc5-r10b-compartments.json", (c) => c.end <= 5, (chunk) => xmlFor(comps.find((c) => c.start === 6)!, chunk));
+168 |     try {
+169 |       const out = await r.check();
+170 |       // Pre-fix: the mini-historian ran over 6-7 and the commit failed "not smaller".
+171 |       expect(out.compactionEvents.map((e) => [e.type, e.data.error ?? null])).toEqual([]);
+                                                                                    ^
+error: expect(received).toEqual(expected)
+
+- []
++ [
++   [
++     "compaction/start",
++     null,
++   ],
++   [
++     "compaction/end",
++     "summary is not smaller than the shadowed content (424 estimated framed tokens >= 237)",
++   ],
++ ]
+
+- Expected  - 1
++ Received  + 10
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/backstop-no-shrink.test.ts:171:79)
+(fail) R10: MC main backstop over a region that cannot shrink (real rc.5 logs) > B (41640093586): checkpoint copy whose tail is uncovered → skipped BEFORE the mini-historian (no LLM call, no compaction/end error) [607.82ms]
+182 |   it("the skip never disables the backstop: new history beyond the retained tail → the next check compacts and clears the diagnostic", async () => {
+183 |     const comps = JSON.parse(readFileSync(join(FIX, "rc5-r10-compartments.json"), "utf8")) as Comp[];
+184 |     const r = await rig("rc5-r10-backstop-checkpoint-only.session.jsonl", "rc5-r10-compartments.json", (c) => c.end <= 7, (chunk) =>
+185 |       xmlFor({ start: chunk.startIndex, end: chunk.endIndex, title: "Listed the workspace and read the pressure fixtures", content: comps[3]!.content }, chunk));
+186 |     try {
+187 |       expect((await r.check()).compactionEvents).toEqual([]);
+                                                       ^
+error: expect(received).toEqual(expected)
+
+- []
++ [
++   {
++     "data": {
++       "compactionId": "5666dddf-9e04-4d86-a416-4cc5ee577085",
++       "turn": 2,
++     },
++     "seq": 66,
++     "time": 1793719812657,
++     "type": "compaction/start",
++   },
++   {
++     "data": {
++       "compactionId": "5666dddf-9e04-4d86-a416-4cc5ee577085",
++       "error": "summary is not smaller than the shadowed content (820 estimated framed tokens >= 473)",
++       "turn": 2,
++     },
++     "seq": 67,
++     "time": 1793719812661,
++     "type": "compaction/end",
++   },
++ ]
+
+- Expected  - 1
++ Received  + 21
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/backstop-no-shrink.test.ts:187:50)
+(fail) R10: MC main backstop over a region that cannot shrink (real rc.5 logs) > the skip never disables the backstop: new history beyond the retained tail → the next check compacts and clears the diagnostic [305.60ms]
+
+ 0 pass
+ 3 fail
+ 3 expect() calls
+Ran 3 tests across 1 file. [2.04s]
