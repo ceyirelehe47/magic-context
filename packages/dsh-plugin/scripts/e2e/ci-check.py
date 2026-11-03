@@ -845,25 +845,43 @@ def check_y(c, out: Path, runs):
           and all(v == "ok" for v in integ.values()) and other_same,
           "outbox settled after restart; SQLite integrity_check ok after the kill and each restart; the other session (scenario X) unchanged",
           {"outbox": ob, "integrity": integ, "otherSessionUnchanged": other_same})
-    # Y6 — raw data: every y-1 tool result emitted before the kill is in the DSH log, whole; the later turns appended
+    # Y6 — raw data: what y-1 emitted before the kill is either whole in the DSH
+    # log, or explicitly recorded by DSH as TOOL_OUTCOME_UNKNOWN (the step was
+    # in flight: emitted on stdout, not yet durable — DSH's own restore marks it);
+    # never a partial original. The later turns are appended to the same session.
     emitted = []
     for e in events(out / "y-1.log"):
         if e.get("type") == "tool_result":
             mm = re.search(r"MOCKSTEP:y1:(\d+)", json.dumps(e))
             if mm:
                 emitted.append(int(mm.group(1)))
-    texts = []
+    calls = {}    # callId -> file k (y1-zh<k>)
+    results = {}  # callId -> (marker k or None, whole, outcome unknown)
     for e in events(out / "y-session.jsonl"):
+        dat = e.get("data") or {}
+        if e.get("type") == "tool/call":
+            mm = re.search(r"y1-zh(\d+)", json.dumps(dat))
+            if mm:
+                calls[dat.get("callId")] = int(mm.group(1))
         if e.get("type") == "tool/result":
-            for b in ((e.get("data") or {}).get("message") or {}).get("content") or []:
-                if isinstance(b, dict) and isinstance(b.get("text"), str):
-                    texts.append(b["text"])
-    whole = {k: any(t.count(f"MOCKSTEP:y1:{k}") >= 2 for t in texts) for k in set(emitted)}
+            msg = dat.get("message") or {}
+            text = "".join(b.get("text", "") for b in (msg.get("content") or []) if isinstance(b, dict))
+            mm = re.findall(r"MOCKSTEP:y1:(\d+)", text)
+            results[msg.get("toolCallId") or (msg.get("source") or {}).get("callId")] = (
+                int(mm[0]) if mm else None, len(mm) >= 2, (dat.get("error") or {}).get("code") == "TOOL_OUTCOME_UNKNOWN")
+    by_k = {k: results.get(cid) for cid, k in calls.items()}
+    whole = sorted(k for k, r in by_k.items() if r and r[0] == k and r[1])
+    unknown = sorted(k for k, r in by_k.items() if r and r[2])
+    partial = sorted(k for k, r in by_k.items() if r and r[0] is not None and not r[1])
+    missing = sorted(k for k, r in by_k.items() if r is None)
+    accounted = {k: (k in whole) or (k in unknown) for k in set(emitted)}
     sess_text = (out / "y-session.jsonl").read_text(errors="replace") if (out / "y-session.jsonl").exists() else ""
     later = all(f"[[MOCK:{p}]]" in sess_text for p in ("y2", "y3"))
-    c.add("Y6", bool(emitted) and all(whole.values()) and later,
-          "raw data intact: every tool result y-1 emitted before the kill is whole (head + tail marker) in the DSH session log; the y-2 / y-3 turns appended to the same session",
-          {"emittedBeforeKill": sorted(set(emitted)), "wholeInLog": whole, "laterTurnsAppended": later, "toolResults": len(texts)})
+    c.add("Y6", bool(emitted) and bool(whole) and not partial and not missing and all(accounted.values()) and later,
+          "raw data: every y-1 tool result is whole in the DSH session log or explicitly TOOL_OUTCOME_UNKNOWN (in flight at the kill, recorded by DSH's restore); no partial original; every call has a result; the y-2 / y-3 turns appended to the same session",
+          {"emittedBeforeKill": sorted(set(emitted)), "wholeInLog": whole, "partial": partial,
+           "outcomeUnknown(DSH)": unknown, "noResult": missing, "accounted": accounted,
+           "laterTurnsAppended": later})
 
 
 def k_rows(out: Path):

@@ -76,3 +76,14 @@ Push run 41642824046 hit it in the two-process unit case (A died before its
 first event, the old `codeA != 0` assertion hid why). Fixed in the test (DB
 migrated once before spawning; A must log its crash point); 12/12 under
 parallel load locally.
+
+## e2e 41642823892 @ `74de2508f`
+
+91 PASS / 2 FAIL. R10 again (backstop "summary is not smaller … 819 >= 475",
+second occurrence; see known limitation 18 (f)). Y6 FAIL was the check: the
+kill landed after read #2 was printed on stdout but before DSH made it
+durable; DSH's restore recorded `TOOL_OUTCOME_UNKNOWN` for that call (by
+design). Y6 now requires "whole or TOOL_OUTCOME_UNKNOWN per call, no partial
+original, every call has a result" (re-judged: 41642823892 / 41640093586 /
+local all PASS). Checks job of this run passed; the push run on the same
+commit (41642824046) hit the concurrent-first-migration flake.

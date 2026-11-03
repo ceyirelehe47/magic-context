@@ -1479,8 +1479,8 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       after-COMMIT point; (e) in real DSH the busy probe's dead-owner branch
       is not directly observable at the first step (the first pass already
       reclaimed the row before the step observer runs); it is covered by the
-      cross-process unit cases; (f) **observed once, not fixed (P1
-      candidate):** e2e 41640093586 R10 — in scenario L two consecutive
+      cross-process unit cases; (f) **observed twice, not fixed (P1
+      candidate):** e2e 41640093586 and 41642823892 ("819 >= 475") R10 — in scenario L two consecutive
       backstop checks at 38.2 % / 39.6 % (≥ 36 % on that route) right after a
       committed compaction failed with compaction-basic's "summary is not
       smaller than the shadowed content (423 estimated framed tokens >= 239)":
@@ -1502,7 +1502,14 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       (`evidence-round23c/repro-concurrent-first-migration.*`); it made the
       two-process unit case flaky on CI (push run 41642824046). That case now
       migrates the shared DB once before spawning (an existing DB, as for any
-      second DSH process) and asserts process A died at the injected point.
+      second DSH process) and asserts process A died at the injected point;
+      (h) **DSH behaviour under kill -9 (verified, by design):** a tool result
+      already printed on headless stdout may not be durable yet; on resume DSH
+      records that call as `TOOL_OUTCOME_UNKNOWN` ("interrupted … outcome is
+      unknown … retry only if read-only or idempotent") instead of the output
+      (e2e 41642823892: read #2 emitted, then killed). Magic tags that
+      synthesized result after the restart (tag 3 in y-2); no partial original
+      ever reaches the log. Y6 accepts exactly "whole or TOOL_OUTCOME_UNKNOWN".
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
