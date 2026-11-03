@@ -156,6 +156,41 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     }
   }
 
+  /**
+   * Observability (round 19): one log line per automatic native compaction
+   * region (pressure or overflow recovery — `compactNow` does not come through
+   * here), with the pre-compaction pressure as a percentage of the routed
+   * window, so the e2e can prove native compaction never pre-empts MC.
+   */
+  override async compactRegion(
+    start: Parameters<BasicCompactionEngine["compactRegion"]>[0],
+    end: Parameters<BasicCompactionEngine["compactRegion"]>[1],
+    agent: Agent,
+    signal?: AbortSignal,
+  ): Promise<CompactionResult> {
+    try {
+      const session = agent.session as unknown as { requestHeader?: () => { config?: { provider?: string; model?: string } } | undefined };
+      const target = session.requestHeader?.()?.config;
+      const ctx = this.ctx as unknown as {
+        tokenMeter?: { measure(s: unknown): { totalTokens: number } };
+        llm?: { resolveModelInfo?(p: string, m: string): Promise<{ context?: { contextWindow?: number } }> };
+        logger?: { info?(m: string): void };
+      };
+      const tokens = ctx.tokenMeter?.measure(agent.session).totalTokens;
+      const window =
+        target?.provider && target.model
+          ? (await ctx.llm?.resolveModelInfo?.(target.provider, target.model))?.context?.contextWindow
+          : undefined;
+      const pct = tokens !== undefined && window ? Math.round((tokens / window) * 1000) / 10 : undefined;
+      ctx.logger?.info?.(
+        `[magic-context] native compaction region: child=${isDshChildSession(agent)} tokens=${tokens ?? "?"} window=${window ?? "?"} pct=${pct ?? "?"}`,
+      );
+    } catch {
+      // observability only
+    }
+    return super.compactRegion(start, end, agent, signal);
+  }
+
   /** Run `fn` with `config` visible to its synchronous prefix only. */
   private withPressureConfig<T>(config: ResolvedConfig, fn: () => Promise<T>): Promise<T> {
     const self = this as unknown as { config: ResolvedConfig };

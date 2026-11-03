@@ -17,6 +17,8 @@
 #   use-*             round 17 U: ctx_search / ctx_memory / ctx_expand in it
 #   child-parent      round 17/18 S: `subagent` child on a 24k route reads eight
 #                     <8 KB files until compaction-basic must summarize
+#   pnew-* / pold-*   round 19 P: native pressure compaction vs MC 65 % on an
+#                     80k main route (shipped policy vs explicit DSH defaults)
 # Everything lands in $CI_OUT (default $E2E_ROOT/ci); ci-check.py judges it.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -214,6 +216,45 @@ fi
 if [[ -n "$KID" ]]; then
   decode_session "$KID" "$OUT/child-session.jsonl"
   [[ -f "$DB" ]] && bun "$HERE/ci-db.ts" "$DB" "$KID" > "$OUT/db-child.json"
+fi
+unset MC_E2E_MAIN_PROVIDER
+
+# ============================ round 19 scenario P ============================
+# Native pressure compaction vs MC on an 80k main route (MC 65 % unchanged).
+#   P-new  shipped policy: MC-led (headroom 0, ratio = MC force band 85 %);
+#          the session is pushed past 65 % so MC's historian fires first and
+#          no native compaction may happen below 65 %.
+#   P-old  the pre-round-19 policy (compaction-basic defaults set explicitly,
+#          patch-r19-dsh-default.yml): measures where native compaction fired.
+export MC_E2E_MAIN_PROVIDER=opencode-go-80k
+P_MODEL_KEY="opencode-go-80k/deepseek-v4.1-flash"
+export OPENCODE_SESSION="mc-ci-pnew-$(date +%s)"
+run pnew-01 "Reply with the single word: ready."
+PNSID="$(session_of "$OUT/pnew-01.log")"
+echo "$PNSID" > "$OUT/pnew.sid"
+if [[ -n "$PNSID" ]]; then
+  k=2
+  for pair in "src/agent/knowledge-gate.ts src/host/remote.ts" "src/agent/context-plane.ts src/agent/historian.ts" \
+              "src/agent/dreamer.ts src/agent/nudge.ts" "src/agent/pressure-truncation.ts src/agent/outbox.ts" \
+              "src/host/meter.ts src/agent/auto-search.ts"; do
+    set -- $pair
+    name="pnew-$(printf %02d "$k")"
+    run "$name" "Read the file $1 with the read tool (whole file), then read the file $2 with the read tool (whole file), one after the other. Then tell me the name of the first exported function or constant in each. Two short sentences." "$PNSID"
+    r17_db session "$DB" "$PNSID" 65 "$P_MODEL_KEY" > "$OUT/db-$name.json"
+    k=$((k + 1))
+    grep -q 'historian trigger: pct=[0-9]* threshold=65 .* fires=true' "$OUT/$name.log" && break
+  done
+  run "pnew-$(printf %02d "$k")" "Without calling any tool: in one sentence, which files did you read in this session?" "$PNSID"
+  decode_session "$PNSID" "$OUT/pnew-session.jsonl"
+fi
+export OPENCODE_SESSION="mc-ci-pold-$(date +%s)"
+EXTRA_PATCH="$HERE/patch-r19-dsh-default.yml" run pold-01 "Reply with the single word: ready."
+POSID="$(session_of "$OUT/pold-01.log")"
+echo "$POSID" > "$OUT/pold.sid"
+if [[ -n "$POSID" ]]; then
+  EXTRA_PATCH="$HERE/patch-r19-dsh-default.yml" run pold-02 "Read the file src/agent/knowledge-gate.ts with the read tool (whole file), then read the file src/host/remote.ts with the read tool (whole file). Then tell me the name of the first exported function or constant in each. Two short sentences." "$POSID"
+  EXTRA_PATCH="$HERE/patch-r19-dsh-default.yml" run pold-03 "Without calling any tool: in one sentence, which files did you read in this session?" "$POSID"
+  decode_session "$POSID" "$OUT/pold-session.jsonl"
 fi
 unset MC_E2E_MAIN_PROVIDER
 

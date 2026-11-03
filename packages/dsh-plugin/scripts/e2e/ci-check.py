@@ -22,6 +22,12 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       child, Magic wrote no child rows, child finished, result reached the parent
   U*  round 17: ctx_search / ctx_memory / ctx_expand used once each; the
       settings-page readout and /ctx-status agree with the DB; doctor clean
+  R*  round 19: native pressure compaction vs MC on an 80k main route —
+      R1 no native compaction below 65 % in the MC-led session, R2 MC's
+      historian fired first (pct >= 63, threshold 65), R3 the session passed
+      the old DSH-default threshold (13 %) without native compaction, R4 the
+      pre-round-19 policy (explicit DSH defaults) measured firing < 65 %,
+      R5 no "leaving no pressure budget" config error in any run
   P1  no dsh process left after the runs
 """
 import json
@@ -33,6 +39,8 @@ from pathlib import Path
 ALLOWED_CHILD_TOOLS = {"read", "grep", "glob", "fs_search"}
 MASKED = ("bash", "write", "edit", "ctx_search", "ctx_reduce")
 TAG_PREFIX = re.compile(r"^\s*§(\d+)§")
+NATIVE = re.compile(r"native compaction region: child=(true|false) tokens=(\S+) window=(\S+) pct=([0-9.]+|\?)")
+NO_BUDGET = "leaving no pressure budget"
 TRIGGER = re.compile(r"historian trigger: pct=(\d+) threshold=(\d+) budget=(\d+) window=(\d+) fires=(true|false)")
 CODEWORD = os.environ.get("MC_E2E_CODEWORD", "AMBER-FALCON-7319")
 MC_SESSION_TABLES = ("compartments", "compartment_history_versions", "dsh_context_compaction_marker",
@@ -369,6 +377,64 @@ def check_r17_child(c, out: Path, runs):
           {"parentHits": phits, "childHits": chits, "of": len(sums), "parent": ptext[:200], "child": ctext[:200]})
 
 
+def ordered_pressure_events(path: Path):
+    """[("mc", pct, fires) | ("native", pct, child)] in log order."""
+    if not path.exists():
+        return []
+    text = path.read_text(errors="replace")
+    evs = [(m.start(), ("mc", int(m.group(1)), m.group(5) == "true")) for m in TRIGGER.finditer(text)]
+    evs += [(m.start(), ("native", float(m.group(4)) if m.group(4) != "?" else None, m.group(1) == "true"))
+            for m in NATIVE.finditer(text)]
+    return [e for _, e in sorted(evs)]
+
+
+def check_r19(c, out: Path, runs):
+    window, max_tokens = 80000, 4096
+    old_threshold = min(0.8 * window, window - max_tokens - 65536)
+    old_pct = round(100 * old_threshold / window, 1)
+    pnew = sorted(n for n in runs if n.startswith("pnew-"))
+    pold = sorted(n for n in runs if n.startswith("pold-"))
+    bad = {n: runs[n][1] for n in pnew + pold if not runs[n][1].startswith("rc=0")}
+    c.add("R0", bool(pnew) and bool(pold) and not bad, "scenario P runs exit 0", bad or {"pnew": len(pnew), "pold": len(pold)})
+    seq = [(n, e) for n in pnew for e in ordered_pressure_events(out / f"{n}.log")]
+    native = [(n, e[1]) for n, e in seq if e[0] == "native" and not e[2]]
+    mc_fire = next(((n, e[1]) for n, e in seq if e[0] == "mc" and e[2]), None)
+    thresholds = sorted({t[1] for n in pnew for t in triggers(out / f"{n}.log")})
+    first_native_idx = next((i for i, (_, e) in enumerate(seq) if e[0] == "native" and not e[2]), None)
+    first_fire_idx = next((i for i, (_, e) in enumerate(seq) if e[0] == "mc" and e[2]), None)
+    sev = session_events(out / "pnew-session.jsonl")
+    starts = [e.get("type") for e in sev].count("compaction/start")
+    mc_pcts = [e[1] for _, e in seq if e[0] == "mc"]
+    tok = [x[2] for n in pnew for x in run_steps(out / f"{n}.log")]
+    max_prompt_pct = round(100 * max(tok) / window, 1) if tok else 0
+    max_pct = max(mc_pcts + [max_prompt_pct] or [0])
+    c.add("R1", bool(pnew) and all(p is not None and p >= 65 for _, p in native),
+          "MC-led main session: no native pressure compaction below 65 %",
+          {"nativeRegions": native, "compactionStartEvents": starts, "maxTriggerPct": max(mc_pcts or [0]),
+           "maxPromptPct": max_prompt_pct})
+    c.add("R2", mc_fire is not None and thresholds == ["65"] and mc_fire[1] >= 63
+          and (first_native_idx is None or first_fire_idx < first_native_idx),
+          "MC historian fired first (pct >= 63, threshold 65) — MC leads, native is only the backstop",
+          {"firstFire": mc_fire, "thresholds": thresholds, "nativeBeforeFire": first_native_idx is not None
+           and (first_fire_idx is None or first_native_idx < first_fire_idx)})
+    c.add("R3", max_pct > old_pct and not [p for _, p in native if p is not None and p < 65],
+          f"session passed the old DSH-default threshold ({old_pct} %) with no native compaction there",
+          {"oldDefaultPct": old_pct, "maxPct": max_pct})
+    oseq = [(n, e) for n in pold for e in ordered_pressure_events(out / f"{n}.log")]
+    onative = [(n, e[1]) for n, e in oseq if e[0] == "native" and not e[2]]
+    osev = session_events(out / "pold-session.jsonl")
+    c.add("R4", bool(onative) and onative[0][1] is not None and onative[0][1] < 65,
+          "pre-round-19 policy (explicit DSH defaults) measured: native compaction fired below MC's 65 %",
+          {"firstNativePct": onative[0][1] if onative else None, "nativeRegions": onative[:4],
+           "compactionStartEvents": [e.get("type") for e in osev].count("compaction/start"), "oldDefaultPct": old_pct})
+    nobudget = {}
+    for p_ in sorted(out.glob("*.log")):
+        n = p_.read_text(errors="replace").count(NO_BUDGET)
+        if n:
+            nobudget[p_.name] = n
+    c.add("R5", not nobudget, "no TargetPressureConfigError ('leaving no pressure budget') in any run log", nobudget or "clean")
+
+
 def check(out: Path) -> int:
     c = Checks()
     runs = {}
@@ -458,6 +524,7 @@ def check(out: Path) -> int:
     # --- round 17 scenarios
     check_r17(c, out, runs)
     check_r17_child(c, out, runs)
+    check_r19(c, out, runs)
 
     # --- P: process hygiene
     left = (out / "leftover-procs.txt").read_text().split() if (out / "leftover-procs.txt").exists() else []

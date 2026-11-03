@@ -8,6 +8,9 @@
 #   opencode-go-40k  same model, 40k window: round 17 scenario C (main session
 #                    pushed past the UNCHANGED 65 % execute threshold in a
 #                    handful of real turns) and the parent of scenario S
+#   opencode-go-80k  same model, 80k window: round 19 scenario P (native
+#                    pressure compaction must stay behind MC's 65 %; the DSH
+#                    default would fire at min(0.8w, w-4096-65536) = 13 %)
 #   opencode-go-child same model, 24k window, 2048 output: the delegated child
 #                    of scenario S (patch-r17-child.yml routes `subagent` here
 #                    and gives compaction-basic a small-window policy for it)
@@ -52,6 +55,17 @@
         models:
           - id: deepseek-v4.1-flash
             contextWindow: 40000
+            maxTokens: 4096
+      opencode-go-80k:
+        displayName: OpenCode Go (80k)
+        apiKeyEnv: OPENCODE_API_KEY
+        api: openai-completions
+        baseURL: https://opencode.ai/zen/go/v1
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: deepseek-v4.1-flash
+            contextWindow: 80000
             maxTokens: 4096
       opencode-go-child:
         displayName: OpenCode Go (24k child)
