@@ -80,6 +80,7 @@ window.__ModuleLoader__.load({
 			src_dsh: ["DSH override", "DSH 覆盖"],
 			src_jsonc: ["magic-context.jsonc", "magic-context.jsonc"],
 			src_default: ["core default", "核心默认"],
+			src_profile: ["profile row (cordis.patch.yml)", "配置行（cordis.patch.yml）"],
 			f_enabled: ["Enabled", "启用"],
 			f_enabled_hint: ["Pauses per-step Magic work live (tools stay listed).", "在线暂停每步的 MC 处理（工具仍保留）。"],
 			f_historianModel: ["Historian model", "Historian 模型"],
@@ -356,7 +357,7 @@ window.__ModuleLoader__.load({
 			return scaled(value / 1e6) + "M";
 		}
 		function sourceLabel(source) {
-			return source === "dsh" ? L("src_dsh") : source === "jsonc" ? L("src_jsonc") : L("src_default");
+			return source === "dsh" ? L("src_dsh") : source === "profile" ? L("src_profile") : source === "jsonc" ? L("src_jsonc") : L("src_default");
 		}
 		function displayValue(value) {
 			if (value === void 0 || value === null) return "—";

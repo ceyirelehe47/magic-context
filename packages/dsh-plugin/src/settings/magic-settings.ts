@@ -199,7 +199,11 @@ export function readMagicOverrides(config: unknown): MagicDshOverrides {
 
 // ------------------------------------------------------------- effective
 
-export type SettingSource = "dsh" | "jsonc" | "default";
+/**
+ * `profile` (round 22): an explicit value on the profile's `magic-agent` row
+ * (cordis.patch.yml / preset) that the agent plane runs with ahead of jsonc.
+ */
+export type SettingSource = "dsh" | "profile" | "jsonc" | "default";
 
 export interface EffectiveSetting<T> {
   readonly value: T;

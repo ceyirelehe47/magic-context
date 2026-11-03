@@ -94,11 +94,23 @@ export interface MagicContextHostService {
   registerRunningConfig?(fn: () => unknown): void;
   runningConfig?(): unknown;
   /**
+   * Round 22: explicit profile-row values of the hot keys (DSH override >
+   * row > jsonc) so the settings page shows what the agent really uses.
+   */
+  registerExplicitRowConfig?(fn: () => ExplicitRowConfig): void;
+  explicitRowConfig?(): ExplicitRowConfig;
+  /**
    * Current DSH override layer (dereferenced on every call, so live
    * `settings.mutate` edits apply without a remount). Optional for older
    * host stand-ins.
    */
   overrides?(): MagicDshOverrides;
+}
+
+/** Round 22: hot keys set explicitly on the profile's `magic-agent` row. */
+export interface ExplicitRowConfig {
+  readonly historianModel?: string;
+  readonly protectedTokens?: number;
 }
 
 /**
@@ -125,6 +137,7 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
   let nativePressure: ((agent: unknown) => number | undefined) | undefined;
   let historianBusy: ((agent: unknown) => boolean) | undefined;
   let runningConfig: (() => unknown) | undefined;
+  let explicitRow: (() => ExplicitRowConfig) | undefined;
   const host: MagicContextHostService = {
     ready,
     canonicalKey(dshSessionId: string): string {
@@ -157,6 +170,12 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
     },
     runningConfig(): unknown {
       return runningConfig?.();
+    },
+    registerExplicitRowConfig(fn: () => ExplicitRowConfig): void {
+      explicitRow = fn;
+    },
+    explicitRowConfig(): ExplicitRowConfig {
+      return explicitRow?.() ?? {};
     },
     overrides(): MagicDshOverrides {
       return readMagicOverrides(config);

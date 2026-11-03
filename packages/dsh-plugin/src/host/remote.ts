@@ -488,7 +488,29 @@ export function resetJsoncCache(): void {
 }
 
 function effectiveFor(host: MagicContextHostService): EffectiveMagicSettings {
-  return resolveEffectiveSettings(loadJsoncForHost(), host.overrides?.() ?? {});
+  return withExplicitRow(resolveEffectiveSettings(loadJsoncForHost(), host.overrides?.() ?? {}), host);
+}
+
+/**
+ * Round 22: the agent plane resolves the hot keys as DSH override > explicit
+ * profile row > jsonc. The jsonc-only view showed "default" for a row-set
+ * historian.model the agent was running with (real rc.5, scenario K).
+ */
+export function withExplicitRow(effective: EffectiveMagicSettings, host: MagicContextHostService): EffectiveMagicSettings {
+  let row: { historianModel?: string; protectedTokens?: number } = {};
+  try {
+    row = host.explicitRowConfig?.() ?? {};
+  } catch {
+    row = {};
+  }
+  let out = effective;
+  if (typeof row.historianModel === "string" && effective.historianModel.source !== "dsh") {
+    out = { ...out, historianModel: { value: row.historianModel, source: "profile" } };
+  }
+  if (typeof row.protectedTokens === "number" && effective.protectedTokens.source !== "dsh") {
+    out = { ...out, protectedTokens: { value: row.protectedTokens, source: "profile" } };
+  }
+  return out;
 }
 
 function pendingRestartFor(host: MagicContextHostService): PendingRestartChange[] {

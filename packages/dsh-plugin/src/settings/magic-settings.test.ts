@@ -192,6 +192,31 @@ describe("magicContext/settings + updateSettings (remote)", () => {
     expect(buildSettingsView(forms, host()).pendingRestart).toEqual([]);
   });
 
+  // Round 22 (real rc.5, scenario K): the profile row sets historian.model
+  // (cordis.patch.yml `magic-agent` config). The agent ran with it while the
+  // page showed "effective: none · default" — the view never knew the row.
+  it("round 22: an explicit profile-row historian.model / protected_tokens is shown as the effective value (source profile)", () => {
+    resetJsoncCache();
+    const { forms } = fakeForms();
+    const h = {
+      ...(host() as object),
+      explicitRowConfig: () => ({ historianModel: "opencode-go-big/deepseek-v4.1-flash", protectedTokens: 7000 }),
+    } as never;
+    const view = buildSettingsView(forms, h);
+    expect(view.effective.historianModel).toEqual({ value: "opencode-go-big/deepseek-v4.1-flash", source: "profile" });
+    expect(view.effective.protectedTokens).toEqual({ value: 7000, source: "profile" });
+    // A DSH settings override still wins over the row.
+    const o = {
+      ...(host({ historianModel: "x/y", protectedTokens: 8000 }) as object),
+      explicitRowConfig: () => ({ historianModel: "opencode-go-big/deepseek-v4.1-flash", protectedTokens: 7000 }),
+    } as never;
+    const v2 = buildSettingsView(forms, o);
+    expect(v2.effective.historianModel).toEqual({ value: "x/y", source: "dsh" });
+    expect(v2.effective.protectedTokens.source).toBe("dsh");
+    // No row values registered: jsonc/default as before.
+    expect(buildSettingsView(forms, host()).effective.historianModel.source).not.toBe("profile");
+  });
+
   it("writes through settings.mutate with the expected revision", async () => {
     const { forms, calls, user } = fakeForms();
     const result = await applySettingsUpdate(forms, host(), {

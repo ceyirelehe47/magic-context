@@ -445,6 +445,11 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   // The settings page (host bundle) compares the jsonc against what this
   // plane runs with, to show "running value · pending restart: new value".
   host.registerRunningConfig?.(() => live.startup());
+  // Round 22: the page shows a row-set hot key as the effective value.
+  host.registerExplicitRowConfig?.(() => ({
+    ...(explicitHot.historianModel !== undefined ? { historianModel: explicitHot.historianModel } : {}),
+    ...(explicitHot.contextProtectedTokens !== undefined ? { protectedTokens: explicitHot.contextProtectedTokens } : {}),
+  }));
   config = {
     ...config,
     context: withGetters(rowContext, {
