@@ -80,8 +80,8 @@ for (const sid of sidsArg.split(",").filter(Boolean)) {
 
 const memories = tables.has("memories")
   ? safe(() =>
-      (db.query("select id, status, category, superseded_by_memory_id sup, source_session_id src, content from memories order by id").all() as {
-        id: number; status: string; category: string; sup: number | null; src: string | null; content: string;
+      (db.query("select id, status, category, superseded_by_memory_id sup, source_session_id src, source_type st, project_path p, content from memories order by id").all() as {
+        id: number; status: string; category: string; sup: number | null; src: string | null; st: string | null; p: string | null; content: string;
       }[])
         .filter((m) => mentions(m.content).length > 0)
         .map((m) => ({ ...m, codes: mentions(m.content) })),

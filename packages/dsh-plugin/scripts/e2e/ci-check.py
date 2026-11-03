@@ -39,6 +39,7 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       key shown as "running · pending restart" (settings view, /ctx-status),
       hot key shown and applied live (protection floor), cleared by a restart;
       U12 the page's historian model is the one the agent runs with
+  U26 (round 25, scenario H) every memory under a project identity, no active exact duplicate
   U13–U25 (round 24b, scenario H) multi-session memory CORRECTNESS: four facts
       with codewords pinned in session A, historian >= 2 passes, restarts; the
       message lane returns the fact's own message, ctx_expand the original
@@ -1211,6 +1212,27 @@ def check_h(c, out: Path, runs):
     c.add("U25", bool(acomps) and bool(cm0) and not a_bad and not (csh & set(H_A_CODES)),
           "no cross-session mixing: A's compartments never carry B's new todo; C's <session-history> carries none of A's facts",
           {"aCompartmentsWithB": a_bad, "cSessionHistoryCodes": sorted(csh)})
+
+    # U26 (round 25, e2e 41682984222 U21: the historian re-promoted the todo under
+    # the raw directory, beside the agent's identity row) every scenario memory is
+    # stored under a resolved project identity and no exact duplicate is active
+    def _norm(t):
+        return re.sub(r"\s+", " ", (t or "").lower()).strip()
+    with_p = [m for m in mems if "p" in m]
+    raw_path = [(m["id"], m.get("st"), m.get("p")) for m in with_p if not str(m.get("p") or "").startswith(("git:", "dir:"))]
+    seen_keys, dups = {}, []
+    for m in mems:
+        if m.get("status", "active") not in ("active", "permanent"):
+            continue
+        k = (m.get("category"), _norm(m.get("content")))
+        if k in seen_keys:
+            dups.append((seen_keys[k], m["id"]))
+        else:
+            seen_keys[k] = m["id"]
+    c.add("U26", bool(with_p) and not raw_path and not dups,
+          "memory identity: every scenario memory under a git:/dir: project identity, no exact duplicate active",
+          {"rawPath": raw_path, "activeDuplicates": dups, "projectPaths": sorted({str(m.get("p")) for m in with_p}),
+           "sourceTypes": sorted({str(m.get("st")) for m in with_p}), "class": None if (with_p and not raw_path and not dups) else "product"})
 
 
 def check(out: Path) -> int:
