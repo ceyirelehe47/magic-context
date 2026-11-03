@@ -37,7 +37,8 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       /compact waits for the background pass, the timeout branch fails closed
   U7–U11 (round 22, scenario K) jsonc edited during one live turn: restart-only
       key shown as "running · pending restart" (settings view, /ctx-status),
-      hot key shown and applied live (protection floor), cleared by a restart
+      hot key shown and applied live (protection floor), cleared by a restart;
+      U12 the page's historian model is the one the agent runs with
   P1  no dsh process left after the runs
 """
 import json
@@ -671,6 +672,12 @@ def check_r22_k(c, out: Path, runs):
            "floorAfter": floors_post[:4], "hotAfter": hot_post[:3], "dbFloor": meta.get("protected_tokens_effective"),
            "historianModel": {"page": (sv.get("effective") or {}).get("historianModel"),
                               "agent": (steps1[-1].get("hotHistorianModel") if steps1 else None)}})
+    # U12 (round 22 fix 4f0b97a96) the page shows the historian model the agent runs with
+    page_hm = (sv.get("effective") or {}).get("historianModel") or {}
+    agent_hm = steps1[-1].get("hotHistorianModel") if steps1 else None
+    c.add("U12", bool(agent_hm) and page_hm.get("value") == agent_hm,
+          "settings page historian.model == the model the agent uses (profile-row value shown, source profile)",
+          {"page": page_hm, "agent": agent_hm})
     st2 = turn2.get("ctxStatus") or {}
     sv2 = turn2.get("settingsView") or {}
     c.add("U11", bool(turn2) and not (sv2.get("pendingRestart") or []) and "Pending restart" not in str(st2.get("text") or "")

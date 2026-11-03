@@ -9,7 +9,9 @@
 # while its pass still holds the lease (e2e-only hold,
 # MAGIC_CONTEXT_DSH_E2E_HISTORIAN_HOLD_MS). Explicit per-route values win over
 # the MC-led defaults (round 19), exactly as a user's own policy would; the
-# deferral code path is the same one the 90 % default takes.
+# deferral code path is the same one the 90 % default takes. compaction-basic
+# requires an explicit maxTokens on a headroom-0 policy (it would otherwise
+# derive maxTokens = headroomTokens = 0 and refuse the whole row).
 - id: magic-compaction
   config:
     auto: true
@@ -19,3 +21,4 @@
         headroomTokens: 0
         thresholdRatio: 0.48
         retainTokens: 4000
+        maxTokens: 4096
