@@ -66,7 +66,7 @@ jobs:
         continue-on-error: true
         run: bun run typecheck:dsh
 
-      - name: dsh-plugin test-file typecheck (*.test.ts, round 20; informational)
+      - name: dsh-plugin test-file typecheck (*.test.ts; gating since round 21)
         id: tc_tests
         continue-on-error: true
         run: |
@@ -103,13 +103,13 @@ jobs:
             echo "| step | outcome | pass | fail |"
             echo "|---|---|---|---|"
             echo "| typecheck:dsh | ${{ steps.tc_dsh.outcome }} | | |"
-            echo "| test-file typecheck (informational) | ${{ steps.tc_tests.outcome }} | | $(grep -c 'error TS' "$RUNNER_TEMP/tc-tests.log" 2>/dev/null) |"
+            echo "| test-file typecheck | ${{ steps.tc_tests.outcome }} | | $(grep -c 'error TS' "$RUNNER_TEMP/tc-tests.log" 2>/dev/null) |"
             echo "| core typecheck | ${{ steps.tc_core.outcome }} | | |"
             echo "| dsh-plugin | ${{ steps.t_dsh.outcome }} | $(count dsh-plugin pass) | $(count dsh-plugin fail) |"
             echo "| adapter-api | ${{ steps.t_api.outcome }} | $(count adapter-api pass) | $(count adapter-api fail) |"
             echo "| contracts:dsh | ${{ steps.t_contracts.outcome }} | $(count contracts pass) | $(count contracts fail) |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          for o in "${{ steps.tc_dsh.outcome }}" "${{ steps.tc_core.outcome }}" "${{ steps.t_dsh.outcome }}" \
+          for o in "${{ steps.tc_dsh.outcome }}" "${{ steps.tc_tests.outcome }}" "${{ steps.tc_core.outcome }}" "${{ steps.t_dsh.outcome }}" \
                    "${{ steps.t_api.outcome }}" "${{ steps.t_contracts.outcome }}"; do
             [ "$o" = "success" ] || exit 1
           done
