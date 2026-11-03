@@ -28,6 +28,7 @@
  * Slice boundary: runRecomp / runWrapup seams are Phase 4 — not exported.
  */
 import type { Agent } from "@deepseek-ai/dsh-agent";
+import { e2eCrashPoint } from "./e2e-hooks";
 import { randomUUID } from "node:crypto";
 import { closeSync, openSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -608,8 +609,10 @@ function publishHistorianResult(args: PublishArgs): PublishResult {
         summary: markerSummary,
       });
     }
+    e2eCrashPoint("historian-publish");
     db.exec("COMMIT");
     published = true;
+    e2eCrashPoint("historian-published");
     return { ok: true, persistedIds, eventsPublished };
   } finally {
     if (!published) {
@@ -694,6 +697,7 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
   }
   const acquiredAt = Date.now();
   let e2eHeld = false;
+  e2eCrashPoint("historian-leased");
 
   const telemetry: Partial<HistorianRunInput> = { runKind: "incremental", status: "failed" };
   let completedSuccessfully = false;

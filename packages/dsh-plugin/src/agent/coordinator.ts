@@ -27,6 +27,7 @@
  * `start` (prepend), keeping the surface contiguous.
  */
 import { randomUUID } from "node:crypto";
+import { e2eCrashPoint } from "./e2e-hooks";
 import type { Session } from "@deepseek-ai/dsh-session";
 import {
   deriveEventMessage,
@@ -260,8 +261,10 @@ async function executePlan(
     inputDigest: plan.inputDigest,
     generation: plan.generation,
   });
+  e2eCrashPoint("outbox-pending");
   try {
     const { ackSeq } = applyPlanOps(host, session, plan);
+    e2eCrashPoint("surface-applied");
     markOutboxApplied(db, plan.opId, ackSeq);
     markOutboxCommitted(db, plan.opId);
     rememberAppliedOp(state, sessionId, plan.opId);

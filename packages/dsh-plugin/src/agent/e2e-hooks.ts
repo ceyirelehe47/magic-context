@@ -36,6 +36,14 @@
  *       the DSH command registry (scenario K: pending restart vs hot keys in
  *       one long process).
  *
+ *   MAGIC_CONTEXT_DSH_E2E_CRASH_AT=<point>
+ *       (round 23b, P0-2) SIGKILL this process at the named point — the
+ *       crash-recovery tests' fault injection. Points: outbox-pending (saga
+ *       row written, surface not replaced), surface-applied (surface replaced,
+ *       saga not acknowledged), historian-leased (lease taken, nothing
+ *       published), historian-publish (inside the publish transaction, before
+ *       COMMIT), historian-published (after COMMIT, before the lease release).
+ *
  * All output also goes to stderr as `[magic-context] e2e: …` lines (headless
  * prints console.error, not ctx.logger).
  */
@@ -48,6 +56,25 @@ export const E2E_COMPACT_AT_IDLE_ENV = "MAGIC_CONTEXT_DSH_E2E_COMPACT_AT_IDLE";
 export const E2E_FAKE_LEASE_ENV = "MAGIC_CONTEXT_DSH_E2E_FAKE_LEASE_MS";
 export const E2E_SUMMARIZE_LEASE_WAIT_ENV = "MAGIC_CONTEXT_DSH_E2E_SUMMARIZE_LEASE_WAIT_MS";
 export const E2E_STATUS_DUMP_ENV = "MAGIC_CONTEXT_DSH_E2E_STATUS_DUMP";
+export const E2E_CRASH_AT_ENV = "MAGIC_CONTEXT_DSH_E2E_CRASH_AT";
+
+export type E2eCrashPoint =
+  | "outbox-pending"
+  | "surface-applied"
+  | "historian-leased"
+  | "historian-publish"
+  | "historian-published";
+
+/**
+ * Round 23b (P0-2) fault injection: SIGKILL the process at `point` when the
+ * master gate and `MAGIC_CONTEXT_DSH_E2E_CRASH_AT=<point>` are set. Inert in
+ * production (one env read, returns).
+ */
+export function e2eCrashPoint(point: E2eCrashPoint, env: Env = process.env): void {
+  if (env[E2E_CRASH_AT_ENV] !== point || !e2eGateOpen(env)) return;
+  e2eSay(`crash point ${point}: SIGKILL pid ${process.pid}`);
+  process.kill(process.pid, "SIGKILL");
+}
 
 type Env = Record<string, string | undefined>;
 
