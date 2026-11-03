@@ -13,10 +13,47 @@
  * this machine. PID reuse can only make a dead owner read "alive" — the old
  * TTL-bounded wait, never a false "free" while the real owner lives.
  */
-import { isPidAlive } from "@magic-context/core/shared/rpc-utils";
+import { isPidAlive, readProcessStartTime } from "@magic-context/core/shared/rpc-utils";
 
-export function isLeaseOwnerGone(ownerPid: number | null | undefined): boolean {
+/**
+ * Round 25 (B2): tolerance between a row's `acquired_at` (Date.now() of the
+ * writer, same machine) and the owner's start time read from the OS (Linux:
+ * /proc btime + start ticks, 10 ms resolution). Kept small: a restart inside
+ * this window after the lease was taken falls back to the TTL (5 min).
+ */
+export const LEASE_PID_REUSE_TOLERANCE_MS = 5_000;
+
+/**
+ * Round 25 (B2): the pid is alive but its process started after the record was
+ * written (`acquiredAt`, the lease's last acquire/renew) — it cannot be the
+ * writer: the pid was reused, or it is this process's own pid inherited from a
+ * killed earlier process (containers restart the CLI under the same pid). Same
+ * rule as core's `isPidIdentityPlausible` for RPC port files. Unknown start
+ * time → false (unchanged behaviour).
+ */
+export function isPidNewerThan(pid: number, acquiredAt: number | null | undefined): boolean {
+  if (typeof acquiredAt !== "number" || !Number.isFinite(acquiredAt) || acquiredAt <= 0) return false;
+  const started = cachedStartTime(pid);
+  return started !== null && started > acquiredAt + LEASE_PID_REUSE_TOLERANCE_MS;
+}
+
+// A process's start time never changes; a short cache bounds the cost where the
+// probe spawns `ps` (macOS/BSD) on hot paths (backstop pressure checks).
+const START_TIME_CACHE_MS = 2_000;
+const startTimes = new Map<number, { at: number; value: number | null }>();
+function cachedStartTime(pid: number): number | null {
+  const now = Date.now();
+  const hit = startTimes.get(pid);
+  if (hit !== undefined && now - hit.at < START_TIME_CACHE_MS) return hit.value;
+  const value = readProcessStartTime(pid);
+  if (startTimes.size > 64) startTimes.clear();
+  startTimes.set(pid, { at: now, value });
+  return value;
+}
+
+export function isLeaseOwnerGone(ownerPid: number | null | undefined, acquiredAt?: number | null): boolean {
   if (ownerPid === null || ownerPid === undefined || ownerPid === 0) return false; // legacy row without a pid: trust the TTL
+  if (isPidNewerThan(ownerPid, acquiredAt)) return true;
   if (ownerPid === process.pid) return false;
   return isPidAlive(ownerPid) === "dead";
 }

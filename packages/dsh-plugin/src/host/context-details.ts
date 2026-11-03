@@ -152,14 +152,14 @@ export function readSessionContextDetails(input: ContextDetailsInput): MagicSess
   // → trust the flag.
   // Round 23c (P0-2): a lease whose owner process is confirmed dead does not
   // count either (SIGKILL inside the TTL window).
-  const leaseOwners = all<{ pid: number | null }>(
-    "SELECT owner_pid AS pid FROM compartment_state_lease WHERE session_id = ? AND expires_at > ?",
+  const leaseOwners = all<{ pid: number | null; at: number | null }>(
+    "SELECT owner_pid AS pid, acquired_at AS at FROM compartment_state_lease WHERE session_id = ? AND expires_at > ?",
     sid,
     Date.now(),
   );
   const inProgress =
     Number(meta.compartment_in_progress ?? 0) > 0 &&
-    (leaseOwners === undefined || leaseOwners.some((row) => !isLeaseOwnerGone(row.pid)));
+    (leaseOwners === undefined || leaseOwners.some((row) => !isLeaseOwnerGone(row.pid, row.at)));
   const failureCount = Number(meta.historian_failure_count ?? 0) || 0;
   const lastFailureAt = typeof meta.historian_last_failure_at === "number" ? meta.historian_last_failure_at : undefined;
   const lastCompartmentAt = typeof lastCompartment === "number" ? lastCompartment : undefined;

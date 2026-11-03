@@ -1,0 +1,10 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/lease-pid-reuse.test.ts:
+(pass) lease owner pid reused (round 25 B2) > isLeaseOwnerGone: an owner that started after the lease was taken is gone; the real owner is not [105.51ms]
+(pass) lease owner pid reused (round 25 B2) > a lease left by an earlier process with our pid: not busy, reclaimed (exact row), the next acquire succeeds [380.13ms]
+
+ 2 pass
+ 0 fail
+ 11 expect() calls
+Ran 2 tests across 1 file. [1299.00ms]

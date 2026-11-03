@@ -762,6 +762,7 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
     }
   }
 
+  reclaimDshLeaseOfGoneOwner(db, sessionId, log);
   const lease = acquireCompartmentLease(db, sessionId, holderId);
   if (lease === null) {
     log(`[magic-context] historian: compartment lease busy for ${sessionId}`);
@@ -947,7 +948,41 @@ export function isDshHistorianBusy(db: Database, sessionId: string): boolean {
   const blocker = getCompartmentLeaseBlocker(db, sessionId);
   // Round 23c (P0-2): an unexpired lease whose owner process is confirmed dead
   // (SIGKILL mid-pass) is not a running pass; the next acquire reclaims it.
-  return blocker !== null && !isLeaseOwnerGone(blocker.ownerPid);
+  return blocker !== null && !isLeaseOwnerGone(blocker.ownerPid, blocker.acquiredAt);
+}
+
+/**
+ * Round 25 (B2): delete the session's lease row when its owner is gone by the
+ * adapter's rule (dead pid, or a pid whose process started after the lease was
+ * taken — reused / earlier incarnation with our pid). Core's acquire reclaims
+ * only a DEAD pid, so without this a restarted DSH under the same pid waited
+ * out the 5-min TTL. Exact-row DELETE (core's reclaim statement), so a lease
+ * re-acquired in between is never touched. Returns true when a row was removed.
+ * Fail-open (false).
+ */
+export function reclaimDshLeaseOfGoneOwner(
+  db: Database,
+  sessionId: string,
+  log: (message: string) => void,
+): boolean {
+  try {
+    const blocker = getCompartmentLeaseBlocker(db, sessionId);
+    if (blocker === null || !isLeaseOwnerGone(blocker.ownerPid, blocker.acquiredAt)) return false;
+    const result = db
+      .prepare(
+        `DELETE FROM compartment_state_lease
+          WHERE session_id = ? AND holder_id = ? AND owner_pid = ?
+            AND acquired_at = ? AND expires_at = ?`,
+      )
+      .run(sessionId, blocker.holderId, blocker.ownerPid, blocker.acquiredAt, blocker.expiresAt) as { changes?: number };
+    if (result.changes === 1) {
+      log(`[magic-context] historian: reclaimed the compartment lease of ${sessionId} from a gone owner (holder=${blocker.holderId} pid=${blocker.ownerPid})`);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /* ──────────────────────── magicSummarize hook (Magic 压缩策略) ─────────────────────── */
@@ -1092,6 +1127,7 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
       // iff the last compartment's endMessage reaches the range's last ordinal.
       let rawOutput: string | undefined;
       let covered = getLastCompartmentEndMessage(deps.db, sessionId) >= lastOrdinal;
+      if (!covered) reclaimDshLeaseOfGoneOwner(deps.db, sessionId, log);
       let lease = covered ? null : acquireCompartmentLease(deps.db, sessionId, holderId);
       if (!covered && lease === null) {
         // Round 21: another (background) historian pass holds the lease. Wait
@@ -1110,6 +1146,7 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
             covered = true;
             break;
           }
+          reclaimDshLeaseOfGoneOwner(deps.db, sessionId, log);
           lease = acquireCompartmentLease(deps.db, sessionId, holderId);
           if (lease !== null) break;
         }
