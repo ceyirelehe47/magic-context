@@ -4,8 +4,8 @@
 //
 //   bun scripts/e2e/ci-history.ts <session.jsonl> <db-session.json> <promptNeedle>
 //
-// The decoded DSH session log is replayed by the real DSH `Session` (its own
-// surface fold). For the user prompt containing <promptNeedle> and for every
+// The decoded DSH session log (storage-form seq ranges expanded with DSH's own
+// `decodeSeqRanges`) is replayed by the real DSH `Session` (its own surface fold). For the user prompt containing <promptNeedle> and for every
 // file the model read after it (its `CHECKSUM: …` line from the read result),
 // it reports:
 //   - onSurface: the text is still in the model-visible surface view;
@@ -17,7 +17,7 @@
 // carries a compartment whose range reaches the read turn).
 // Prints JSON only; no secrets are read.
 import { readFileSync } from "node:fs";
-import { Session, SessionId } from "@deepseek-ai/dsh-session";
+import { decodeSeqRanges, Session, SessionId } from "@deepseek-ai/dsh-session";
 import { readRawMessagesFromAgent } from "../../src/agent/tools";
 import { readDshTranscript } from "../../src/agent/transcript";
 
@@ -32,7 +32,14 @@ const lines = readFileSync(sessionPath, "utf8")
   .filter((l) => l.trim().length > 0)
   .map((l) => JSON.parse(l) as Ev);
 const header = lines[0] as unknown as { id: string };
-const events = lines.slice(1);
+// Round 24c: DSH's JSONL storage form range-encodes `sourceEventSeqs` runs of
+// >= 3 consecutive seqs (`encodeSeqRanges`, e.g. [53, [57, 59]]); the in-memory
+// seed `Session.create` validates wants them expanded (e2e 41679402115 R14:
+// "invalid seed event at index 61 … sourceEventSeqs must densely contain …"
+// on a Magic op copy that shadowed three parallel read results).
+const events = lines.slice(1).map((e) =>
+  Array.isArray(e.sourceEventSeqs) ? { ...e, sourceEventSeqs: decodeSeqRanges(e.sourceEventSeqs) } : e,
+);
 const session = Session.create(SessionId(header.id), events as never);
 const agent = { session } as never;
 
