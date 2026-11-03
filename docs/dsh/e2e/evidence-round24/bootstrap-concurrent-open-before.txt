@@ -1,0 +1,68 @@
+bun test v1.4.4 (38afee6c8)
+
+src/host/bootstrap-concurrent-open.test.ts:
+31 |         directory: join(dir, "proj"), port: 0, dbPath, storageDirOverride: dir, homeHash: "a1b2c3d4",
+32 |         log: (m) => logs.push(m),
+33 |       }).finally(() => { settled = true; });
+34 |       await Bun.sleep(700);
+35 |       // A live holder (another DSH process mid-migration) must keep us out.
+36 |       expect(settled).toBe(false);
+                           ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/host/bootstrap-concurrent-open.test.ts:36:23)
+(fail) dsh bootstrap: concurrent first open of a fresh DB > waits while another live DSH process holds the open lock, then opens [777.95ms]
+60 |         directory: join(dir, "proj"), port: 0, dbPath, storageDirOverride: dir, homeHash: "a1b2c3d4",
+61 |         log: (m) => logs.push(m),
+62 |       });
+63 |       expect(outcome.kind).toBe("ok");
+64 |       expect(Date.now() - started).toBeLessThan(10_000);
+65 |       expect(logs.some((m) => m.includes("open lock") && m.includes("stale"))).toBe(true);
+                                                                                    ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/host/bootstrap-concurrent-open.test.ts:65:80)
+(fail) dsh bootstrap: concurrent first open of a fresh DB > takes over a lock whose holder process is dead (no wait for a crashed opener) [533.03ms]
+79 |         );
+80 |         const codes = await Promise.all(children.map((c) => c.exited));
+81 |         const errs = await Promise.all(children.map((c) => new Response(c.stderr).text()));
+82 |         const outs = await Promise.all(children.map((c) => new Response(c.stdout).text()));
+83 |         expect({ round, codes, errs: errs.map((e) => e.split("\n").filter((l) => l.includes("open failed") || l.includes("open refused"))) })
+84 |           .toEqual({ round, codes: [0, 0, 0], errs: [[], [], []] });
+                ^
+error: expect(received).toEqual(expected)
+
+  {
+    "codes": [
+      0,
+      0,
+-     0,
++     1,
+    ],
+    "errs": [
+      [],
+      [],
+-     [],
++     [
++       "open failed: [magic-context] storage unavailable: table temporal_decisions already exists. Magic Context is disabled for this run; check log for details.",
++     ],
+    ],
+    "round": 3,
+  }
+
+- Expected  - 2
++ Received  + 4
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/host/bootstrap-concurrent-open.test.ts:84:12)
+(fail) dsh bootstrap: concurrent first open of a fresh DB > three real processes opening one fresh DB at once all succeed (6 rounds) [3543.84ms]
+
+ 0 pass
+ 3 fail
+ 17 expect() calls
+Ran 3 tests across 1 file. [5.76s]

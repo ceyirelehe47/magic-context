@@ -1,0 +1,5 @@
+# before fix @ af30f30a6 (bootstrapDshStorage, fresh DB, N processes at once)
+iterations 48 procs/iteration 2 parallel 4
+bad iterations 8 bad processes 8
+  6 × open failed: [magic-context] storage unavailable: table temporal_decisions already exists. Magic Context is disabled for this run; check log for details.
+  2 × open failed: [magic-context] storage unavailable: index idx_message_fts_rowid_map_session_rowid already exists. Magic Context is disabled for this run; check lo
