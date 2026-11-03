@@ -13,7 +13,7 @@ import { join } from "node:path";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { Session, SessionId } from "@deepseek-ai/dsh-session";
 import { appendCompartments, getCompartments } from "@magic-context/core/features/magic-context/compartment-storage";
-import { acquireCompartmentLease } from "@magic-context/core/features/magic-context/compartment-lease";
+import { acquireCompartmentLease, releaseCompartmentLease } from "@magic-context/core/features/magic-context/compartment-lease";
 import type { ProtectedTailBoundarySnapshot } from "@magic-context/core/hooks/magic-context/protected-tail-boundary";
 import type { RawMessageProvider } from "@magic-context/core/hooks/magic-context/read-session-chunk";
 import type { Database } from "@magic-context/core/shared/sqlite";
@@ -29,6 +29,7 @@ import {
   checkDshCompartmentTrigger,
   consumeDshDeferredSignals,
   createMagicSummarizeHook,
+  isDshHistorianBusy,
   runDshHistorian,
   signalDshDeferredHistoryRefresh,
   signalDshDeferredMaterialization,
@@ -882,6 +883,169 @@ describe("createMagicSummarizeHook (Magic 压缩策略)", () => {
       ).rejects.toThrow(/mini-historian failed: llm call failed/);
       expect(getCompartments(db, SESSION_ID)).toHaveLength(0);
       expect(acquireCompartmentLease(db, SESSION_ID, "lease-probe")).not.toBeNull();
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+});
+
+// Round 21: a manual /compact (or a backstop that raced the busy probe) that
+// meets a background historian pass holding the compartment lease used to
+// throw "lease busy" at once (compaction/end error). The hook now waits for
+// the lease (bounded), re-checking coverage: the background pass usually
+// publishes exactly the range compaction needs.
+describe("createMagicSummarizeHook: waits for a busy lease (round 21)", () => {
+  const fakeAgent = { options: { provider: "test-provider", model: "test-model" } } as unknown as Agent;
+  function inputMessages(session: Session): unknown[] {
+    return providerOf(session).readMessages().map((m) => ({ id: m.id, role: m.role, content: [] }));
+  }
+  function deps(db: Database, session: Session, summarize: DshSummarizeCall, extra: Record<string, unknown>): MagicSummarizeDeps {
+    return {
+      db,
+      sessionId: SESSION_ID,
+      ctx: {},
+      provider: providerOf(session),
+      summarize,
+      directory: "C:/work/project",
+      leaseHolderId: "lease-hook",
+      ...extra,
+    } as MagicSummarizeDeps;
+  }
+  const threeCompartments = () =>
+    validHistorianXml(
+      [
+        { start: 1, end: 3, title: "intro" },
+        { start: 4, end: 7, title: "work" },
+        { start: 8, end: 10, title: "wrap" },
+      ],
+      11,
+    );
+
+  it("lease released while waiting: runs the mini-historian instead of failing", async () => {
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      expect(acquireCompartmentLease(db, SESSION_ID, "bg-pass")).not.toBeNull();
+      setTimeout(() => releaseCompartmentLease(db, SESSION_ID, "bg-pass"), 120);
+      let calls = 0;
+      const logs: string[] = [];
+      const hook = createMagicSummarizeHook(
+        deps(db, session, async () => {
+          calls += 1;
+          return threeCompartments();
+        }, { leaseWaitMs: 3_000, leasePollMs: 20, log: (m: string) => logs.push(m) }),
+      );
+      const result = await hook({ messages: inputMessages(session) as never }, fakeAgent);
+      expect(calls).toBe(1);
+      expect(result.summary[0]!.text).toContain("Narrative summary of 8-10.");
+      expect(logs.some((l) => /waiting for the compartment lease/.test(l))).toBe(true);
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it("the background pass covers the range while waiting: renders without an LLM call", async () => {
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      const view = providerOf(session).readMessages();
+      expect(acquireCompartmentLease(db, SESSION_ID, "bg-pass")).not.toBeNull();
+      setTimeout(() => {
+        appendCompartments(db, SESSION_ID, [
+          {
+            sequence: 0,
+            startMessage: 1,
+            endMessage: 10,
+            startMessageId: view[0]!.id,
+            endMessageId: view[9]!.id,
+            title: "bg",
+            content: "Background summary of 1-10.",
+            p1: "Background summary of 1-10.",
+            p2: "c",
+            p3: "o",
+            p4: "a",
+            importance: 50,
+            episodeType: "design",
+          },
+        ]);
+        releaseCompartmentLease(db, SESSION_ID, "bg-pass");
+      }, 120);
+      let calls = 0;
+      const hook = createMagicSummarizeHook(
+        deps(db, session, async () => {
+          calls += 1;
+          return threeCompartments();
+        }, { leaseWaitMs: 3_000, leasePollMs: 20 }),
+      );
+      const result = await hook({ messages: inputMessages(session) as never }, fakeAgent);
+      expect(calls).toBe(0);
+      expect(result.summary[0]!.text).toContain("Background summary of 1-10.");
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it("isDshHistorianBusy reflects a live lease of any holder", async () => {
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      expect(isDshHistorianBusy(db, SESSION_ID)).toBe(false);
+      expect(acquireCompartmentLease(db, SESSION_ID, "bg-pass")).not.toBeNull();
+      expect(isDshHistorianBusy(db, SESSION_ID)).toBe(true);
+      releaseCompartmentLease(db, SESSION_ID, "bg-pass");
+      expect(isDshHistorianBusy(db, SESSION_ID)).toBe(false);
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it("still busy after the bounded wait: fails closed with a clear message", async () => {
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      expect(acquireCompartmentLease(db, SESSION_ID, "bg-pass")).not.toBeNull();
+      const hook = createMagicSummarizeHook(
+        deps(db, session, async () => threeCompartments(), { leaseWaitMs: 150, leasePollMs: 20 }),
+      );
+      const started = Date.now();
+      await expect(hook({ messages: inputMessages(session) as never }, fakeAgent)).rejects.toThrow(
+        /lease busy .*after waiting/,
+      );
+      expect(Date.now() - started).toBeGreaterThanOrEqual(140);
+      db.close();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it("an abort while waiting stops the wait", async () => {
+    const env = makeEnv();
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      expect(acquireCompartmentLease(db, SESSION_ID, "bg-pass")).not.toBeNull();
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 60);
+      const hook = createMagicSummarizeHook(
+        deps(db, session, async () => threeCompartments(), { leaseWaitMs: 5_000, leasePollMs: 20 }),
+      );
+      const started = Date.now();
+      await expect(hook({ messages: inputMessages(session) as never }, fakeAgent, controller.signal)).rejects.toThrow(
+        /abort/i,
+      );
+      expect(Date.now() - started).toBeLessThan(2_000);
       db.close();
     } finally {
       await env.cleanup();

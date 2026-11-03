@@ -41,7 +41,7 @@ import {
   type SessionFact,
 } from "@magic-context/core/features/magic-context/compartment-storage";
 import { insertCompartmentEvents } from "@magic-context/core/features/magic-context/compartment-events";
-import { acquireCompartmentLease, isCompartmentLeaseHeld, releaseCompartmentLease } from "@magic-context/core/features/magic-context/compartment-lease";
+import { acquireCompartmentLease, getCompartmentLeaseBlocker, isCompartmentLeaseHeld, releaseCompartmentLease } from "@magic-context/core/features/magic-context/compartment-lease";
 import { promoteSessionFactsDurable } from "@magic-context/core/features/magic-context/memory/promotion";
 import {
   clearHistorianFailureState,
@@ -838,6 +838,16 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
   return completedSuccessfully;
 }
 
+/**
+ * Round 21: does a live historian pass (any holder) hold the compartment lease
+ * of `sessionId`? The agent plane exposes this to the compaction engine
+ * (`magicContextHost.historianBusy`) so the native pressure backstop defers
+ * instead of failing "lease busy". Expired leases do not count.
+ */
+export function isDshHistorianBusy(db: Database, sessionId: string): boolean {
+  return getCompartmentLeaseBlocker(db, sessionId) !== null;
+}
+
 /* ──────────────────────── magicSummarize hook (Magic 压缩策略) ─────────────────────── */
 
 /** Deps for the Magic compression strategy hook. */
@@ -859,9 +869,43 @@ export interface MagicSummarizeDeps {
   readonly chunkTokens?: number;
   /** Compartment-lease holder id for the mini-historian (default per-session). */
   readonly leaseHolderId?: string;
+  /**
+   * Round 21: how long the mini-historian waits for a compartment lease held
+   * by another (background) historian pass before failing closed. Default
+   * {@link DEFAULT_SUMMARIZE_LEASE_WAIT_MS}.
+   */
+  readonly leaseWaitMs?: number;
+  /** Poll interval while waiting for the lease (default 500 ms). */
+  readonly leasePollMs?: number;
   /** Provider/model resolution; default: the compacting agent's options. */
   readonly resolveModel?: (agent: Agent) => { provider: string; model: string };
   readonly log?: (message: string) => void;
+}
+
+/**
+ * Round 21: bounded wait for a busy compartment lease in the summarize hook
+ * (manual `/compact` while a background historian pass runs). A background
+ * pass is one historian LLM call over one chunk; 45 s covers the common case
+ * without letting `/compact` hang indefinitely.
+ */
+export const DEFAULT_SUMMARIZE_LEASE_WAIT_MS = 45_000;
+
+function sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("magic-context: summarize aborted while waiting for the compartment lease"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("magic-context: summarize aborted while waiting for the compartment lease"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /** Default provider/model resolution: the compacting agent's options. */
@@ -886,7 +930,9 @@ function defaultResolveModel(agent: Agent): { provider: string; model: string } 
  * 3. Not fully covered → run ONE synchronous mini-historian pass (same
  *    SummarizeCall) over the uncovered range [lastCompartmentEnd+1, lastOrdinal]
  *    with validation + atomic publication, then re-render.
- * 4. Failures (LLM / validation / publish / lease-busy) THROW — the official
+ * 4. Lease held by a background pass → wait (bounded, round 21) re-checking
+ *    coverage; still busy afterwards → throw.
+ * 5. Failures (LLM / validation / publish / lease-busy) THROW — the official
  *    compaction transaction closes the compaction/end with error (fail-closed).
  */
 export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHook {
@@ -933,16 +979,39 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
       // Coverage: stored compartments are contiguous from ordinal 1
       // (validateStoredCompartments invariant), so the range is fully covered
       // iff the last compartment's endMessage reaches the range's last ordinal.
-      const lastCompartmentEnd = getLastCompartmentEndMessage(deps.db, sessionId);
       let rawOutput: string | undefined;
-      if (lastCompartmentEnd < lastOrdinal) {
-        // Mini-historian: one synchronous pass over [lastCompartmentEnd+1, lastOrdinal].
-        const lease = acquireCompartmentLease(deps.db, sessionId, holderId);
-        if (lease === null) {
+      let covered = getLastCompartmentEndMessage(deps.db, sessionId) >= lastOrdinal;
+      let lease = covered ? null : acquireCompartmentLease(deps.db, sessionId, holderId);
+      if (!covered && lease === null) {
+        // Round 21: another (background) historian pass holds the lease. Wait
+        // for it — bounded — re-checking coverage: that pass usually publishes
+        // exactly the range this compaction needs.
+        const waitMs = Math.max(0, deps.leaseWaitMs ?? DEFAULT_SUMMARIZE_LEASE_WAIT_MS);
+        const pollMs = Math.max(1, deps.leasePollMs ?? 500);
+        const started = Date.now();
+        log(
+          `[magic-context] summarize: waiting for the compartment lease of ${sessionId} (a historian pass is running; up to ${Math.round(waitMs / 1000)}s)`,
+        );
+        while (Date.now() - started < waitMs) {
+          await sleepUnlessAborted(Math.min(pollMs, Math.max(1, waitMs - (Date.now() - started))), signal);
+          if (getLastCompartmentEndMessage(deps.db, sessionId) >= lastOrdinal) {
+            covered = true;
+            break;
+          }
+          lease = acquireCompartmentLease(deps.db, sessionId, holderId);
+          if (lease !== null) break;
+        }
+        if (!covered && lease === null) {
           throw new Error(
-            `magic-context: summarize mini-historian lease busy for ${sessionId} (another historian pass is running)`,
+            `magic-context: summarize mini-historian lease busy for ${sessionId} after waiting ${Math.round((Date.now() - started) / 1000)}s (a historian pass is still running; retry once it finishes)`,
           );
         }
+        log(
+          `[magic-context] summarize: lease wait ended after ${Date.now() - started}ms (${covered ? "range covered by the background pass" : "lease acquired"})`,
+        );
+      }
+      if (!covered && lease !== null) {
+        // Mini-historian: one synchronous pass over [lastCompartmentEnd+1, lastOrdinal].
         try {
           const result = await runHistorianPassCore({
             db: deps.db,

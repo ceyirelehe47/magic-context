@@ -79,6 +79,14 @@ export interface MagicContextHostService {
   registerNativePressurePercentage?(fn: (agent: unknown) => number | undefined): void;
   nativePressurePercentage?(agent: unknown): number | undefined;
   /**
+   * Round 21: the agent plane registers a probe telling whether a Magic
+   * historian pass holds the compartment lease of a session; the compaction
+   * engine defers the native pressure backstop while it does (no
+   * "lease busy" compaction error). Optional for older host stand-ins.
+   */
+  registerHistorianBusy?(fn: (agent: unknown) => boolean): void;
+  historianBusy?(agent: unknown): boolean;
+  /**
    * Current DSH override layer (dereferenced on every call, so live
    * `settings.mutate` edits apply without a remount). Optional for older
    * host stand-ins.
@@ -108,6 +116,7 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
   });
   let summarizeHook: MagicSummarizeHook | undefined;
   let nativePressure: ((agent: unknown) => number | undefined) | undefined;
+  let historianBusy: ((agent: unknown) => boolean) | undefined;
   const host: MagicContextHostService = {
     ready,
     canonicalKey(dshSessionId: string): string {
@@ -128,6 +137,12 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
     nativePressurePercentage(agent: unknown): number | undefined {
       // No agent plane yet: MC's default force band (the engine's own default).
       return nativePressure === undefined ? DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE : nativePressure(agent);
+    },
+    registerHistorianBusy(fn: (agent: unknown) => boolean): void {
+      historianBusy = fn;
+    },
+    historianBusy(agent: unknown): boolean {
+      return historianBusy === undefined ? false : historianBusy(agent);
     },
     overrides(): MagicDshOverrides {
       return readMagicOverrides(config);

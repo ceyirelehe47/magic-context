@@ -41,6 +41,7 @@ interface Rig {
   /** true when compaction-basic decided the session is over its pressure threshold. */
   fired: boolean;
   compactRegionCalls: number;
+  result: unknown;
 }
 
 async function probe(opts: {
@@ -51,8 +52,11 @@ async function probe(opts: {
   config?: Record<string, unknown>;
   /** host pressure hook: undefined = no hook registered; function = registered. */
   hook?: (agent: unknown, window: number) => number | undefined;
+  /** host historian-busy probe (round 21): undefined = not registered. */
+  busy?: (agent: unknown) => boolean;
+  logs?: string[];
 }): Promise<Rig> {
-  const rig: Rig = { fired: false, compactRegionCalls: 0 };
+  const rig: Rig = { fired: false, compactRegionCalls: 0, result: undefined };
   const header = {
     id: SessionId("s"),
     version: 4,
@@ -69,6 +73,7 @@ async function probe(opts: {
   const host = {
     summarizeHook: () => undefined,
     ...(opts.hook ? { nativePressurePercentage: opts.hook } : {}),
+    ...(opts.busy ? { historianBusy: opts.busy } : {}),
   };
   const ctx = new Context();
   const engine = new MagicCompactionEngine(ctx as never, { auto: false, ...(opts.config ?? {}) } as never);
@@ -77,6 +82,7 @@ async function probe(opts: {
       llm: {
         resolveModelInfo: async () => ({ context: { contextWindow: opts.window }, defaultMaxTokens: opts.maxTokens }),
       },
+      logger: { info: (m: string) => opts.logs?.push(m), warn: (m: string) => opts.logs?.push(`WARN ${m}`) },
       tokenMeter: {
         measure: () => ({
           totalTokens: total,
@@ -102,7 +108,7 @@ async function probe(opts: {
     return { shadowedSeqs: [], shadowedRange: { start: 0, end: 0 }, shadowedTokenCount: 0 };
   };
   const agent = { id: "s", session, options: { provider: "p", model: "m" } } as unknown as Agent;
-  await engine.compactIfNeeded(agent, "pressure", new AbortController().signal);
+  rig.result = await engine.compactIfNeeded(agent, "pressure", new AbortController().signal);
   return rig;
 }
 
@@ -217,5 +223,54 @@ describe("nativeBackstopPercentage (user decision 2026-11-03: native at 90 %)", 
     expect(nativeBackstopPercentage(80)).toBe(90);
     expect(nativeBackstopPercentage(88)).toBe(93);
     expect(nativeBackstopPercentage(97)).toBe(98);
+  });
+});
+
+// Round 21: a background historian pass holds the compartment lease; the 90 %
+// backstop's summarize would hit "lease busy" and close compaction/end with an
+// ERROR. The backstop must skip quietly (no error, accurate status) and the
+// next pressure check must retry.
+describe("native pressure backstop while a historian pass runs (round 21)", () => {
+  it("over the backstop with the historian busy: skips without error, logs a deferral, no compaction", async () => {
+    const logs: string[] = [];
+    const rig = await probe({ window: 131_072, maxTokens: 8_192, pct: 0.91, busy: () => true, logs });
+    expect(rig.fired).toBe(false);
+    expect(rig.compactRegionCalls).toBe(0);
+    expect(rig.result).toBeNull();
+    expect(logs.some((l) => /native pressure backstop deferred/.test(l) && /historian/.test(l))).toBe(true);
+    expect(logs.some((l) => l.startsWith("WARN") || /error/i.test(l))).toBe(false);
+  });
+
+  it("the next pressure check (historian idle again) retries and fires", async () => {
+    let busy = true;
+    const first = await probe({ window: 131_072, maxTokens: 8_192, pct: 0.91, busy: () => busy });
+    expect(first.fired).toBe(false);
+    busy = false;
+    const second = await probe({ window: 131_072, maxTokens: 8_192, pct: 0.91, busy: () => busy });
+    expect(second.fired).toBe(true);
+  });
+
+  it("below the backstop with the historian busy: no deferral line (status stays 'nothing to do')", async () => {
+    const logs: string[] = [];
+    const rig = await probe({ window: 131_072, maxTokens: 8_192, pct: 0.5, busy: () => true, logs });
+    expect(rig.fired).toBe(false);
+    expect(logs.some((l) => /deferred/.test(l))).toBe(false);
+  });
+
+  it("child sessions ignore the probe (stock summarizer, no MC lease)", async () => {
+    const rig = await probe({ window: 131_072, maxTokens: 8_192, pct: 0.91, child: true, busy: () => true });
+    expect(rig.fired).toBe(true);
+  });
+
+  it("a throwing probe never blocks the backstop", async () => {
+    const rig = await probe({
+      window: 131_072,
+      maxTokens: 8_192,
+      pct: 0.91,
+      busy: () => {
+        throw new Error("db closed");
+      },
+    });
+    expect(rig.fired).toBe(true);
   });
 });

@@ -156,9 +156,10 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       }
     };
     this.lastPressureThresholdPct = undefined;
+    this.lastPressureOutcome = undefined;
     try {
       const result = await this.pressureCompaction(agent, trigger, signal, probe);
-      say(result === null ? "none" : "compacted");
+      say(result === null ? (this.lastPressureOutcome ?? "none") : "compacted");
       return result;
     } catch (error) {
       say(`error:${(error instanceof Error ? error.message : String(error)).slice(0, 160)}`);
@@ -193,6 +194,35 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     }
   }
 
+  /** Outcome override for the debug probe line (round 21). */
+  private lastPressureOutcome: string | undefined;
+
+  /**
+   * Would the backstop fire now under `config`? Prices the same threshold the
+   * debug probe does (window, reserved output, threshold ratio / headroom,
+   * per-route override). Unknown window / pressure → treat as firing (the
+   * deferral is the safe side: no compaction while the lease is busy).
+   */
+  private async backstopWouldFire(
+    config: ResolvedConfig,
+    agent: Agent,
+    known?: { pct?: number; window?: number; reserved?: number },
+  ): Promise<{ pct?: number; thresholdPct: number | string } | null> {
+    const probe = known?.window !== undefined ? known : await this.describePressure(agent);
+    if (probe.window === undefined || probe.pct === undefined) return { thresholdPct: "?" };
+    const header = (agent.session as unknown as {
+      requestHeader?: () => { config?: { provider?: string; model?: string } } | undefined;
+    }).requestHeader?.()?.config;
+    const override = config.modelPolicies.find((p) => p.provider === header?.provider && p.model === header?.model);
+    const t = nativePressureThresholdTokens(probe.window, probe.reserved ?? 0, {
+      thresholdRatio: override?.thresholdRatio ?? config.thresholdRatio,
+      headroomTokens: override?.headroomTokens ?? config.headroomTokens,
+    });
+    if (t === null) return { pct: probe.pct, thresholdPct: "?" };
+    const thresholdPct = Math.round((t / probe.window) * 1000) / 10;
+    return probe.pct >= thresholdPct ? { pct: probe.pct, thresholdPct } : null;
+  }
+
   private notePressureThreshold(
     config: ResolvedConfig,
     agent: Agent,
@@ -225,6 +255,22 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       }
       const main = magicMainPressureConfig(base, this.explicitPressure, percentage);
       this.notePressureThreshold(main, agent, probe);
+      // Round 21: a background historian pass holds the compartment lease, so
+      // the Magic summarize hook could not run its mini-historian now (it would
+      // wait, then close compaction/end with "lease busy"). The backstop is
+      // DEFERRED instead — no compaction, no error — and the next pressure
+      // check (every step) retries once the pass has finished.
+      if (readHostHistorianBusy(this.ctx, agent)) {
+        const deferred = await this.backstopWouldFire(main, agent, probe);
+        if (deferred) {
+          this.lastPressureOutcome = "deferred:historian-busy";
+          logInfo(
+            this.ctx,
+            `[magic-context] native pressure backstop deferred: a historian pass is running for this session (pressure ${deferred.pct ?? "?"} % ≥ ${deferred.thresholdPct} %); the next pressure check retries`,
+          );
+          return null;
+        }
+      }
       return this.withPressureConfig(main, () => super.compactIfNeeded(agent, trigger, signal));
     }
     this.notePressureThreshold(base, agent, probe);
@@ -329,6 +375,32 @@ function readHostNativePressurePercentage(ctx: Context, agent: Agent): number | 
   }
   if (value === undefined) return null;
   return Number.isFinite(value) && value > 0 && value <= 100 ? value : DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE;
+}
+
+/**
+ * Round 21: is a Magic historian pass holding the compartment lease for this
+ * session? Read through the host service (the agent plane registers the
+ * probe). No probe / a throwing probe → false (never block the backstop).
+ */
+function readHostHistorianBusy(ctx: Context, agent: Agent): boolean {
+  const host = ctx.get("magicContextHost") as { historianBusy?: (agent: unknown) => boolean } | undefined;
+  if (typeof host?.historianBusy !== "function") return false;
+  try {
+    return host.historianBusy(agent) === true;
+  } catch {
+    return false;
+  }
+}
+
+function logInfo(ctx: Context, line: string): void {
+  try {
+    (ctx as unknown as { logger?: { info?(m: string): void } }).logger?.info?.(line);
+    // headless prints console.error, not ctx.logger
+    // eslint-disable-next-line no-console
+    if (process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN === "1") console.error(line);
+  } catch {
+    // observability only
+  }
 }
 
 /** Effective top-level pressure defaults for an MC-managed main session. */

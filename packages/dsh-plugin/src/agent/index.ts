@@ -44,6 +44,7 @@ import {
   currentModel,
 } from "./historian-wiring";
 import {
+  isDshHistorianBusy,
   runDshHistorian,
   signalDshDeferredHistoryRefresh,
   signalDshDeferredMaterialization,
@@ -462,6 +463,23 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   host.registerNativePressurePercentage?.((agent) => {
     if (rowContext?.enabled === false || !liveEnabled()) return undefined;
     return nativeBackstopPercentage(escalationBands(resolveExecuteThreshold(agent)).forceMaterializationPercentage);
+  });
+
+  // Round 21: the native pressure backstop defers (no "lease busy" error)
+  // while a historian pass holds this session's compartment lease. The probe
+  // needs the shared DB, which settles with host.ready; before that → false.
+  let busyDb: import("@magic-context/core/shared/sqlite").Database | undefined;
+  fireAndForget(
+    host.ready.then((bootstrap) => {
+      if (bootstrap.kind === "ok") busyDb = bootstrap.db;
+    }),
+    log,
+    "magic-context:historian-busy-probe",
+  );
+  host.registerHistorianBusy?.((agent) => {
+    const id = (agent as { id?: unknown }).id;
+    if (busyDb === undefined || typeof id !== "string") return false;
+    return isDshHistorianBusy(busyDb, host.canonicalKey(id));
   });
 
   // Context plane FIRST, so the knowledge gate below stays the outermost
