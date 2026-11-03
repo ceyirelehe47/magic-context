@@ -427,6 +427,12 @@ unset MC_E2E_MAIN_PROVIDER
 # checks X1–X8. See ci-x.sh.
 bash "$HERE/ci-x.sh"
 
+# ============================ round 24b scenario H ============================
+# Multi-session memory correctness on the real model (task pack P1-1): four
+# facts with codewords, historian passes, restarts, new sessions, a correction
+# and a never-recorded fact; checks U13–U25. See ci-h.sh.
+bash "$HERE/ci-h.sh"
+
 # --- U: doctor after all runs (shared DB opens, no live liveness markers left)
 node "$HERE/../../dist/cli.js" doctor --profile test > "$OUT/doctor-after.txt" 2>&1
 echo "rc=$?" >> "$OUT/doctor-after.txt"

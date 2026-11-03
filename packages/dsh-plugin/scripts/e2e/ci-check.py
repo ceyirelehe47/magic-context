@@ -39,6 +39,14 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       key shown as "running · pending restart" (settings view, /ctx-status),
       hot key shown and applied live (protection floor), cleared by a restart;
       U12 the page's historian model is the one the agent runs with
+  U13–U25 (round 24b, scenario H) multi-session memory CORRECTNESS: four facts
+      with codewords pinned in session A, historian >= 2 passes, restarts; the
+      message lane returns the fact's own message, ctx_expand the original
+      text, the compartment lane answers a paraphrase, an unreachable embedding
+      endpoint degrades visibly to full-text; a new session answers paraphrased
+      questions (and its injected <project-memory> carries the codes); a
+      correction wins over the old value in storage, injection and search; a
+      never-recorded fact gets no invented codeword; no cross-session mixing
   P1  no dsh process left after the runs
 """
 import hashlib
@@ -982,6 +990,180 @@ def check_r22_k(c, out: Path, runs):
           "after the restart (k-2, new process) nothing is pending: the new memory value is the running value",
           {"pending": sv2.get("pendingRestart"), "ctxStatusKind": st2.get("kind")})
 
+# ============================ round 24b scenario H ============================
+H_CODE = re.compile(r"\b[A-Z]{2,}-[A-Z]{2,}-\d{3,}\b")
+H_ARCH, H_RULE, H_FILE, H_TODO, H_TODO2 = ("ARCH-KESTREL-4127", "RULE-MARMOT-5830", "FILE-HERON-2261",
+                                           "TODO-BISON-9074", "TODO-YAK-3318")
+H_A_CODES = (H_ARCH, H_RULE, H_FILE, H_TODO)
+
+
+def h_results(path: Path, tool: str):
+    """(called, [completed result texts], [error result texts]) of one tool in one run."""
+    calls, results = tool_calls(path, tool)
+    ok = [str(r.get("result", "")) for r in results if r.get("status") == "completed"]
+    bad = [str(r.get("result", r.get("error", ""))) for r in results if r.get("status") != "completed"]
+    return bool(calls), ok, bad
+
+
+def h_blocks(text: str):
+    """Split a ctx_search answer into its numbered result blocks."""
+    return [b for b in re.split(r"\n\n(?=\[\d+\] )", text) if re.match(r"\[\d+\] ", b)]
+
+
+def h_flat(s: str) -> str:
+    return re.sub(r"\s+", " ", s or "").strip()
+
+
+def check_h(c, out: Path, runs):
+    """Round 24b scenario H (task pack P1-1): memory CORRECTNESS across
+    sessions and restarts — U13–U25. Each failure detail carries `class`:
+    `product` (Magic returned/stored/injected the wrong thing) or
+    `model` (the model did not call the tool / answered off-script while the
+    Magic side was right), with the trigger."""
+    asid = (out / "h-a.sid").read_text().strip() if (out / "h-a.sid").exists() else ""
+    bsid = (out / "h-b.sid").read_text().strip() if (out / "h-b.sid").exists() else ""
+    csid = (out / "h-c.sid").read_text().strip() if (out / "h-c.sid").exists() else ""
+    final = load_json(out / "h-db-final.json") or {}
+    sess = final.get("sessions") or {}
+    mems = final.get("memories") if isinstance(final.get("memories"), list) else []
+    a1 = load_json(out / "h-db-a1b.json") or load_json(out / "h-db-a1.json") or {}
+    a1m = a1.get("memories") if isinstance(a1.get("memories"), list) else []
+    facts = (out / "h-facts.txt").read_text().splitlines() if (out / "h-facts.txt").exists() else []
+
+    # U13 the four facts were pinned, one code each, as written
+    by_code = {code: [m for m in a1m if code in m.get("codes", []) and m.get("status", "active") == "active"] for code in H_A_CODES}
+    mixed = [m["id"] for m in a1m if len(set(m.get("codes", [])) & set(H_A_CODES)) > 1]
+    called = [n for n in ("h-f1", "h-f2", "h-f3", "h-f4", "h-f5") if tool_calls(out / f"{n}.log", "ctx_memory")[0]]
+    c.add("U13", all(by_code.values()) and not mixed, "session A: each fact pinned as its own active memory (one codeword each)",
+          {"perCode": {k: [m["id"] for m in v] for k, v in by_code.items()}, "mixed": mixed, "ctxMemoryCalledIn": called,
+           "class": None if all(by_code.values()) else ("model" if len(called) < 4 else "product")})
+
+    # U14 the historian compressed session A in >= 2 separate passes, the facts inside compartments
+    reads = (out / "h-a.reads").read_text().split() if (out / "h-a.reads").exists() else ["0", "0"]
+    acomps = ((sess.get(asid) or {}).get("compartments")) if asid else None
+    acomps = acomps if isinstance(acomps, list) else []
+    fact_codes_in_comps = sorted({x for cpt in acomps for x in cpt.get("codes", [])})
+    last_end = max([cpt["range"][1] for cpt in acomps] or [0])
+    c.add("U14", int(reads[1]) >= 2 and len(acomps) >= 2,
+          "session A: historian published compartments in >= 2 passes, covering the four fact turns",
+          {"readTurns": reads[0], "passesWithNewCompartments": reads[1], "compartments": [(x["range"], x["codes"]) for x in acomps],
+           "codesInCompartmentText": fact_codes_in_comps})
+
+    # U15 automatic injection: the NEW session's injected m0 <project-memory> carries the four codes
+    bm0 = ((load_json(out / "h-db-b1.json") or {}).get("sessions") or {}).get(bsid, {}).get("m0") if bsid else None
+    bm0 = bm0 if isinstance(bm0, dict) else {}
+    c.add("U15", bm0.get("hasProjectMemory") is True and set(H_A_CODES) <= set(bm0.get("projectMemoryCodes") or []),
+          "session B (new): injected <project-memory> carries all four codewords",
+          {"m0": bm0, "class": "product" if bm0 else "missing"})
+
+    # U16 ctx_search message lane: the FILE fact's own user message (right content, one code, ordinal)
+    ok_call, res, err = h_results(out / "h-aq.log", "ctx_search")
+    text = res[0] if res else ""
+    msg = [b for b in h_blocks(text) if b.split("\n", 1)[0].find("[message]") >= 0 and "compartment_id=" not in b.split("\n", 1)[0]]
+    hit = next((b for b in msg if H_FILE in b), None)
+    ordinal = None
+    if hit:
+        m = re.search(r"ordinal=(\d+)", hit)
+        ordinal = int(m.group(1)) if m else None
+    others = [x for x in H_A_CODES if x != H_FILE and hit and x in hit]
+    c.add("U16", hit is not None and "role=user" in hit and ordinal is not None and not others,
+          "ctx_search message lane returns the fact's own user message (ordinal, no other fact mixed in)",
+          {"called": ok_call, "hit": (hit or "")[:240], "ordinal": ordinal, "otherCodesInHit": others, "errors": err[:1],
+           "class": None if hit else ("model" if not ok_call else "product")})
+
+    # U17 ctx_expand returns the ORIGINAL text
+    ok_x, xres, xerr = h_results(out / "h-aq.log", "ctx_expand")
+    f_file = next((f for f in facts if H_FILE in f), "")
+    exp_ok = any(h_flat(f_file) in h_flat(r) for r in xres)
+    c.add("U17", exp_ok, "ctx_expand of the hit's range contains the original fact sentence verbatim",
+          {"called": ok_x, "expanded": [r[:240] for r in xres], "errors": xerr[:1], "answer": (final_text(out / "h-aq.log") or "")[:200],
+           "class": None if exp_ok else ("model" if not ok_x else "product")})
+
+    # U18 compartment (semantic) lane: a paraphrase finds the compartment covering the FILE fact
+    ok_s, sres, serr = h_results(out / "h-as.log", "ctx_search")
+    stext = sres[0] if sres else ""
+    cmp_lines = re.findall(r"compartment_id=(\d+) range=(\d+)-(\d+)", stext)
+    covers = ordinal is not None and any(int(a) <= ordinal <= int(b) for _, a, b in cmp_lines)
+    chunks = ((sess.get(asid) or {}).get("chunks")) if asid else None
+    c.add("U18", covers and "semantic search unavailable" not in stext,
+          "ctx_search compartment lane: a codeword-free paraphrase returns the compartment covering the fact",
+          {"called": ok_s, "compartmentHits": cmp_lines, "factOrdinal": ordinal, "chunkEmbeddings": chunks,
+           "head": stext[:240], "class": None if covers else ("model" if not ok_s else "product")})
+
+    # U19 degrade: no reachable embedding model -> full-text answer + visible note, never an error
+    ok_d, dres, derr = h_results(out / "h-ad.log", "ctx_search")
+    dtext = dres[0] if dres else ""
+    rule_hit = any(H_RULE in b for b in h_blocks(dtext) if "[message]" in b.split("\n", 1)[0])
+    c.add("U19", ok_d and not derr and rule_hit and "semantic search unavailable" in dtext and "full-text" in dtext,
+          "embedding endpoint down: ctx_search still answers from full-text and says so (no error)",
+          {"called": ok_d, "errors": derr[:1], "ruleHit": rule_hit, "tail": dtext[-260:]})
+
+    # U20 cross-session recall in different words, each answer the right code (no swap)
+    ans = final_text(out / "h-b1.log") or ""
+    want = {"1": H_ARCH, "2": H_RULE, "3": H_FILE, "4": H_TODO}
+    got = {}
+    for line in ans.splitlines():
+        m = re.match(r"\s*\**\s*([1-4])\s*[:.)]\s*(.*)$", line)
+        if m:
+            got[m.group(1)] = m.group(2)
+    wrong = {k: v for k, v in got.items() if want[k] not in v or any(x in v for x in H_A_CODES if x != want[k])}
+    c.add("U20", len(got) == 4 and not wrong, "session B (new, after restart): four paraphrased questions → the right codeword each",
+          {"answer": ans[:300], "wrong": wrong, "toolsUsed": [t for t in ("ctx_search", "ctx_memory", "ctx_expand") if tool_calls(out / "h-b1.log", t)[0]],
+           "class": None if (len(got) == 4 and not wrong) else ("product" if not set(H_A_CODES) <= set(bm0.get("projectMemoryCodes") or []) else "model")})
+
+    # U21 the modification is stored: old todo no longer active, new todo active
+    old_active = [m for m in mems if H_TODO in m.get("codes", []) and H_TODO2 not in m.get("codes", []) and m.get("status", "active") == "active"]
+    new_active = [m for m in mems if H_TODO2 in m.get("codes", []) and m.get("status", "active") == "active"]
+    c.add("U21", not old_active and bool(new_active), "after the correction: old todo memory not active, new todo memory active",
+          {"oldActive": [(m["id"], m.get("category"), m.get("src")) for m in old_active],
+           "newActive": [m["id"] for m in new_active], "allTodo": [(m["id"], m.get("status"), m.get("codes")) for m in mems if set(m.get("codes", [])) & {H_TODO, H_TODO2}],
+           "ctxMemoryCalled": bool(tool_calls(out / "h-b2.log", "ctx_memory")[0]),
+           "class": None if (not old_active and new_active) else ("model" if not tool_calls(out / "h-b2.log", "ctx_memory")[0] else "product")})
+
+    # U22 a new session gets the NEW value (answer + injected memory), never the old one
+    ans_c = final_text(out / "h-c1.log") or ""
+    cm0 = ((load_json(out / "h-db-c1.json") or {}).get("sessions") or {}).get(csid, {}).get("m0") if csid else None
+    cm0 = cm0 if isinstance(cm0, dict) else {}
+    pm = set(cm0.get("projectMemoryCodes") or [])
+    c.add("U22", H_TODO2 in ans_c and H_TODO not in ans_c and H_TODO2 in pm and H_TODO not in pm,
+          "session C (new): current todo answered and injected with the NEW codeword, the old one absent",
+          {"answer": ans_c[:200], "m0ProjectMemoryCodes": sorted(pm),
+           "class": None if (H_TODO2 in pm and H_TODO not in pm) else "product"})
+
+    # U23 ctx_search after the change: new value, no stale active memory, no session-A history leaking into C
+    ok_c2, c2res, _ = h_results(out / "h-c2.log", "ctx_search")
+    c2 = c2res[0] if c2res else ""
+    blocks = h_blocks(c2)
+    stale = [b[:160] for b in blocks if H_TODO in b and H_TODO2 not in b]
+    leak = [b[:160] for b in blocks if "[message]" in b.split("\n", 1)[0] and any(x in b for x in H_A_CODES)]
+    # A memory already shown in the session's <project-memory> is suppressed from
+    # ctx_search by design (visibleMemoryIds), so the new value counts as
+    # returned when it is in the results OR in C's injected <project-memory>.
+    new_seen = any(H_TODO2 in b for b in blocks) or H_TODO2 in pm
+    c.add("U23", ok_c2 and new_seen and not stale and not leak,
+          "session C ctx_search: new todo returned (or already injected), no stale old-todo result, no session-A message in C's history lanes",
+          {"called": ok_c2, "newInResults": any(H_TODO2 in b for b in blocks), "newInjected": H_TODO2 in pm, "stale": stale, "leak": leak, "head": c2[:240], "answer": (final_text(out / "h-c2.log") or "")[:120],
+           "class": None if (not stale and not leak) else "product"})
+
+    # U24 never-recorded fact: no invented codeword (relaxed recall ORs words, so search hits are not judged)
+    ans3 = final_text(out / "h-c3.log") or ""
+    codes3 = sorted(set(H_CODE.findall(ans3)))
+    invented = [x for x in codes3 if x not in H_A_CODES + (H_TODO2, CODEWORD)]
+    misattributed = [x for x in codes3 if x not in invented]
+    ran3 = bool(ans3.strip())
+    c.add("U24", False if not ran3 else (True if (not invented and not misattributed) else ("warn" if not invented else False)),
+          "never-recorded fact: the answer contains no invented codeword",
+          {"answer": ans3[:200], "invented": invented, "recordedCodeGivenForWrongFact": misattributed,
+           "notRecorded": "NOT RECORDED" in ans3.upper(), "class": "model" if invented else None})
+
+    # U25 no cross-session mixing in stored/injected history
+    a_bad = [x for x in acomps if H_TODO2 in x.get("codes", [])]
+    csh = set(cm0.get("sessionHistoryCodes") or [])
+    c.add("U25", bool(acomps) and bool(cm0) and not a_bad and not (csh & set(H_A_CODES)),
+          "no cross-session mixing: A's compartments never carry B's new todo; C's <session-history> carries none of A's facts",
+          {"aCompartmentsWithB": a_bad, "cSessionHistoryCodes": sorted(csh)})
+
+
 def check(out: Path) -> int:
     c = Checks()
     runs = {}
@@ -1077,6 +1259,7 @@ def check(out: Path) -> int:
     check_x(c, out, runs)
     check_y(c, out, runs)
     check_r22_k(c, out, runs)
+    check_h(c, out, runs)
 
     # --- P: process hygiene
     left = (out / "leftover-procs.txt").read_text().split() if (out / "leftover-procs.txt").exists() else []
