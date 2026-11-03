@@ -94,8 +94,10 @@ for si in range(1, 6):
 # round 25b: five one-line warm-up turns per S session before the stress rounds
 # (real user turns, so core's 5-user-turn protected tail is passed and the
 # historian has eligible history while the stress rounds run in parallel)
-for wk in range(1, 6):
-    plans[f"sw{wk}"] = [{"text": f"DONE sw{wk}"}]
+# (one plan per session and turn: X8 counts repeats of a plan step across runs)
+for si in range(1, 6):
+    for wk in range(1, 6):
+        plans[f"s{si}w{wk}"] = [{"text": f"DONE s{si}w{wk}"}]
 json.dump(plans, open(plans_out, "w"), ensure_ascii=False)
 PY
 TOKROOT="$(ls -d "$REPO"/node_modules/.bun/ai-tokenizer@*/node_modules | head -n 1)"
@@ -249,7 +251,7 @@ for wk in 1 2 3 4 5; do
   SPIDS=()
   for si in 1 2 3 4 5; do
     RUN_LOG="$E2E_ROOT/logs/run-sw-$si-$wk.log" OPENCODE_SESSION="mc-ci-s$si-$$" MC_HISTORIAN_THRESHOLD=35 \
-      xrun "sw-$si-$wk" "Reply when done. [[MOCK:sw$wk]] $SMARK" "${SSID[$si]:-}" &
+      xrun "sw-$si-$wk" "Reply when done. [[MOCK:s${si}w$wk]] $SMARK" "${SSID[$si]:-}" &
     SPIDS+=($!)
   done
   wait "${SPIDS[@]}"
