@@ -306,20 +306,27 @@ describe("crash recovery (round 23b P0-2): two sessions, two processes, one shar
     await withDir(async (dir) => {
       const sa = "sess-shared-a";
       const sb = "sess-shared-b";
+      // The shared DB already exists (migrated once), as for any second DSH
+      // process. Two processes racing the FIRST migration of a fresh file is a
+      // separate core issue (round 23c: "table temporal_decisions already
+      // exists" → storage unavailable for the loser), not this case.
+      // (kept open: core caches the handle per path in this process)
+      const db = await createTestDb(join(dir, "context.db"));
+      initializeDshAdapterTables(db);
       const pa = spawnArgs("historian", dir, sa, "historian-publish");
       const pb = spawnArgs("plane", dir, sb, undefined);
       const childB = Bun.spawn(pb);
       const childA = Bun.spawn(pa);
       const [codeA, codeB] = await Promise.all([childA.exited, childB.exited]);
       const errB = await new Response(childB.stderr).text();
+      const errA = await new Response(childA.stderr).text();
       expect(existsSync(pa.done)).toBe(false);
       expect(codeA).not.toBe(0);
+      expect(errA).toContain("crash point historian-publish"); // died at the injected point, not of something else
       expect(codeB).toBe(0);
       expect(existsSync(pb.done)).toBe(true);
       expect(errB).not.toMatch(/SQLITE_BUSY|database is locked|malformed/i);
 
-      const db = await createTestDb(join(dir, "context.db"));
-      initializeDshAdapterTables(db);
       try {
         const integrity = db.prepare("PRAGMA integrity_check").get() as Record<string, string>;
         expect(Object.values(integrity)[0]).toBe("ok");

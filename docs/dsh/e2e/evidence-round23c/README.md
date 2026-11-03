@@ -66,3 +66,13 @@ busy; y-3 published (1,1); tags 4 → 5 → 7 stable; integrity ok ×3), R12 PAS
 ended with "summary is not smaller than the shadowed content (423 >= 239)"
 (lock-session events 65, 82) — intermittent, model-dependent, not P0-2; see
 DSH-MAINTENANCE known limitation 18 (f). `summary-41636248583.md` is 23b's run.
+
+## Concurrent first migration (found in 23c, core, not fixed)
+
+`repro-concurrent-first-migration.ts` spawns the two crash-recovery fixtures on
+a fresh DB (3 × 15 in parallel): 2 / 45 runs lost one process to
+"table temporal_decisions already exists" (core migration v95 check-then-create).
+Push run 41642824046 hit it in the two-process unit case (A died before its
+first event, the old `codeA != 0` assertion hid why). Fixed in the test (DB
+migrated once before spawning; A must log its crash point); 12/12 under
+parallel load locally.

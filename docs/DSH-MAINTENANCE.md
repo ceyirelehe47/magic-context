@@ -1491,7 +1491,18 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       41636248583 and in round 23); unrelated to the P0-2 change (the lease
       holder there is the live process itself). Option for later: skip the MC
       main backstop when the region after the last checkpoint is smaller than
-      the Magic summary would be.
+      the Magic summary would be; (g) **found in 23c, upstream core, not
+      fixed:** two processes opening a FRESH (never migrated) DB at the same
+      moment can race core's migration — `migration-v95-perf-indexes.ts`
+      checks `sqlite_master` and then runs `CREATE TABLE temporal_decisions`
+      without `IF NOT EXISTS`/a write transaction, so the loser fails with
+      "table temporal_decisions already exists" → "storage unavailable …
+      Magic Context is disabled for this run" (fail-closed; the next start
+      opens normally). Reproduced 2 of 45 parallel spawns
+      (`evidence-round23c/repro-concurrent-first-migration.*`); it made the
+      two-process unit case flaky on CI (push run 41642824046). That case now
+      migrates the shared DB once before spawning (an existing DB, as for any
+      second DSH process) and asserts process A died at the injected point.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

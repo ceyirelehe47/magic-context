@@ -1,0 +1,4 @@
+iter 2: codeA=1 codeB=0 eventsA=false
+error: [magic-context] storage unavailable: table temporal_decisions already exists. Magic Context is disabled for this run; check log for details.
+iter 9: codeA=137 codeB=1 eventsA=true
+error: [magic-context] storage unavailable: table temporal_decisions already exists. Magic Context is disabled for this run; check log for details.
