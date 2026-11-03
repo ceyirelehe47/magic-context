@@ -42,7 +42,89 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 21, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; release
+Baseline (round 23, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; release tags
+unchanged — `dsh/0.49.35-dsh.2` → `7848c0430`; push run @@PUSHRUN@@ @ `@@SHA@@` and
+dispatch run @@E2ERUN@@ (`e2e=true`)):
+`typecheck:dsh` **0 errors**, test-file typecheck **0 errors**, core typecheck
+**0 errors**, `dsh-plugin` **@@TESTS@@ pass** (round 23 +11 over round 22's 525),
+`adapter-api` **15 pass**, `contracts:dsh` **99 pass**, 0 fail; real-model
+`e2e` **@@E2E@@** on run @@E2ERUN@@ (79 judged = round 22's 78 + R14).
+Evidence: `docs/dsh/e2e/evidence-round23/`.
+
+Round 23 fixes (adapter only, no core change; red test first, on the REAL
+rc.5 log of run 41619627652 replayed by DSH's own `Session`):
+- `a61d3c08f` (red `5d8e3b1d4`, typing `f86aa1489`) **history ordinals survive
+  DSH native compaction.** compaction-basic (`/compact` or the pressure
+  backstop) replaces surface nodes with one `compact-checkpoint` message; the
+  surface view then restarted its ordinals (checkpoint = 1) while compartments
+  keep the old numbering. Real run 41619627652: the second `/compact` judged
+  compartments 1–17 "covered" (view had 10 messages) and replayed them as the
+  summary, shadowing p27–p29 and the user's prompt (seq 147, shadowedSeqs
+  114…139) with no summary of them. The unit replay also confirmed the two
+  suspected effects: the background historian found nothing after ordinal 17
+  (it would only resume once the view grew past 17 messages, skipping the
+  first 17 new ones), and the post-compaction turn's messages were drop
+  candidates of compartments ≤ 17. Fix: `transcriptRawMessageProvider` (the
+  source of the historian, the summarize hook, recomp and the compartment drop
+  queue) now reads `readDshHistory` — `expandCompactionCheckpoints` expands
+  every checkpoint (and every Magic op copy that re-renders one, recursively)
+  back into the surface nodes it shadowed, in surface order, and keeps every
+  other node (op copies included) so pre-compaction ordinals are reproduced
+  exactly; a checkpoint in a `/compact` region resolves to the whole history
+  range it stands for (`readMessageOrdinalRangeById`), so the region starts at
+  that range's first ordinal. The context plane (tags, drops, nudges) still
+  works on the model-visible surface (`readDshTranscript`, unchanged).
+  `native-compaction-ordinals.test.ts`: 1/5 before → 7/7.
+- `d2ee6281c` (red `0a15d42cb`) **ctx_expand numbers like the compartments.**
+  It walked the whole event log (op copies, re-injected knowledge counted), so
+  a compartment's `start=`/`end=` expanded other messages — already before any
+  native compaction (real log: 18 vs 17 messages at seq 88). It now reads the
+  history view (op copies expanded to their sources, so a dropped tool output
+  stays recoverable); DSH-0.1-shaped doubles without a surface keep the log walk.
+- `a39dc5ea7` (red `88e62e0d7`) **the MC main backstop compacts once per
+  pressure check.** First e2e of the ordinal fix (run 41625463298, 77/79):
+  compaction-basic retries a pressure compaction while the session is still
+  above the threshold; on an MC main session the retry's region is the
+  checkpoint the first attempt just wrote, Magic renders the same compartments
+  for it, and compaction-basic rejected it ("summary is not smaller than the
+  shadowed content (626 … >= 626)") — 6 of 7 backstop checks in lock-a ended in
+  an error although their first compaction had committed (R10/R11 FAIL). Before
+  the ordinal fix the retry "succeeded" by rendering only the compartments that
+  overlapped the checkpoint's restarted ordinal 1 — silently dropping the rest
+  from the surface. Main sessions now run the backstop with
+  `compactionRetries: 0` unless the user set it, and "still above threshold"
+  after a committed compaction returns that compaction (logged); the residue is
+  the retained tail / already-summarized history, left to MC; child sessions
+  and user-set retries keep compaction-basic's policy. compaction-pressure 25 → 28.
+- `ac00b1ddc` e2e **R14**: scenario L `lock-d` runs the session's second native
+  compaction at idle (lease free); `ci-history.ts` replays the decoded log with
+  DSH's `Session` and checks that lock-c's prompt and every checksum it read are
+  still on the surface or inside a published compartment (`ctx_expand` of its
+  range shows them) and that the second summary reaches them. On run
+  41619627652's artifacts R14 fails (evidence-round23/history-lock-before-fix-41619627652.json).
+
+Round 22 (2026-11-03, HEAD `c362790f2`, `dsh-plugin` **525 pass**, e2e 78
+judged; runs 41616050491 71/77, 41618120979 75/78, 41619627652 76/78 —
+summaries in `docs/dsh/e2e/evidence-round22/`):
+- `42cd105cc` summarize lease wait / timeout lines also on stderr (headless
+  never prints `ctx.logger`).
+- `bac958987` e2e-only hooks (historian lease hold, `/compact` at idle through
+  the DSH command registry, fake stuck lease + shortened summarize wait, live
+  status dump; inert unless `MAGIC_CONTEXT_DSH_E2E=1` and the switch are set).
+- `af16cbe15`, `914ed9905`, `edafbf2e0` e2e scenarios **L** (lock collision,
+  R9–R13) and **K** (jsonc edited mid-turn, U7–U12).
+- `4f0b97a96` settings page / popover show a profile-row `historian.model` /
+  `protected_tokens` as the effective value (real rc.5 scenario K: the agent ran
+  with the row value while the page said "default").
+- `c362790f2` the native backstop defers **at most once per historian cycle**;
+  the next over-threshold check compacts and the summarize hook waits for the
+  lease (run 41619627652 R11: the backstop deferred on every step while MC
+  re-fired the historian).
+- Open after round 22: R11 (fixed by `c362790f2`, re-verified in round 23) and
+  R13 (the timeout branch never ran: `/compact` was wrongly "covered" — the
+  round 23 ordinal defect).
+
+Previous baseline (round 21, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; release
 **`dsh/0.49.35-dsh.2` → `7848c0430`** (version bump only on top of round 20,
 push run 41608723776 green; real e2e for that code: 41601119332 @ `542c6569e`
 66/66); round 21 HEAD push run 41611430368 @ `6ce2603f9` and dispatch run
@@ -1271,6 +1353,69 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       `execute_threshold_*`, `historian.model` and `protected_tokens`
       (protected-token tier overrides included) — now visible as pending
       instead of silently ignored.
+
+16. **Round 22 (2026-11-03) — status.** The lock-collision paths of round 21
+    now run on the real host (scenario L): the backstop deferral (R10, 6
+    deferrals in run 41619627652), the `/compact` wait (R12: waited 21.5 s,
+    "lease acquired", completed) and the jsonc hot/pending split in one live
+    process (scenario K, U7–U12). Two real defects surfaced: the backstop
+    deferred on every step while MC kept re-firing (fixed `c362790f2`, R11
+    re-verified in round 23) and the native-compaction ordinal defect (17).
+17. **Round 23 (2026-11-03) — status.**
+    - **Fixed (reproduced on the real log, then in e2e):** history ordinals
+      across DSH native compactions (`a61d3c08f`; `/compact` #2 over stale
+      compartments, background historian blind after the old last ordinal,
+      post-compaction turn as drop candidates); `ctx_expand` numbering
+      (`d2ee6281c`); the backstop retry over its own fresh checkpoint
+      (`a39dc5ea7`, surfaced by the first e2e of the ordinal fix). Verified: unit replay of run 41619627652's log (7/7 + 1),
+      e2e @@E2ERUN@@ R13 (timeout branch now runs) and R14 (second compaction
+      keeps lock-c's prompt + checksums visible or inside a compartment).
+    - **Known, not changed — the first compaction's uncovered tail.** When the
+      mini-historian leaves a trailing part of the `/compact` region
+      unprocessed (`<unprocessed_from>`), the summary renders only what was
+      covered, so that tail is shadowed without a summary (run 41619627652
+      `/compact` #1: region through ordinal 20, compartments end 17 — two
+      knowledge re-injections and the one-line prompt "Reply with the single
+      word: ok."). Since round 23 the tail keeps its history ordinals, the next
+      background pass reads it (unit case 2 starts at 18) and `ctx_expand`
+      recovers it; failing `/compact` closed instead would make it fail
+      whenever the historian defers the newest message. Observed once, minor.
+    - **Known, not changed — pi-ai clamps `max_tokens` near the configured
+      window (round 22's sporadic `max-tokens`, 1–174 output tokens on the
+      40k / 100k e2e routes).** Investigation only, see
+      `docs/dsh/e2e/evidence-round23/max-tokens-analysis.md`: our requests fit
+      (prompt + 4096 < window) and the provider honours the `max_tokens` it is
+      given; `@earendil-works/pi-ai` sets `max_tokens = min(maxTokens,
+      max(1, window − estimate − 4096))` and DSH's `dsh-llm-pi-ai` replays
+      assistant messages with empty usage, so the estimate is chars/3.5 of all
+      messages + tool schemas (≈ 20 % above the provider's count). The model
+      gets ≈ 0 output budget from ≈ 75 % real usage on a 40k window and ≈ 80–88 %
+      on 100k — below the 85 % force band / 90 % backstop on small windows.
+      Not P0 (not an oversized request; not Magic-specific). Options for a later
+      decision: keep e2e scenarios under ~70 % on pi-ai routes; ask DSH to
+      carry usage on replayed assistant messages; or lower the backstop on
+      small pi-ai windows to `(window − 4096 − maxTokens) / 1.25`.
+    - **Pending user decision — `/compact` behind a historian pass longer than
+      45 s (analysis only, nothing implemented).** Today (re-verified in real
+      rc.5, R12/R13): `/compact` → summarize hook waits (poll 500 ms, ≤ 45 s,
+      re-checking coverage); past 45 s it throws and `/compact` prints DSH's
+      fixed "Compaction could not produce a useful summary…" (our "retry once it
+      finishes" text only reaches the session log). A queue was not built
+      because (1) a plugin cannot change `/compact`'s reply text
+      (`@deepseek-ai/dsh-command-compact` maps every error to a fixed sentence),
+      so "queued" has no channel; (2) `compactNow` needs an idle agent, so a
+      queued run races the next prompt, and in headless the process is gone —
+      only a durable, invisible delayed action would survive; (3) a pass is one
+      historian call (10–30 s measured; R12 waited 21.5 / 24 s), so 45 s only
+      fails on an unusually slow historian route. Options, in order of
+      preference: **A** keep waiting past 45 s while the holder is provably this
+      process's own live pass (historian drain + lease TTL), hard cap ≈ 180 s,
+      cross-process holders keep 45 s — no new UX, `/compact` just completes
+      late; **B** queue + notice via a Magic surface (`/ctx-status`, composer
+      popover) — contradicts `/compact`'s fixed failure sentence without a DSH
+      change; **C** upstream DSH: a `ManualCompactionError` code such as
+      `deferred` with plugin-supplied text, which would make B clean.
+      **待用户决定。**
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
