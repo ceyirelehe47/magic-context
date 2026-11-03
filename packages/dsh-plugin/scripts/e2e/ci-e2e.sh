@@ -132,10 +132,17 @@ echo "$CSID" > "$OUT/cmp.sid"
 if [[ -n "$CSID" ]]; then
   r17_db session "$DB" "$CSID" 65 "$MAIN_MODEL_KEY" > "$OUT/db-cmp-01.json"
   k=2; after=0
-  for f in src/agent/outbox.ts src/host/meter.ts src/agent/nudge.ts src/agent/pressure-truncation.ts \
-           src/agent/coordinator.ts src/agent/worker.ts src/agent/auto-search.ts src/agent/session-track.ts; do
+  # Round 18: two files per turn (~12 % of the 40k window each). With the
+  # cross-process fold fixed, one file per turn let core's proactive trigger
+  # (threshold-2 = 63 %) compress the session before it ever passed 65 %
+  # (run 41550425336: max 61.7 %), so C1 could not show real pressure. A pair
+  # takes the context from ~50 % past 65 % inside one turn, before the
+  # background historian's fold can land (next process).
+  for pair in "src/agent/outbox.ts src/host/meter.ts" "src/agent/nudge.ts src/agent/pressure-truncation.ts" \
+              "src/agent/coordinator.ts src/agent/worker.ts" "src/agent/auto-search.ts src/agent/session-track.ts"; do
+    set -- $pair
     name="cmp-$(printf %02d "$k")"
-    run "$name" "Read the file $f with the read tool (whole file) and tell me the name of the first exported function or constant in it. One short sentence." "$CSID"
+    run "$name" "Read the file $1 with the read tool (whole file), then read the file $2 with the read tool (whole file), one after the other. Then tell me the name of the first exported function or constant in each. Two short sentences." "$CSID"
     r17_db session "$DB" "$CSID" 65 "$MAIN_MODEL_KEY" > "$OUT/db-$name.json"
     if [[ "$(compartments_of "$OUT/db-$name.json")" -gt 0 ]]; then after=$((after + 1)); fi
     [[ "$after" -ge 2 ]] && break
