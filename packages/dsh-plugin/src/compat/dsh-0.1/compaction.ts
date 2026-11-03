@@ -30,6 +30,7 @@ import { isDshChildSession } from "./child-session";
 import { DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE, nativePressureThresholdTokens } from "./pressure-policy";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { ContentBlock, Message, TokenUsage, ToolSchema } from "@deepseek-ai/dsh-llm";
+import { createUserMessage } from "./session";
 
 export {
   CompactionId,
@@ -194,15 +195,27 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     agent: Agent,
     trigger: CompactionTrigger,
     signal: AbortSignal,
+    probe?: { pct?: number; window?: number; reserved?: number },
+    note?: PressureNote,
   ): Promise<CompactionResult | null> {
     const session = agent.session as unknown as object;
     const once = this.explicitPressure.retries === true ? main : withConfigOverrides(main, { compactionRetries: 0 });
     this.recordCommittedRegions();
     this.committedRegion.delete(session);
+    // Round 24 (R10): the region compaction-basic selects is vetted before its
+    // compaction/start (see compactRegion / backstopWouldNotShrink).
+    this.guardedChecks.add(session);
     try {
-      return await this.withPressureConfig(once, () => super.compactIfNeeded(agent, trigger, signal));
+      const result = await this.withPressureConfig(once, () => super.compactIfNeeded(agent, trigger, signal));
+      if (result !== null) readHostBackstopGuard(this.ctx)?.clearSkip(agent);
+      return result;
     } catch (error) {
+      if (error instanceof BackstopWouldNotShrink) {
+        await this.reportBackstopSkip(main, agent, error, probe, note);
+        return null;
+      }
       const committed = this.committedRegion.get(session);
+      if (committed !== undefined) readHostBackstopGuard(this.ctx)?.clearSkip(agent);
       const message = error instanceof Error ? error.message : String(error);
       if (this.explicitPressure.retries === true || committed === undefined || !/compaction still above threshold after/.test(message)) {
         throw error;
@@ -214,6 +227,105 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       return committed;
     } finally {
       this.committedRegion.delete(session);
+      this.guardedChecks.delete(session);
+    }
+  }
+
+  /** Round 24: sessions whose current pressure check is the MC main backstop (region vetted). */
+  private readonly guardedChecks = new WeakSet<object>();
+  /** Round 24: region start seq of the last WARN per session (one warning per stuck region). */
+  private readonly warnedRegion = new WeakMap<object, number>();
+
+  /**
+   * Round 24 (R10): would the Magic summary of [start, end] be smaller than
+   * the region? compaction-basic only finds out after compaction/start (then
+   * fails the whole check with "summary is not smaller than the shadowed
+   * content"). Skips — returns the reason — when it provably would not:
+   *  - every non-system node of the region is a native checkpoint (or its
+   *    Magic op copy): re-summarizing the summary renders at least the same
+   *    compartments (plus any uncovered tail the checkpoint stood for);
+   *  - the compartment text Magic already renders for the region (a lower
+   *    bound: framing and a mini-historian compartment only add) is ≥ the
+   *    region's route tokens.
+   * No guard registered / no preview (DB not ready) → never skip.
+   */
+  private backstopWouldNotShrink(agent: Agent, start: unknown, end: unknown): BackstopWouldNotShrink | null {
+    const guard = readHostBackstopGuard(this.ctx);
+    if (guard === undefined) return null;
+    const meter = (this.ctx as unknown as {
+      tokenMeter?: { measure(s: unknown): { nodes: ReadonlyArray<{ seq: number; tokens: number }> }; estimateMessage?(m: unknown): number };
+    }).tokenMeter;
+    if (meter === undefined) return null;
+    const startSeq = Number(start);
+    const endSeq = Number(end);
+    let preview: ReturnType<MagicBackstopGuardView["preview"]>;
+    try {
+      preview = guard.preview(agent, startSeq, endSeq);
+    } catch {
+      return null; // a broken probe never blocks the backstop
+    }
+    if (preview === undefined) return null;
+    const nodes = meter.measure(agent.session).nodes;
+    const from = nodes.findIndex((n) => n.seq === startSeq);
+    const to = nodes.findIndex((n) => n.seq === endSeq);
+    if (from === -1 || to === -1 || from > to) return null;
+    const region = nodes.slice(from, to + 1);
+    const standIns = new Set(preview.standInSeqs);
+    const regionTokens = region.reduce((total, n) => total + n.tokens, 0);
+    const rawTokens = region.filter((n) => !standIns.has(n.seq)).reduce((total, n) => total + n.tokens, 0);
+    const summaryTokensAtLeast =
+      preview.renderText.length === 0
+        ? 0
+        : (meter.estimateMessage?.(createUserMessage({ content: [{ type: "text", text: preview.renderText }], source: { kind: "magic-context", plugin: "magic-context" } as never })) ??
+          Math.ceil(preview.renderText.length / 4));
+    const base = { regionStartSeq: startSeq, regionTokens, rawTokens, summaryTokensAtLeast };
+    if (standIns.size > 0 && rawTokens === 0) {
+      return new BackstopWouldNotShrink({
+        ...base,
+        reason: `the candidate region is only the previous compaction checkpoint (history ${preview.firstOrdinal}-${preview.lastOrdinal}${preview.covered ? "" : ", partly not yet in compartments"}); re-summarizing a summary would not shrink it`,
+      });
+    }
+    if (summaryTokensAtLeast >= regionTokens) {
+      return new BackstopWouldNotShrink({
+        ...base,
+        reason: `Magic's summary of the candidate region (history ${preview.firstOrdinal}-${preview.lastOrdinal}) is already at least as large as the region`,
+      });
+    }
+    return null;
+  }
+
+  private async reportBackstopSkip(
+    config: ResolvedConfig,
+    agent: Agent,
+    skip: BackstopWouldNotShrink,
+    known?: { pct?: number; window?: number; reserved?: number },
+    note?: PressureNote,
+  ): Promise<void> {
+    if (note !== undefined) note.outcome = "skipped:would-not-shrink";
+    const probe = known?.window !== undefined ? known : await this.describePressure(agent);
+    const fire = await this.backstopWouldFire(config, agent, probe).catch(() => null);
+    const pct = fire?.pct ?? probe.pct;
+    const thresholdPct = fire?.thresholdPct ?? note?.thresholdPct;
+    const d = skip.details;
+    const line =
+      `[magic-context] native pressure backstop skipped: ${d.reason} — the summary would not shrink the context ` +
+      `(region ${d.regionTokens} tokens, ${d.rawTokens} of them new history; Magic summary ≥ ${d.summaryTokensAtLeast} tokens). ` +
+      `Pressure ${pct ?? "?"} % ≥ ${thresholdPct ?? "?"} %: left to Magic (historian / drops / pressure truncation); the next pressure check retries`;
+    const session = agent.session as unknown as object;
+    if (this.warnedRegion.get(session) !== d.regionStartSeq) {
+      this.warnedRegion.set(session, d.regionStartSeq);
+      logWarn(this.ctx, line);
+    } else {
+      logInfo(this.ctx, line);
+    }
+    try {
+      readHostBackstopGuard(this.ctx)?.recordSkip(agent, {
+        ...(pct !== undefined ? { pct } : {}),
+        ...(thresholdPct !== undefined ? { thresholdPct } : {}),
+        ...d,
+      });
+    } catch {
+      // diagnostics only
     }
   }
 
@@ -349,7 +461,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       } else {
         this.backstopDeferred.delete(session);
       }
-      return this.compactOnce(main, agent, trigger, signal);
+      return this.compactOnce(main, agent, trigger, signal, probe, note);
     }
     this.notePressureThreshold(base, agent, probe, note);
     try {
@@ -396,6 +508,10 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       if (process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN === "1") console.error(line);
     } catch {
       // observability only
+    }
+    if (this.guardedChecks.has(agent.session as unknown as object)) {
+      const skip = this.backstopWouldNotShrink(agent, start, end);
+      if (skip !== null) throw skip; // before compaction/start: nothing written
     }
     return super.compactRegion(start, end, agent, signal);
   }
@@ -490,6 +606,47 @@ function readHostHistorianBusy(ctx: Context, agent: Agent): boolean {
     return host.historianBusy(agent) === true;
   } catch {
     return false;
+  }
+}
+
+/** Round 24: the agent plane's backstop guard (host service; structural view). */
+interface MagicBackstopGuardView {
+  preview(agent: Agent, startSeq: number, endSeq: number):
+    | { standInSeqs: readonly number[]; covered: boolean; renderText: string; firstOrdinal: number; lastOrdinal: number }
+    | undefined;
+  recordSkip(agent: Agent, record: Record<string, unknown> & { regionStartSeq: number; regionTokens: number; rawTokens: number; summaryTokensAtLeast: number; reason: string }): unknown;
+  clearSkip(agent: Agent): void;
+}
+
+function readHostBackstopGuard(ctx: Context): MagicBackstopGuardView | undefined {
+  try {
+    const host = ctx.get("magicContextHost") as { backstopGuard?: () => unknown } | undefined;
+    const guard = host?.backstopGuard?.();
+    return guard !== null && typeof guard === "object" && typeof (guard as MagicBackstopGuardView).preview === "function"
+      ? (guard as MagicBackstopGuardView)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Round 24: thrown from compactRegion BEFORE compaction/start; caught in compactOnce. */
+class BackstopWouldNotShrink extends Error {
+  constructor(
+    readonly details: { regionStartSeq: number; regionTokens: number; rawTokens: number; summaryTokensAtLeast: number; reason: string },
+  ) {
+    super(`magic-context: backstop region would not shrink (${details.reason})`);
+  }
+}
+
+function logWarn(ctx: Context, line: string): void {
+  try {
+    const logger = (ctx as unknown as { logger?: { warn?(m: string): void; info?(m: string): void } }).logger;
+    (logger?.warn ?? logger?.info)?.call(logger, line);
+    // eslint-disable-next-line no-console
+    if (process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN === "1") console.error(line);
+  } catch {
+    // observability only
   }
 }
 

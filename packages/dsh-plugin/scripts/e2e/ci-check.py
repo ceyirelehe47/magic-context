@@ -565,6 +565,18 @@ def check_r22_lock(c, out: Path, runs):
     c.add("R10", bool(deferrals) and not errs,
           "backstop (90 % path; 36 % on this route) deferred silently while the historian held the lease: no compaction/end error",
           {"deferrals": deferrals[:6], "compactionEnds": len(ends), "errors": errs[:3]})
+    # Round 24 (R10 fix): an over-backstop check that finds no region whose
+    # summary could shrink is SKIPPED with a visible line (WARN + /ctx-status
+    # record), never silent and never a failed compaction/end. Every main
+    # check at/above the backstop must say what it did.
+    over = [(p, t, o) for _, p, t, o in checks if p != "?" and t != "?" and float(p) >= float(t)]
+    silent = [x for x in over if x[2] not in ("compacted", "deferred:historian-busy", "skipped:would-not-shrink")]
+    skipped = [x for x in over if x[2] == "skipped:would-not-shrink"]
+    skip_lines = re.findall(r"native pressure backstop skipped: (.*?) — the summary would not shrink", text_a)
+    c.add("R15", not silent and len(skip_lines) >= len(skipped) and not errs,
+          "every lock-a pressure check at/above the backstop compacted, deferred or was skipped with a visible 'backstop skipped' line (no silent check, no failed compaction/end)",
+          {"overBackstop": len(over), "outcomes": sorted({o for _, _, o in over}), "silent": silent[:4],
+           "skipped": len(skipped), "skipLines": [l[:160] for l in skip_lines[:3]], "errors": errs[:3]})
     last_def = text_a.rfind("native pressure backstop deferred")
     after = [x for x in checks if x[0] > last_def] if last_def >= 0 else []
     db_a = load_json(out / "db-lock-a.json") or {}

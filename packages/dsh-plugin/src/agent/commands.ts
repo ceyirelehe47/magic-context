@@ -20,6 +20,7 @@
  * slices wire in. Until wired, they answer with an explicit "not wired"
  * message instead of failing.
  */
+import { backstopSkipStatusBlock, readBackstopSkip } from "./backstop-guard";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { getCompartments } from "@magic-context/core/features/magic-context/compartment-storage";
@@ -199,7 +200,12 @@ export function registerCtxStatusCommand(ctx: Context, opts: CtxCommandsOptions)
         } catch {
           pending = undefined;
         }
-        return successResult(stripOpenCodeDbStatusLine(statusText) + pendingRestartStatusBlock(pending));
+        return successResult(
+          stripOpenCodeDbStatusLine(statusText) +
+            pendingRestartStatusBlock(pending) +
+            // Round 24 (R10): a skipped native backstop is never silent.
+            backstopSkipStatusBlock(readBackstopSkip(db, sessionId)),
+        );
       } catch (error) {
         return errorResult(`## Magic Status — Failed\n\n${describeError(error).brief}`);
       }

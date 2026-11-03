@@ -1,0 +1,11 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/backstop-no-shrink.test.ts:
+(pass) R10: MC main backstop over a region that cannot shrink (real rc.5 logs) > A (41642823892): region = only the previous checkpoint copy, covered → no compaction/start, no error, visible skip diagnostic [259.60ms]
+(pass) R10: MC main backstop over a region that cannot shrink (real rc.5 logs) > B (41640093586): checkpoint copy whose tail is uncovered → skipped BEFORE the mini-historian (no LLM call, no compaction/end error) [198.72ms]
+(pass) R10: MC main backstop over a region that cannot shrink (real rc.5 logs) > the skip never disables the backstop: new history beyond the retained tail → the next check compacts and clears the diagnostic [448.40ms]
+
+ 3 pass
+ 0 fail
+ 29 expect() calls
+Ran 3 tests across 1 file. [1.56s]

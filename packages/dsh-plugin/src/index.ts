@@ -100,6 +100,14 @@ export interface MagicContextHostService {
   registerExplicitRowConfig?(fn: () => ExplicitRowConfig): void;
   explicitRowConfig?(): ExplicitRowConfig;
   /**
+   * Round 24 (R10): the agent plane's backstop guard — previews what Magic
+   * would render for a native pressure-compaction region (so the engine can
+   * skip a region whose summary cannot be smaller) and records each skip for
+   * /ctx-status. Optional for older host stand-ins (no guard → never skip).
+   */
+  registerBackstopGuard?(guard: unknown): void;
+  backstopGuard?(): unknown;
+  /**
    * Current DSH override layer (dereferenced on every call, so live
    * `settings.mutate` edits apply without a remount). Optional for older
    * host stand-ins.
@@ -138,6 +146,7 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
   let historianBusy: ((agent: unknown) => boolean) | undefined;
   let runningConfig: (() => unknown) | undefined;
   let explicitRow: (() => ExplicitRowConfig) | undefined;
+  let backstopGuard: unknown;
   const host: MagicContextHostService = {
     ready,
     canonicalKey(dshSessionId: string): string {
@@ -176,6 +185,12 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
     },
     explicitRowConfig(): ExplicitRowConfig {
       return explicitRow?.() ?? {};
+    },
+    registerBackstopGuard(guard: unknown): void {
+      backstopGuard = guard;
+    },
+    backstopGuard(): unknown {
+      return backstopGuard;
     },
     overrides(): MagicDshOverrides {
       return readMagicOverrides(config);

@@ -264,7 +264,7 @@ export function createLlmSummarizeCall(
 }
 
 /** Message id of a surface event (`user/message` data.id, else data.message.id). */
-function surfaceEventMessageId(event: unknown): string | undefined {
+export function surfaceEventMessageId(event: unknown): string | undefined {
   if (event === null || typeof event !== "object") return undefined;
   const data = (event as { data?: unknown }).data;
   if (data === null || typeof data !== "object") return undefined;
@@ -286,6 +286,8 @@ export interface DshRawMessageProvider extends RawMessageProvider {
   readMessageOrdinalById(messageId: string): number | null;
   getMessageCount(): number;
   readMessageOrdinalRangeById(messageId: string): { first: number; last: number } | null;
+  /** Round 24: is this surface message a native-compaction checkpoint (or its op copy)? */
+  isCheckpointStandIn(messageId: string): boolean;
 }
 
 /**
@@ -332,9 +334,13 @@ export function transcriptRawMessageProvider(
   }
   // Round 23: a checkpoint / checkpoint copy on the surface stands for the
   // whole history range it shadowed.
+  const standInIds = new Set<string>();
   for (const [seq, range] of view.standInOrdinals) {
     const id = surfaceEventMessageId(eventBySeq.get(seq));
-    if (id !== undefined && !ordinalById.has(id)) surfaceRangeById.set(id, range);
+    if (id !== undefined && !ordinalById.has(id)) {
+      surfaceRangeById.set(id, range);
+      standInIds.add(id);
+    }
   }
   return {
     readMessages: () => [...view.messages],
@@ -347,6 +353,7 @@ export function transcriptRawMessageProvider(
       return surfaceRangeById.get(messageId) ?? null;
     },
     getMessageCount: () => view.messages.length,
+    isCheckpointStandIn: (messageId: string) => standInIds.has(messageId),
   };
 }
 

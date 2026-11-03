@@ -58,6 +58,7 @@ import {
   signalDshDeferredMaterialization,
 } from "./historian";
 import { createHistorianDrain, UNLOAD_DRAIN_MS } from "./historian-drain";
+import { createBackstopGuard } from "./backstop-guard";
 import { dshDreamSeams, registerDshDreamer } from "./dreamer";
 import { prunePressureTruncations } from "./pressure-truncation";
 import { pruneTerminalOutboxRows } from "./outbox";
@@ -542,6 +543,13 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
     if (busyDb === undefined || typeof id !== "string") return false;
     return isDshHistorianBusy(busyDb, host.canonicalKey(id));
   });
+
+  // Round 24 (R10): the native backstop skips a region whose Magic summary
+  // cannot be smaller (and records the skip for /ctx-status) instead of
+  // writing a compaction/start that compaction-basic then fails.
+  host.registerBackstopGuard?.(
+    createBackstopGuard({ db: () => busyDb, canonicalKey: (id) => host.canonicalKey(id) }),
+  );
 
   // Round 22: E2E-ONLY switches (inert unless MAGIC_CONTEXT_DSH_E2E=1 and the
   // switch's own variable are set; see e2e-hooks.ts). Production: undefined.
