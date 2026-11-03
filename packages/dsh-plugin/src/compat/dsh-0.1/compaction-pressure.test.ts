@@ -274,3 +274,94 @@ describe("native pressure backstop while a historian pass runs (round 21)", () =
     expect(rig.fired).toBe(true);
   });
 });
+
+// Round 21 — diagnostics (e2e evidence lines, MAGIC_CONTEXT_DEBUG_HISTORIAN=1).
+// P7: the effective threshold was kept on the shared engine instance, so two
+//     sessions checking pressure concurrently printed each other's
+//     thresholdPct. P8: the first pressure check of a session (no
+//     request/context header yet) printed pct=?.
+describe("native pressure diagnostics (round 21: P7 race, P8 first-step pct)", () => {
+  function rig(sessions: Array<{ id: string; window: number; delayMs: number; header: boolean; pct: number }>) {
+    const ctx = new Context();
+    const engine = new MagicCompactionEngine(ctx as never, { auto: false } as never);
+    const byModel = new Map(sessions.map((s) => [`m-${s.id}`, s]));
+    const agents = sessions.map((s) => {
+      const session = Session.create(SessionId(s.id));
+      for (let t = 1; t <= 2; t += 1) appendTurn(session, t);
+      if (s.header) {
+        (session as unknown as { requestHeader: () => unknown }).requestHeader = () => ({
+          config: { provider: "p", model: `m-${s.id}`, maxTokens: 8_192 },
+        });
+      }
+      return { id: s.id, session, options: { provider: "p", model: `m-${s.id}`, maxTokens: 8_192 } } as unknown as Agent;
+    });
+    Object.defineProperty(engine, "ctx", {
+      value: Object.assign(Object.create(ctx), {
+        llm: {
+          resolveModelInfo: async (_p: string, model: string) => {
+            const s = byModel.get(model)!;
+            await new Promise((resolve) => setTimeout(resolve, s.delayMs));
+            return { context: { contextWindow: s.window }, defaultMaxTokens: 8_192 };
+          },
+        },
+        tokenMeter: {
+          measure: (session: Session) => {
+            const s = sessions.find((x) => x.id === String(session.id))!;
+            return { totalTokens: Math.floor(s.window * s.pct), nodes: [] };
+          },
+        },
+        get: (name: string) => (name === "magicContextHost" ? { summarizeHook: () => undefined } : undefined),
+      }),
+      configurable: true,
+    });
+    return { engine, agents };
+  }
+
+  async function captureLines(fn: () => Promise<unknown>): Promise<string[]> {
+    const lines: string[] = [];
+    const original = console.error;
+    const env = process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN;
+    process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN = "1";
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    try {
+      await fn();
+    } finally {
+      console.error = original;
+      if (env === undefined) delete process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN;
+      else process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN = env;
+    }
+    return lines.filter((l) => l.includes("native pressure check"));
+  }
+
+  it("P7: concurrent checks on one engine each print their own thresholdPct", async () => {
+    // 1M window → backstop 90 % of window; 32k window (small) → a different % (max-tokens bound).
+    const { engine, agents } = rig([
+      { id: "big", window: 1_000_000, delayMs: 20, header: true, pct: 0.1 },
+      { id: "small", window: 32_768, delayMs: 30, header: true, pct: 0.1 },
+    ]);
+    const lines = await captureLines(() =>
+      Promise.all(agents.map((a) => engine.compactIfNeeded(a, "pressure", new AbortController().signal))),
+    );
+    expect(lines).toHaveLength(2);
+    const big = lines.find((l) => l.includes("window=1000000"))!;
+    const small = lines.find((l) => l.includes("window=32768"))!;
+    const pctOf = (l: string) => Number(/thresholdPct=([\d.]+)/.exec(l)?.[1]);
+    // Each line is priced from its own session: the threshold % recomputed
+    // from that line's window must match (different windows → different %).
+    expect(Number.isFinite(pctOf(big))).toBe(true);
+    expect(Number.isFinite(pctOf(small))).toBe(true);
+    expect(pctOf(big)).toBe(90);
+    expect(pctOf(small)).toBeLessThan(90);
+  });
+
+  it("P8: the first check (no request header yet) still prints pct from the agent's route", async () => {
+    const { engine, agents } = rig([{ id: "fresh", window: 131_072, delayMs: 0, header: false, pct: 0.42 }]);
+    const lines = await captureLines(() => engine.compactIfNeeded(agents[0]!, "pressure", new AbortController().signal));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("pct=42");
+    expect(lines[0]).toContain("window=131072");
+    expect(lines[0]).not.toContain("thresholdPct=?");
+  });
+});

@@ -145,21 +145,23 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     // line per pressure check with the pressure, the effective threshold and
     // the outcome — the evidence that native compaction stays behind MC.
     const probe = await this.describePressure(agent);
+    // Round 21 (P7): per-call diagnostics, not engine-instance fields — the
+    // engine is shared by every session, so concurrent checks overwrote each
+    // other's threshold.
+    const note: PressureNote = {};
     const say = (outcome: string) => {
       try {
         // eslint-disable-next-line no-console
         console.error(
-          `[magic-context] native pressure check: child=${isDshChildSession(agent)} pct=${probe.pct ?? "?"} thresholdPct=${this.lastPressureThresholdPct ?? "?"} window=${probe.window ?? "?"} outcome=${outcome}`,
+          `[magic-context] native pressure check: child=${isDshChildSession(agent)} pct=${probe.pct ?? "?"} thresholdPct=${note.thresholdPct ?? "?"} window=${probe.window ?? "?"} outcome=${outcome}`,
         );
       } catch {
         // diagnostics only
       }
     };
-    this.lastPressureThresholdPct = undefined;
-    this.lastPressureOutcome = undefined;
     try {
-      const result = await this.pressureCompaction(agent, trigger, signal, probe);
-      say(result === null ? (this.lastPressureOutcome ?? "none") : "compacted");
+      const result = await this.pressureCompaction(agent, trigger, signal, probe, note);
+      say(result === null ? (note.outcome ?? "none") : "compacted");
       return result;
     } catch (error) {
       say(`error:${(error instanceof Error ? error.message : String(error)).slice(0, 160)}`);
@@ -167,14 +169,9 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     }
   }
 
-  /** Last effective native threshold (% of window) computed by a debug probe. */
-  private lastPressureThresholdPct: number | undefined;
-
   private async describePressure(agent: Agent): Promise<{ pct?: number; window?: number; reserved?: number }> {
     try {
-      const header = (agent.session as unknown as {
-        requestHeader?: () => { config?: { provider?: string; model?: string; maxTokens?: number } } | undefined;
-      }).requestHeader?.()?.config;
+      const header = routeOf(agent);
       const ctx = this.ctx as unknown as {
         tokenMeter?: { measure(s: unknown): { totalTokens: number } };
         llm?: { resolveModelInfo?(p: string, m: string): Promise<{ context?: { contextWindow?: number }; defaultMaxTokens?: number }> };
@@ -194,9 +191,6 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     }
   }
 
-  /** Outcome override for the debug probe line (round 21). */
-  private lastPressureOutcome: string | undefined;
-
   /**
    * Would the backstop fire now under `config`? Prices the same threshold the
    * debug probe does (window, reserved output, threshold ratio / headroom,
@@ -210,9 +204,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
   ): Promise<{ pct?: number; thresholdPct: number | string } | null> {
     const probe = known?.window !== undefined ? known : await this.describePressure(agent);
     if (probe.window === undefined || probe.pct === undefined) return { thresholdPct: "?" };
-    const header = (agent.session as unknown as {
-      requestHeader?: () => { config?: { provider?: string; model?: string } } | undefined;
-    }).requestHeader?.()?.config;
+    const header = routeOf(agent);
     const override = config.modelPolicies.find((p) => p.provider === header?.provider && p.model === header?.model);
     const t = nativePressureThresholdTokens(probe.window, probe.reserved ?? 0, {
       thresholdRatio: override?.thresholdRatio ?? config.thresholdRatio,
@@ -227,17 +219,16 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     config: ResolvedConfig,
     agent: Agent,
     probe?: { window?: number; reserved?: number },
+    note?: PressureNote,
   ): void {
-    if (probe?.window === undefined) return;
-    const header = (agent.session as unknown as {
-      requestHeader?: () => { config?: { provider?: string; model?: string } } | undefined;
-    }).requestHeader?.()?.config;
+    if (probe?.window === undefined || note === undefined) return;
+    const header = routeOf(agent);
     const override = config.modelPolicies.find((p) => p.provider === header?.provider && p.model === header?.model);
     const t = nativePressureThresholdTokens(probe.window, probe.reserved ?? 0, {
       thresholdRatio: override?.thresholdRatio ?? config.thresholdRatio,
       headroomTokens: override?.headroomTokens ?? config.headroomTokens,
     });
-    this.lastPressureThresholdPct = t === null ? undefined : Math.round((t / probe.window) * 1000) / 10;
+    note.thresholdPct = t === null ? undefined : Math.round((t / probe.window) * 1000) / 10;
   }
 
   private async pressureCompaction(
@@ -245,16 +236,17 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     trigger: CompactionTrigger,
     signal: AbortSignal,
     probe?: { window?: number; reserved?: number },
+    note?: PressureNote,
   ): Promise<CompactionResult | null> {
     const base = this.config;
     if (!isDshChildSession(agent)) {
       const percentage = readHostNativePressurePercentage(this.ctx, agent);
       if (percentage === null) {
-        this.notePressureThreshold(base, agent, probe);
+        this.notePressureThreshold(base, agent, probe, note);
         return super.compactIfNeeded(agent, trigger, signal);
       }
       const main = magicMainPressureConfig(base, this.explicitPressure, percentage);
-      this.notePressureThreshold(main, agent, probe);
+      this.notePressureThreshold(main, agent, probe, note);
       // Round 21: a background historian pass holds the compartment lease, so
       // the Magic summarize hook could not run its mini-historian now (it would
       // wait, then close compaction/end with "lease busy"). The backstop is
@@ -263,7 +255,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       if (readHostHistorianBusy(this.ctx, agent)) {
         const deferred = await this.backstopWouldFire(main, agent, probe);
         if (deferred) {
-          this.lastPressureOutcome = "deferred:historian-busy";
+          if (note !== undefined) note.outcome = "deferred:historian-busy";
           logInfo(
             this.ctx,
             `[magic-context] native pressure backstop deferred: a historian pass is running for this session (pressure ${deferred.pct ?? "?"} % ≥ ${deferred.thresholdPct} %); the next pressure check retries`,
@@ -273,7 +265,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       }
       return this.withPressureConfig(main, () => super.compactIfNeeded(agent, trigger, signal));
     }
-    this.notePressureThreshold(base, agent, probe);
+    this.notePressureThreshold(base, agent, probe, note);
     try {
       return await super.compactIfNeeded(agent, trigger, signal);
     } catch (error) {
@@ -281,7 +273,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
         throw error;
       }
       const legal = withConfigOverrides(base, { headroomTokens: 0 });
-      this.notePressureThreshold(legal, agent, probe);
+      this.notePressureThreshold(legal, agent, probe, note);
       return this.withPressureConfig(legal, () => super.compactIfNeeded(agent, trigger, signal));
     }
   }
@@ -299,8 +291,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     signal?: AbortSignal,
   ): Promise<CompactionResult> {
     try {
-      const session = agent.session as unknown as { requestHeader?: () => { config?: { provider?: string; model?: string } } | undefined };
-      const target = session.requestHeader?.()?.config;
+      const target = routeOf(agent);
       const ctx = this.ctx as unknown as {
         tokenMeter?: { measure(s: unknown): { totalTokens: number } };
         llm?: { resolveModelInfo?(p: string, m: string): Promise<{ context?: { contextWindow?: number } }> };
@@ -375,6 +366,30 @@ function readHostNativePressurePercentage(ctx: Context, agent: Agent): number | 
   }
   if (value === undefined) return null;
   return Number.isFinite(value) && value > 0 && value <= 100 ? value : DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE;
+}
+
+/** Per-call pressure diagnostics (round 21, P7). */
+interface PressureNote {
+  thresholdPct?: number;
+  outcome?: string;
+}
+
+/**
+ * The session's provider/model/maxTokens route: the request header once the
+ * session has made a request, else the agent's own options (round 21, P8 —
+ * the first pressure check of a session has no request/context yet).
+ */
+function routeOf(agent: Agent): { provider?: string; model?: string; maxTokens?: number } {
+  const header = (agent.session as unknown as {
+    requestHeader?: () => { config?: { provider?: string; model?: string; maxTokens?: number } } | undefined;
+  }).requestHeader?.()?.config;
+  if (header?.provider && header.model) return header;
+  const options = (agent as unknown as { options?: { provider?: string; model?: string; maxTokens?: number } }).options;
+  return {
+    provider: options?.provider,
+    model: options?.model,
+    maxTokens: header?.maxTokens ?? options?.maxTokens,
+  };
 }
 
 /**
