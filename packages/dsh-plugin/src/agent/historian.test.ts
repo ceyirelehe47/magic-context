@@ -312,6 +312,56 @@ describe("runDshHistorian repair retry (upstream runHistorianPrompt parity)", ()
   });
 });
 
+describe("e2e-only historian corruption (round 19)", () => {
+  it("is a no-op without the env var / with a relative path, and corrupts exactly once per marker", async () => {
+    const { maybeCorruptHistorianOutputForE2e, E2E_CORRUPT_HISTORIAN_ENV, E2E_CORRUPTED_HISTORIAN_OUTPUT } = await import("./historian");
+    const dir = mkdtempSync(join(tmpdir(), "dsh-magic-e2e-corrupt-"));
+    try {
+      const logs: string[] = [];
+      const log = (m: string) => logs.push(m);
+      expect(maybeCorruptHistorianOutputForE2e("<ok/>", log, {})).toBe("<ok/>");
+      expect(maybeCorruptHistorianOutputForE2e("<ok/>", log, { [E2E_CORRUPT_HISTORIAN_ENV]: "rel/marker" })).toBe("<ok/>");
+      const env = { [E2E_CORRUPT_HISTORIAN_ENV]: join(dir, "marker") };
+      expect(maybeCorruptHistorianOutputForE2e("<ok/>", log, env)).toBe(E2E_CORRUPTED_HISTORIAN_OUTPUT);
+      expect(maybeCorruptHistorianOutputForE2e("<ok/>", log, env)).toBe("<ok/>");
+      expect(logs.length).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("drives the real repair retry: the corrupted first output is repaired and published", async () => {
+    const { E2E_CORRUPT_HISTORIAN_ENV } = await import("./historian");
+    const env = makeEnv();
+    const markerDir = mkdtempSync(join(tmpdir(), "dsh-magic-e2e-corrupt-"));
+    const prev = process.env[E2E_CORRUPT_HISTORIAN_ENV];
+    process.env[E2E_CORRUPT_HISTORIAN_ENV] = join(markerDir, "marker");
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      const calls: Array<{ validationError?: string; previousOutput?: string } | undefined> = [];
+      const good = validHistorianXml([{ start: 1, end: 3, title: "intro" }, { start: 4, end: 7, title: "work" }], 8);
+      const deps = historianDeps(db, session, {
+        summarize: (async (_c: unknown, _p: unknown, _s: unknown, repair?: { validationError: string; previousOutput: string }) => {
+          calls.push(repair);
+          return good;
+        }) as DshSummarizeCall,
+      });
+      expect(await runDshHistorian(deps)).toBe(true);
+      expect(calls.length).toBe(2);
+      expect(calls[1]?.previousOutput).toContain('<compartment start="1" end="');
+      expect(getCompartments(db, SESSION_ID).length).toBe(2);
+      db.close();
+    } finally {
+      if (prev === undefined) delete process.env[E2E_CORRUPT_HISTORIAN_ENV];
+      else process.env[E2E_CORRUPT_HISTORIAN_ENV] = prev;
+      rmSync(markerDir, { recursive: true, force: true });
+      await env.cleanup();
+    }
+  });
+});
+
 describe("runDshHistorian", () => {
   it("publishes atomically: compartments + marker + onPublished + lease released + telemetry", async () => {
     const env = makeEnv();

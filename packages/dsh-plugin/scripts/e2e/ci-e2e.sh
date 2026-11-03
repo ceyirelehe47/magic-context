@@ -126,6 +126,11 @@ export MC_E2E_MAIN_PROVIDER=opencode-go-40k
 MAIN_MODEL_KEY="opencode-go-40k/deepseek-v4.1-flash"
 
 # --- C: main session pushed past the 65 % execute threshold (40k window)
+# Round 19: e2e-only fault injection — the FIRST historian output of scenario C
+# is replaced by truncated XML (exactly once, O_EXCL marker) so the repair
+# retry (f8c663fee) runs in real DSH; check C10. Never set outside this script.
+export MAGIC_CONTEXT_DSH_E2E_CORRUPT_HISTORIAN_ONCE="$(cd "$OUT" && pwd)/historian-corrupt.marker"
+rm -f "$MAGIC_CONTEXT_DSH_E2E_CORRUPT_HISTORIAN_ONCE"
 export OPENCODE_SESSION="mc-ci-cmp-$(date +%s)"
 r17_db snapshot "$DB" > "$OUT/r17-snap-c0.json"
 run cmp-01 "Remember this codeword exactly: $MC_E2E_CODEWORD. It is important; I will ask you for it near the end of this session. For now reply with the single word: noted."
@@ -161,6 +166,7 @@ if [[ -n "$CSID" ]]; then
   decode_session "$CSID" "$OUT/cmp-session.jsonl"
 fi
 r17_db snapshot "$DB" > "$OUT/r17-snap-c1.json"
+unset MAGIC_CONTEXT_DSH_E2E_CORRUPT_HISTORIAN_ONCE
 
 # --- S: a delegated child session hits its own (24k) context limit
 export OPENCODE_SESSION="mc-ci-child-$(date +%s)"

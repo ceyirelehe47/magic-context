@@ -28,6 +28,8 @@
  * Slice boundary: runRecomp / runWrapup seams are Phase 4 — not exported.
  */
 import type { Agent } from "@deepseek-ai/dsh-agent";
+import { closeSync, openSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import {
   appendCompartments,
   buildCompartmentBlock,
@@ -434,6 +436,7 @@ async function runHistorianPassCore(args: HistPassArgs): Promise<HistPassResult>
   if (typeof text !== "string" || text.trim().length === 0) {
     return { ok: false, status: "failed", reason: "historian returned no usable text" };
   }
+  text = maybeCorruptHistorianOutputForE2e(text, log);
 
   const maxExistingSequence = priorCompartments.reduce((max, c) => Math.max(max, c.sequence), -1);
   const sequenceOffset = priorCompartments.length === 0 ? 0 : maxExistingSequence + 1;
@@ -976,4 +979,33 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
       };
     });
   };
+}
+
+
+/**
+ * E2E-ONLY fault injection (round 19): exercise the historian repair retry in
+ * real DSH. When `MAGIC_CONTEXT_DSH_E2E_CORRUPT_HISTORIAN_ONCE` names an
+ * ABSOLUTE marker path that does not exist yet, the first historian output is
+ * replaced by truncated XML and the marker is created with O_EXCL — exactly
+ * once across processes (headless runs one process per turn). Production never
+ * sets the variable; an unset/relative value or an existing marker is a no-op.
+ * Only the primary output is touched, never the repair call's.
+ */
+export const E2E_CORRUPT_HISTORIAN_ENV = "MAGIC_CONTEXT_DSH_E2E_CORRUPT_HISTORIAN_ONCE";
+export const E2E_CORRUPTED_HISTORIAN_OUTPUT = '<output>\n<compartments>\n<compartment start="1" end="';
+
+export function maybeCorruptHistorianOutputForE2e(
+  text: string,
+  log: (message: string) => void,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const marker = env[E2E_CORRUPT_HISTORIAN_ENV];
+  if (typeof marker !== "string" || marker.length === 0 || !isAbsolute(marker)) return text;
+  try {
+    closeSync(openSync(marker, "wx"));
+  } catch {
+    return text; // already injected once (or unwritable): never again
+  }
+  log(`[magic-context] e2e: historian output corrupted once (${E2E_CORRUPT_HISTORIAN_ENV}); expecting a repair retry`);
+  return E2E_CORRUPTED_HISTORIAN_OUTPUT;
 }

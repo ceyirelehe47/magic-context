@@ -16,7 +16,8 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       the early codeword is still answerable, no §N§ in visible output, no
       overlapping / stuck compression; C7/C8 (round 18) the cached m0
       <session-history> carries the compartments and the codeword is answered
-      from it without a retrieval tool
+      from it without a retrieval tool; C10 (round 19) the historian repair
+      retry ran in real DSH (e2e-only one-shot corruption of the first output)
   S*  round 17/18: delegated child reads eight <8 KB files on a 24k route:
       the stock compaction-basic summarizer (not only the pruner) ran in the
       child, Magic wrote no child rows, child finished, result reached the parent
@@ -254,6 +255,25 @@ def check_r17(c, out: Path, runs):
             dup.append((e.get("seq"), e.get("type"), rep))
     c.add("C9", (out / "cmp-session.jsonl").exists() and not dup,
           "no repeated [dropped §N§] for one tag inside one session event", {"placeholders": placeholders, "dups": dup[:5]})
+    # C10 (round 19) the historian repair retry ran in real DSH: the e2e-only
+    # injection corrupted the first historian output exactly once, the repair
+    # retry fired after it, and the pass still published (C6: no failure).
+    inj, rep = [], []
+    for n in seq:
+        t = (out / f"{n}.log").read_text(errors="replace") if (out / f"{n}.log").exists() else ""
+        i = t.find("e2e: historian output corrupted once")
+        if i >= 0:
+            inj.append(n)
+            if "historian repair retry:" in t[i:]:
+                rep.append(n)
+        elif inj and "historian repair retry:" in t:
+            rep.append(n)
+    m = re.findall(r"historian repair retry: ([^\n]{0,160})", "".join(
+        (out / f"{n}.log").read_text(errors="replace") for n in seq if (out / f"{n}.log").exists()))
+    c.add("C10", len(inj) == 1 and bool(rep) and bool(comps) and not meta_failures(final),
+          "historian repair retry exercised in real DSH (injected once, repaired, published, no failure)",
+          {"injectedIn": inj, "repairIn": rep, "errors": m[:2], "compartments": len(comps),
+           "marker": (out / "historian-corrupt.marker").exists()})
     # C5 no §N§ in user-visible output of any round 17 turn
     leaks = {}
     for n in seq + ["child-parent"]:
@@ -375,6 +395,10 @@ def check_r17_child(c, out: Path, runs):
     c.add("S7", bool(sums) and max(phits, chits) >= 6,
           "child result (>= 6 of 8 CHECKSUM codes) in the parent reply or the child's final message",
           {"parentHits": phits, "childHits": chits, "of": len(sums), "parent": ptext[:200], "child": ctext[:200]})
+
+
+def meta_failures(final):
+    return (final.get("meta") or {}).get("historian_failure_count") or 0
 
 
 def ordered_pressure_events(path: Path):
