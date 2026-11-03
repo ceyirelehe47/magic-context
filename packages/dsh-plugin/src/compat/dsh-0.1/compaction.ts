@@ -94,7 +94,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
   protected readonly magicSummarize?: SummarizeHook;
 
   /** Which top-level pressure keys the user set explicitly (those always win). */
-  protected readonly explicitPressure: { headroomTokens: boolean; thresholdRatio: boolean; retain: boolean };
+  protected readonly explicitPressure: { headroomTokens: boolean; thresholdRatio: boolean; retain: boolean; retries?: boolean };
   /** Round 22: sessions whose current historian episode already used its one backstop deferral. */
   private readonly backstopDeferred = new WeakSet<object>();
 
@@ -105,6 +105,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       headroomTokens: config.headroomTokens !== undefined,
       thresholdRatio: config.thresholdRatio !== undefined,
       retain: config.retainTokens !== undefined || config.retainRatio !== undefined,
+      retries: (config as { compactionRetries?: number }).compactionRetries !== undefined,
     };
   }
 
@@ -169,6 +170,68 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       say(`error:${(error instanceof Error ? error.message : String(error)).slice(0, 160)}`);
       throw error;
     }
+  }
+
+  /** Round 23: last region committed per session during the current pressure check. */
+  private readonly committedRegion = new WeakMap<object, CompactionResult>();
+
+  /**
+   * Round 23 — the MC main backstop compacts ONCE per pressure check.
+   * compaction-basic retries while the session is still above the threshold;
+   * on an MC main session the retry's region is the checkpoint the first
+   * attempt just wrote, Magic renders the same compartments for it, and
+   * compaction-basic rejects it ("summary is not smaller than the shadowed
+   * content") — the whole check failed although the first compaction had
+   * committed (real rc.5 e2e run 41625463298, 6 of 7 backstop compactions).
+   * Unless the user set `compactionRetries` (top level or per route), main
+   * sessions run with 0 retries, and "still above threshold" after a committed
+   * compaction returns that compaction: what stays above the backstop is the
+   * retained tail / already-summarized history, which MC's own pipeline
+   * (historian, drops, pressure truncation) handles; the next check retries.
+   */
+  private async compactOnce(
+    main: ResolvedConfig,
+    agent: Agent,
+    trigger: CompactionTrigger,
+    signal: AbortSignal,
+  ): Promise<CompactionResult | null> {
+    const session = agent.session as unknown as object;
+    const once = this.explicitPressure.retries === true ? main : withConfigOverrides(main, { compactionRetries: 0 });
+    this.recordCommittedRegions();
+    this.committedRegion.delete(session);
+    try {
+      return await this.withPressureConfig(once, () => super.compactIfNeeded(agent, trigger, signal));
+    } catch (error) {
+      const committed = this.committedRegion.get(session);
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.explicitPressure.retries === true || committed === undefined || !/compaction still above threshold after/.test(message)) {
+        throw error;
+      }
+      logInfo(
+        this.ctx,
+        `[magic-context] native pressure backstop compacted once; the session is still above it (${message.replace(/^compaction still above threshold after \d+ compaction attempts? /, "")}) — the rest is the retained tail / already-summarized history, left to Magic; the next pressure check retries`,
+      );
+      return committed;
+    } finally {
+      this.committedRegion.delete(session);
+    }
+  }
+
+  /** Wrap the (possibly instance-overridden) `compactRegion` once so a committed region is remembered per session. */
+  private recordCommittedRegions(): void {
+    const self = this as unknown as {
+      compactRegion: (start: unknown, end: unknown, agent: Agent, signal?: AbortSignal) => Promise<CompactionResult>;
+    };
+    const current = self.compactRegion as typeof self.compactRegion & { __magicRecords?: true };
+    if (current.__magicRecords === true) return;
+    const committed = this.committedRegion;
+    const wrapped = async function (this: unknown, start: unknown, end: unknown, agent: Agent, signal?: AbortSignal) {
+      const result = await current.call(this, start, end, agent, signal);
+      committed.set(agent.session as unknown as object, result);
+      return result;
+    } as typeof current;
+    wrapped.__magicRecords = true;
+    self.compactRegion = wrapped;
   }
 
   private async describePressure(agent: Agent): Promise<{ pct?: number; window?: number; reserved?: number }> {
@@ -286,7 +349,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       } else {
         this.backstopDeferred.delete(session);
       }
-      return this.withPressureConfig(main, () => super.compactIfNeeded(agent, trigger, signal));
+      return this.compactOnce(main, agent, trigger, signal);
     }
     this.notePressureThreshold(base, agent, probe, note);
     try {
@@ -455,7 +518,7 @@ export function magicMainPressureConfig(
 
 function withConfigOverrides(
   base: ResolvedConfig,
-  overrides: { headroomTokens?: number; thresholdRatio?: number },
+  overrides: { headroomTokens?: number; thresholdRatio?: number; compactionRetries?: number },
 ): ResolvedConfig {
   return Object.freeze({ ...base, ...overrides }) as ResolvedConfig;
 }
