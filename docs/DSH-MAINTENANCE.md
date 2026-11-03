@@ -42,6 +42,64 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
+Baseline (round 21, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; release
+**`dsh/0.49.35-dsh.2` → `7848c0430`** (version bump only on top of round 20,
+push run 41608723776 green; real e2e for that code: 41601119332 @ `542c6569e`
+66/66); round 21 HEAD push run 41611430368 @ `6ce2603f9` and dispatch run
+41611644712 @ `6ce2603f9` (`e2e=true`)):
+`typecheck:dsh` **0 errors**, **test-file typecheck 0 errors (now gating)**,
+core typecheck **0 errors**, `dsh-plugin` **515 pass** (round 21 +21),
+`adapter-api` **15 pass**, `contracts:dsh` **99 pass**, 0 fail; real-model
+`e2e` E2E_RESULT_PLACEHOLDER (67 judged = round 20's 66 + R8).
+
+Round 21 fixes (adapter only, no core change; each with a red test first):
+- `b27f24410` **lease busy no longer fails native compaction.** (a) The Magic
+  summarize hook (`/compact`, or a backstop that raced the probe) now WAITS
+  for a compartment lease held by a background historian pass — bounded,
+  `DEFAULT_SUMMARIZE_LEASE_WAIT_MS` = 45 s, poll 500 ms, abortable —
+  re-checking coverage on every poll (the background pass usually publishes
+  exactly the range compaction needs, then no LLM call is made); still busy
+  after 45 s → fails closed with "… after waiting Ns (retry once it
+  finishes)". (b) The 90 % native pressure backstop on an MC main session
+  checks `magicContextHost.historianBusy(agent)` (agent plane probe over
+  `getCompartmentLeaseBlocker`) and, when the session is over the backstop
+  while the lease is held, **defers**: returns no compaction, no error, logs
+  `native pressure backstop deferred: a historian pass is running …; the
+  next pressure check retries` (debug probe outcome `deferred:historian-busy`);
+  below the backstop nothing is logged; child sessions ignore the probe;
+  a throwing probe never blocks. The next step's pressure check retries.
+  Unit: hook 5, pressure 5 (6 red before).
+- `0927d1b40` **settings page vs runtime.** `historian.model` (incl.
+  `historian.opencode.model`) and `protected_tokens` are now **hot**: the
+  agent plane reads them per call/step from the live jsonc view (DSH override
+  > explicit row config > current jsonc; `tools.protectedTokens` too, which
+  previously did not even follow the DSH override). They left the restart
+  notice. Every other restart-only section (memory, dreamer, compaction,
+  other `historian` keys, mural, caveman, commit-cluster, temporal, prompt
+  surface, cache TTL, protected_tags, history budget) is shown as
+  **running value · pending restart: new value** — settings page
+  (`MagicSettingsView.pendingRestart`, from the startup jsonc the agent plane
+  registers via `magicContextHost.registerRunningConfig`) and `/ctx-status`
+  ("Pending restart" block). Unit only (6 tests, 5 red before).
+- `110acca0d` + `52f33bbf8` **test-file type errors 156 → 0** (fixture typing
+  only: `as never` / `as unknown as` casts on branded `ToolCallId`, rc.5
+  assistant-message inputs and `assistant/message` payloads, `PreStepDecision`
+  stubs, a `bun:sqlite` view for `db.query`, a test-only `react` module shim
+  in `test-types/`; no assertion or fixture value changed). `6ce2603f9` makes
+  the step **gating** in `checks`.
+- `a84fb1553` **pressure diagnostics** (P7/P8): the debug probe's threshold
+  and outcome are per call (concurrent sessions printed each other's
+  `thresholdPct`); the session route falls back to the agent's options when
+  the session has no request header yet (first check printed `pct=?`).
+- `9ab4c3a9e` **coordinator caches bounded**: `appliedOps` keeps 256 opIds per
+  session (FIFO) and 64 sessions (LRU) — the outbox stays authoritative, an
+  evicted id is still answered "already-applied" by `getOutboxRecord`; a
+  settled per-session plan queue entry is removed.
+- `5b30b1ae5` e2e **R8**: no `compaction/end` error and no log line says
+  "summarize mini-historian lease busy" in any run; reports backstop
+  deferrals, `/compact` lease waits and first-step `pct=?` counts.
+- `7848c0430` release bump `0.49.35-dsh.2` (tag `dsh/0.49.35-dsh.2`).
+
 Baseline (round 20, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; HEAD after
 the round 20 fixes, release tag `dsh/0.49.35-dsh.1` unchanged → `270629e75`;
 push run 41600879637 @ `542c6569e` and dispatch run 41601119332 @ `542c6569e` (`e2e=true`)):
@@ -385,6 +443,7 @@ Round 17/18 新增检查：
 | C10 | （round 19）e2e 专用开关把 scenario C 第一次 historian 输出换成截断的 XML（只一次，O_EXCL 标记文件）：之后出现 `historian repair retry`，compartment 仍写出，historian 无失败 |
 | R0–R6 | （round 19）scenario P，100k 主会话路由：R1 MC 管理的主会话里没有低于 65 % 的原生压缩；R2 MC historian 先触发（≥63 %，阈值 65）；R3 会话越过旧默认阈值（30.4 %）时没有原生压缩；R4 旧策略（显式写入 compaction-basic 默认值）实测在 65 % 之前原生压缩；R5 所有日志里没有 "leaving no pressure budget"；R6 引擎每步打印的有效主会话阈值 ≥ 65 % |
 | R7 | （round 20）主会话原生压缩（MC summarize hook）必须成功：pold/pnew 会话里至少有一次 `compaction/end` 且都没有 error，所有日志里没有 "summarize range unresolvable" |
+| R8 | （round 21）所有会话的 `compaction/end` 都没有 "lease busy" 错误，所有日志里没有 "summarize mini-historian lease busy"；details 里报告 90 % 兜底推迟次数、`/compact` 等锁次数、首步 `pct=?` 次数 |
 
 Round 19：dispatch run 41586948399 @ `9d16d6fab`（2 FAIL：R2，读结果被截到 ~8 KB 且模型自己 ctx_reduce，P 只到 52 %；R4，headless 不打印 ctx.logger）→ 41589483637 @ `34e728b60`（2 FAIL：R4，80k 上 DSH 默认值本身非法：retain 12144 ≥ 阈值 10368；R6 首个 pre-step 没有 header；C10 **PASS**）→ 41591017319 @ `0eb2e69c4`（R0–R6 **全过**；C 场景因模型每轮 ctx_reduce、峰值 61 % 而失败 8 项）→ 41592114076 @ `6615a8d5b`（64/65；仅 C8 失败：模型答对暗号但先调了一次 `ctx_search`，属模型行为。C8 改为只判答案 + m0 含暗号，检索调用仅记录）→ 41593887664 @ `270629e75`（原生兜底改为 90 % 后复验，**0 FAIL**；R6 有效阈值 90；MC 首次触发 73 %；C8、C10 通过）。发行 tag `dsh/0.49.35-dsh.1` 指向 `270629e75`。
 
@@ -787,6 +846,14 @@ attached); `5` (out of bounds) and an unknown field answered `invalid` and
 wrote nothing. `unset` removed the row and both endpoints fell back to 65
 (source `jsonc`).
 
+**Pending restart (round 21).** The view also carries `pendingRestart`: the
+restart-only jsonc sections whose current value differs from the one the
+running agent plane started with (`{ key, running, next }`). The page shows
+them as "运行中的值 … · 待重启生效 …" under the precedence note, and
+`/ctx-status` appends a "Pending restart" block with the same data.
+`historian.model` and `protected_tokens` are not in that list: they apply
+live.
+
 ## Magic Context composer meter (replacing the native context indicator)
 
 Goal: the composer's context ring shows Magic Context's view (yellow at the
@@ -850,6 +917,8 @@ floor = threshold − 2). Config lives on the **`magic-agent` row**
   Fallback when unset on the row: core config `historian.model` (legacy flat
   string) or `historian.opencode.model` (string or `{ model }`) — DSH reads
   the `opencode` harness block because DSH refs are `provider/model`.
+  Since round 21 the jsonc value is read live (≈3 s TTL, no restart needed);
+  precedence: DSH settings override > explicit row value > jsonc.
 - **Drain** (`agent/historian-drain.ts`). Passes are fire-and-forget, and
   `dsh headless` exits right after the turn (~5 s shutdown budget), which
   used to kill the pass mid-flight (`reclaimed compartment lease from dead
@@ -1159,7 +1228,7 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       test red→green, real run 41601119332 C6/C10 PASS with no UNIQUE error —
       the overlap itself is timing-dependent and was not reproduced on demand,
       no "lease busy" line in that run).
-    - **Partly:** `typecheck:dsh` still excludes `*.test.ts`; the new
+    - **Partly (fixed in round 21, see 15):** `typecheck:dsh` still excludes `*.test.ts`; the new
       informational step type-checks them (156 errors in fixtures:
       branded `ToolCallId`, assistant events without `stream`, untyped
       `react`). Fixing them is mechanical but touches ~30 test files; make the
@@ -1180,6 +1249,27 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       90 % backstop on a main session fails closed ("mini-historian lease
       busy") when a background historian pass is running at that moment; the
       next pressure check retries.
+    - **Round 21 update:** all four "Not changed" items and the side effect
+      are fixed — see 15.
+15. **Round 21 (2026-11-03) — status.**
+    - **Fixed:** lease-busy side effect (`b27f24410`: `/compact` waits ≤ 45 s
+      for the background pass, the 90 % backstop defers quietly and retries
+      on the next pressure check); settings page vs runtime (`0927d1b40`:
+      `historian.model` / `protected_tokens` hot, other restart-only sections
+      shown as running + pending restart); test-file typecheck 156 → 0 and
+      gating (`110acca0d`, `52f33bbf8`, `6ce2603f9`); P7 / P8 diagnostics
+      (`a84fb1553`); coordinator caches bounded (`9ab4c3a9e`).
+    - **Verified how:** all by unit tests (red first); real e2e R8 is a
+      regression scan — the overlap of a background pass with a native
+      compaction is timing-dependent and no e2e scenario issues `/compact`
+      (headless has no slash-command step), so the wait path itself is
+      unit-verified only. The `/compact` wait is bounded at 45 s: a historian
+      pass slower than that still fails `/compact` (with a clear "retry once
+      it finishes" message).
+    - **Still restart-only:** every jsonc section except `enabled`,
+      `execute_threshold_*`, `historian.model` and `protected_tokens`
+      (protected-token tier overrides included) — now visible as pending
+      instead of silently ignored.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
