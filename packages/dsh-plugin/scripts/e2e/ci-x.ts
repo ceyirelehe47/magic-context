@@ -5,7 +5,7 @@
 //
 // truncations (tag, head/tail, original chars + sha256, basis seq, created_at),
 // tool tags (tag → message id, status), outbox status counts, pending ops,
-// compartments (range), leases, historian state.
+// compartments (range), leases (holder pid), historian state, integrity_check.
 import { Database } from "bun:sqlite";
 
 const [dbPath, sid] = process.argv.slice(2);
@@ -26,9 +26,14 @@ out.outbox = has("dsh_context_outbox") ? q("select status, count(*) n from dsh_c
 out.pendingOps = has("pending_ops") ? q("select operation, count(*) n from pending_ops where session_id like ? group by operation", like) : [];
 out.compartments = has("compartments") ? q("select id, start_message, end_message from compartments where session_id like ? order by start_message", like) : [];
 out.leases = has("compartment_state_lease")
-  ? q("select holder_id, expires_at, ? as now from compartment_state_lease where session_id like ?", Date.now(), like)
+  ? q("select holder_id, owner_pid, expires_at, ? as now from compartment_state_lease where session_id like ?", Date.now(), like)
   : [];
 out.meta = has("session_meta")
   ? db.query("select compartment_in_progress, historian_failure_count, last_context_percentage from session_meta where session_id like ?").get(like)
   : null;
+// round 23c scenario Y (kill -9): whole-file integrity + every session's row counts
+out.integrity = (db.query("pragma integrity_check").get() as Record<string, string>)?.integrity_check ?? null;
+out.allSessions = q(
+  "select session_id, count(*) as tags, sum(case when status='active' then 1 else 0 end) as active from tags group by session_id order by session_id",
+);
 console.log(JSON.stringify(out));

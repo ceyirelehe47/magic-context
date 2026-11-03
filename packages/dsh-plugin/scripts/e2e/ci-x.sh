@@ -60,6 +60,14 @@ for k in range(1, 15):
     plans["x4"].append(read(f"x4-en{k:02d}.txt"))
 plans["x4"].append({"text": "DONE x4"})
 plans["x5"] = [{"text": "DONE x5"}]
+# round 23c scenario Y (kill -9 during a historian hold)
+plans["y1"] = []
+for k in range(1, 4):
+    write(f"y1-zh{k}.txt", f"MOCKSTEP:y1:{k}", zh_lines(5000, f"y{k}", ZH2 if k % 2 else ZH))
+    plans["y1"].append(read(f"y1-zh{k}.txt"))
+plans["y1"].append({"text": "DONE y1"})
+plans["y2"] = [{"text": "DONE y2"}]
+plans["y3"] = [{"text": "DONE y3"}]
 plans["xr"] = [{"text": "DONE xr"}]
 json.dump(plans, open(plans_out, "w"), ensure_ascii=False)
 PY
@@ -110,6 +118,54 @@ if [[ -n "$XSID" ]]; then
   # rewrites $HOME to "~" inside the tool results, so hash them NOW (round 23c).
   [[ -s "$OUT/x-session.jsonl" ]] && python3 "$HERE/ci-check.py" xsha "$OUT" > "$OUT/x-session-sha.json" 2>/dev/null
 fi
+
+# --- Scenario Y (round 23c, P0-2): kill -9 the DSH process while a background
+# historian pass holds the compartment lease (e2e hold, 90 s), then continue the
+# SAME session in new processes. Checks Y1–Y6 (ci-check.py check_y).
+#   y-1  three dense reads; historian fires (threshold 30) and holds; SIGKILL
+#        from outside (kill -9 on the node pid) once the hold line is logged
+#   y-2  restart, one turn (status dump: busy probe + lease rows per step)
+#   y-3  restart again (rerun must not duplicate anything)
+YMARK="YKILL$$"
+export OPENCODE_SESSION="mc-ci-y-$(date +%s)"
+LOGDIR="$E2E_ROOT/logs"
+before_logs="$(ls "$LOGDIR" 2>/dev/null | grep -c '^run-' || true)"
+( MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_HISTORIAN_HOLD_MS=90000 MC_HISTORIAN_THRESHOLD=30 RUN_TIMEOUT=200 \
+    xrun y-1 "Read the three files as planned. [[MOCK:y1]] $YMARK" ) &
+YBG=$!
+YLOG="$LOGDIR/run-$((before_logs + 1)).log"
+held=""
+for i in $(seq 1 240); do
+  grep -q "historian holding the compartment lease" "$YLOG" 2>/dev/null && { held=1; break; }
+  kill -0 "$YBG" 2>/dev/null || break
+  sleep 0.25
+done
+NODEPID=""
+for p in $(pgrep -f "$YMARK" 2>/dev/null); do
+  [[ "$(ps -o comm= -p "$p" 2>/dev/null)" == node ]] && NODEPID="$p"
+done
+if [[ -n "$held" && -n "$NODEPID" ]]; then
+  kill -9 "$NODEPID"
+  printf '{"held": true, "killedPid": %s, "at": %s}\n' "$NODEPID" "$(date +%s%3N)" > "$OUT/y-kill.json"
+else
+  printf '{"held": %s, "killedPid": null}\n' "${held:-false}" > "$OUT/y-kill.json"
+fi
+wait "$YBG" 2>/dev/null
+echo "[ci-x] y kill: $(cat "$OUT/y-kill.json")"
+YSID="$(session_of "$OUT/y-1.log")"
+echo "$YSID" > "$OUT/y.sid"
+if [[ -n "$YSID" ]]; then
+  xdb "$YSID" y-1k
+  MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_STATUS_DUMP="$OUT/y-2-status.jsonl" MC_HISTORIAN_THRESHOLD=30 \
+    xrun y-2 "Reply when done. [[MOCK:y2]]" "$YSID"
+  xdb "$YSID" y-2
+  MC_HISTORIAN_THRESHOLD=30 xrun y-3 "Reply when done. [[MOCK:y3]]" "$YSID"
+  xdb "$YSID" y-3
+  [[ -n "$XSID" ]] && xdb "$XSID" x-after-y
+  f="$(ls "$DSH_HOME"/sessions/*/"$YSID"/session.v4.jsonl.zstd 2>/dev/null | head -n 1)"
+  [[ -n "$f" ]] && zstd -qdc "$f" > "$OUT/y-session.jsonl" 2>/dev/null
+fi
+
 kill "$MOCK_PID" 2>/dev/null
 wait "$MOCK_PID" 2>/dev/null
 echo "[ci-x] done; requests: $(wc -l < "$OUT/x-requests.jsonl")"

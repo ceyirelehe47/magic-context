@@ -778,6 +778,90 @@ def check_x(c, out: Path, runs):
           {"maxRepeats": worst, "repeated": {k: v for k, v in repeats.items() if v > 1}})
 
 
+def check_y(c, out: Path, runs):
+    """Round 23c scenario Y (ci-x.sh): kill -9 the DSH process while a
+    background historian pass holds the compartment lease, then continue the
+    same session in two new processes. Y1–Y6."""
+    names = ("y-1", "y-2", "y-3")
+    if not any(n in runs for n in names):
+        c.add("Y0", False, "scenario Y ran (kill -9 during a historian hold)", "no y-* runs")
+        return
+    kill = load_json(out / "y-kill.json") or {}
+    d = {n: load_json(out / f"db-{n}.json") or {} for n in ("y-1k", "y-2", "y-3", "x-5", "x-after-y")}
+    rc = {n: runs.get(n, ("", "missing"))[1] for n in names}
+    pid = kill.get("killedPid")
+    # Y1 — the kill landed inside the hold: the dead process left an UNEXPIRED lease, nothing published
+    l1 = d["y-1k"].get("leases") or []
+    dead_live = [l for l in l1 if l.get("owner_pid") == pid and (l.get("expires_at") or 0) > (l.get("now") or 0)]
+    c.add("Y1", bool(kill.get("held")) and pid is not None and not rc["y-1"].startswith("rc=0") and bool(dead_live)
+          and not (d["y-1k"].get("compartments") or []),
+          "y-1: kill -9 of the DSH process while the historian holds the lease leaves an unexpired lease of the dead pid and no half-published compartment",
+          {"kill": kill, "rc": rc["y-1"], "leases": l1, "compartments": len(d["y-1k"].get("compartments") or []),
+           "inProgress": (d["y-1k"].get("meta") or {}).get("compartment_in_progress")})
+    # Y2 — restart: the dead lease reads not-busy at once, a pass publishes, no live lease left, quickly
+    steps = [r for r in events(out / "y-2-status.jsonl") if r.get("kind") == "step"]
+    first = steps[0] if steps else {}
+    first_dead = [l for l in (first.get("leases") or []) if l.get("owner_pid") == pid]
+    m = re.search(r"elapsed=([0-9.]+)s", rc["y-2"])
+    el = float(m.group(1)) if m else None
+    comps2 = d["y-2"].get("compartments") or []
+    live2 = [l for l in (d["y-2"].get("leases") or []) if (l.get("expires_at") or 0) > (l.get("now") or 0)]
+    c.add("Y2", rc["y-2"].startswith("rc=0") and bool(first_dead) and first.get("historianBusy") is False
+          and bool(comps2) and not live2 and (d["y-2"].get("meta") or {}).get("compartment_in_progress") in (0, None)
+          and el is not None and el < 120,
+          "y-2 (new process): the dead holder's unexpired lease does not read busy (first step), a historian pass publishes, no live lease or in-progress flag left, no 5-min TTL wait",
+          {"rc": rc["y-2"], "firstStep": {"historianBusy": first.get("historianBusy"), "leases": first.get("leases")},
+           "compartments": [[x.get("start_message"), x.get("end_message")] for x in comps2], "liveLeases": live2,
+           "meta": d["y-2"].get("meta")})
+    # Y3 — no duplicate / overlapping compartment after a second restart
+    comps3 = [(x.get("start_message"), x.get("end_message")) for x in (d["y-3"].get("compartments") or [])]
+    starts = [a for a, _ in comps3]
+    contiguous = all(comps3[i][0] == comps3[i - 1][1] + 1 for i in range(1, len(comps3)))
+    kept = all((x.get("start_message"), x.get("end_message")) in comps3 for x in comps2)
+    c.add("Y3", rc["y-3"].startswith("rc=0") and bool(comps3) and len(set(starts)) == len(starts) and contiguous and kept,
+          "y-3 (second restart): no duplicate or overlapping compartment; y-2's compartments kept",
+          {"rc": rc["y-3"], "compartments": comps3})
+    # Y4 — tag identity: unique, contiguous, every earlier tag keeps number + message id
+    def tags(n):
+        return {t["tag_number"]: t["message_id"] for t in (d[n].get("tags") or [])}
+    t1, t2, t3 = tags("y-1k"), tags("y-2"), tags("y-3")
+    def ok_ids(t):
+        return sorted(t) == list(range(1, len(t) + 1)) and len(set(t.values())) == len(t)
+    moved = {n: (t1[n], t3.get(n)) for n in t1 if t3.get(n) != t1[n]} | {n: (t2[n], t3.get(n)) for n in t2 if t3.get(n) != t2[n]}
+    c.add("Y4", bool(t1) and ok_ids(t1) and ok_ids(t2) and ok_ids(t3) and not moved and len(t3) >= len(t1),
+          "tag numbers unique and contiguous, message ids unique; every tag from before the kill keeps its number and message",
+          {"tags": [len(t1), len(t2), len(t3)], "changed": moved})
+    # Y5 — outbox settled, integrity_check ok, other session untouched
+    ob = {n: {o.get("status"): o.get("n") for o in (d[n].get("outbox") or [])} for n in ("y-2", "y-3")}
+    integ = {n: d[n].get("integrity") for n in ("y-1k", "y-2", "y-3")}
+    xb, xa = d["x-5"], d["x-after-y"]
+    other_same = bool(xa) and xb.get("tags") == xa.get("tags") and xb.get("compartments") == xa.get("compartments") \
+        and xb.get("truncations") == xa.get("truncations")
+    c.add("Y5", all(set(v) <= {"committed", "superseded", "abandoned"} for v in ob.values())
+          and all(v == "ok" for v in integ.values()) and other_same,
+          "outbox settled after restart; SQLite integrity_check ok after the kill and each restart; the other session (scenario X) unchanged",
+          {"outbox": ob, "integrity": integ, "otherSessionUnchanged": other_same})
+    # Y6 — raw data: every y-1 tool result emitted before the kill is in the DSH log, whole; the later turns appended
+    emitted = []
+    for e in events(out / "y-1.log"):
+        if e.get("type") == "tool_result":
+            mm = re.search(r"MOCKSTEP:y1:(\d+)", json.dumps(e))
+            if mm:
+                emitted.append(int(mm.group(1)))
+    texts = []
+    for e in events(out / "y-session.jsonl"):
+        if e.get("type") == "tool/result":
+            for b in ((e.get("data") or {}).get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and isinstance(b.get("text"), str):
+                    texts.append(b["text"])
+    whole = {k: any(t.count(f"MOCKSTEP:y1:{k}") >= 2 for t in texts) for k in set(emitted)}
+    sess_text = (out / "y-session.jsonl").read_text(errors="replace") if (out / "y-session.jsonl").exists() else ""
+    later = all(f"[[MOCK:{p}]]" in sess_text for p in ("y2", "y3"))
+    c.add("Y6", bool(emitted) and all(whole.values()) and later,
+          "raw data intact: every tool result y-1 emitted before the kill is whole (head + tail marker) in the DSH session log; the y-2 / y-3 turns appended to the same session",
+          {"emittedBeforeKill": sorted(set(emitted)), "wholeInLog": whole, "laterTurnsAppended": later, "toolResults": len(texts)})
+
+
 def k_rows(out: Path):
     p1, p2 = [], []
     path = out / "k-dump.jsonl"
@@ -957,6 +1041,7 @@ def check(out: Path) -> int:
     check_r22_lock(c, out, runs)
     check_r23_history(c, out, runs)
     check_x(c, out, runs)
+    check_y(c, out, runs)
     check_r22_k(c, out, runs)
 
     # --- P: process hygiene

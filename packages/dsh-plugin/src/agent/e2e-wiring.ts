@@ -76,7 +76,25 @@ export function registerE2eWiring(ctx: Context, deps: E2eWiringDeps): void {
       } catch {
         floor = null;
       }
+      // Round 23c (scenario Y, kill -9): what the busy probe answers and the
+      // lease row it answers about (holder pid) at this step.
+      let leases: unknown[] = [];
+      try {
+        leases = db === undefined
+          ? []
+          : (db.prepare("SELECT holder_id, owner_pid, expires_at FROM compartment_state_lease WHERE session_id = ?").all(keyOf(agent)) as unknown[]);
+      } catch {
+        leases = [];
+      }
+      let historianBusy: boolean | null = null;
+      try {
+        historianBusy = deps.busy(agent);
+      } catch {
+        historianBusy = null;
+      }
       return {
+        historianBusy,
+        leases,
         hotProtectedTokens: deps.hotProtectedTokens() ?? null,
         hotHistorianModel: deps.hotHistorianModel() ?? null,
         protectedFloor: floor,
