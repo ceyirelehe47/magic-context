@@ -175,7 +175,8 @@ describe("pressure truncation input prices dense output like the provider (round
     } as unknown as ContextPlaneDeps;
     const input = pressureTruncationInputFor(deps, { id: SID, session } as never)!;
     expect(input.projectedTokens).toBeGreaterThanOrEqual(meter);
-    expect(input.projectedTokens).toBeLessThanOrEqual(Math.max(meter, BASE_PROMPT + estimateTokens(text) + 50));
+    // meter-dense text: at most a few tokens of tool-call arguments are re-priced
+    expect(input.projectedTokens).toBeLessThanOrEqual(meter + 50);
   });
 });
 

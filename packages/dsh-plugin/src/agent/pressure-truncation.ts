@@ -116,6 +116,32 @@ export function keepBudgetChars(contextWindow: number): { head: number; tail: nu
   return { head, tail: keep - head };
 }
 
+/**
+ * Round 23b (P0-1): per-output keep window. The budget is CHARACTERS sized for
+ * ordinary text (~4 chars/token); dense output (Chinese ≈ 1.06 chars/token,
+ * digit listings ≈ 2) would keep 2–4× the intended tokens and — worse — the
+ * eligibility floor (3× the kept size) is a CHAR floor, so three 5 000-char
+ * Chinese reads (≈ 4.7k tokens each, enough to overflow a 24k window
+ * together) were never eligible. Text whose real token count exceeds its
+ * chars/4 price by more than 25 % gets the same TOKEN budget instead: head and
+ * tail scaled by (chars/4) / tokens, eligible at 3× the kept tokens. Ordinary
+ * text keeps the round 11 rule unchanged.
+ */
+export function keepFor(
+  text: string,
+  budget: { head: number; tail: number },
+): { head: number; tail: number; eligible: boolean } {
+  const keep = budget.head + budget.tail;
+  if (text.length < keep) return { ...budget, eligible: false };
+  const exact = estimateTokens(text);
+  const priced = text.length / 4;
+  if (exact <= priced * 1.25) return { ...budget, eligible: text.length >= keep * 3 };
+  const factor = priced / exact;
+  const head = Math.max(1, Math.round(budget.head * factor));
+  const tail = Math.max(1, Math.round(budget.tail * factor));
+  return { head, tail, eligible: exact >= (keep / 4) * 3 };
+}
+
 /** Never split a UTF-16 surrogate pair. */
 function safeCut(text: string, index: number): number {
   if (index <= 0 || index >= text.length) return index;
@@ -220,31 +246,33 @@ export function applyPressureTruncation(
   const latestBasis = rows.reduce((max, row) => Math.max(max, row.basis_usage_seq), -Infinity);
   if (rows.length > 0 && input.usageSeq <= latestBasis) return { decided, replayed, skipped };
 
-  const { head, tail } = keepBudgetChars(window);
-  const minChars = (head + tail) * 3;
+  const budget = keepBudgetChars(window);
   const pool = candidates
     .filter((c) => !truncated.has(c.tagNumber))
-    .map((c) => ({ c, text: c.part.getText() ?? "" }))
-    .filter((x) => x.text.length >= minChars)
+    .map((c) => {
+      const text = c.part.getText() ?? "";
+      return { c, text, ...keepFor(text, budget) };
+    })
+    .filter((x) => x.eligible)
     .sort((a, b) => a.c.tagNumber - b.c.tagNumber);
   if (pool.length === 0) return { decided, replayed, skipped };
   const target = (input.executePercentage / 100) * window;
   const force = (input.forcePercentage / 100) * window;
   let remaining = effective;
-  const saving = (text: string, tagNumber: number) =>
-    Math.max(0, estimateTokens(text) - estimateTokens(truncateOutput(text, head, tail, tagNumber)));
-  const chosen: Array<{ c: TruncationCandidate; text: string }> = [];
+  const saving = (x: { text: string; head: number; tail: number; c: TruncationCandidate }) =>
+    Math.max(0, estimateTokens(x.text) - estimateTokens(truncateOutput(x.text, x.head, x.tail, x.c.tagNumber)));
+  const chosen: Array<(typeof pool)[number]> = [];
   // Oldest first, holding back the newest result (the one the model is most
   // likely answering about) unless the others cannot get under the force band.
   const newest = pool[pool.length - 1]!;
   for (const x of pool.slice(0, -1)) {
     if (remaining <= target) break;
     chosen.push(x);
-    remaining -= saving(x.text, x.c.tagNumber);
+    remaining -= saving(x);
   }
   if (remaining >= force) {
     chosen.push(newest);
-    remaining -= saving(newest.text, newest.c.tagNumber);
+    remaining -= saving(newest);
   }
   if (chosen.length === 0) return { decided, replayed, skipped };
   const insert = db.prepare(
@@ -255,11 +283,11 @@ export function applyPressureTruncation(
   const now = Date.now();
   db.transaction(() => {
     for (const x of chosen) {
-      insert.run(sessionId, x.c.tagNumber, head, tail, x.text.length, sha(x.text), input.usageSeq, now);
+      insert.run(sessionId, x.c.tagNumber, x.head, x.tail, x.text.length, sha(x.text), input.usageSeq, now);
     }
   })();
   for (const x of chosen) {
-    x.c.part.setToolOutput(truncateOutput(x.text, head, tail, x.c.tagNumber));
+    x.c.part.setToolOutput(truncateOutput(x.text, x.head, x.tail, x.c.tagNumber));
     decided.push(x.c.tagNumber);
   }
   log?.(

@@ -13,7 +13,8 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { DshStorageBootstrap } from "../host/bootstrap";
-import { isMagicSource, sessionEvents } from "../compat/dsh-0.1/session";
+import { deriveEventMessage, isMagicSource, sessionEvents } from "../compat/dsh-0.1/session";
+import { estimateTokens } from "@magic-context/core/hooks/magic-context/read-session-formatting";
 import {
   registerPreStepGate,
   type PreStepDecision,
@@ -560,9 +561,11 @@ export function pressureTruncationInputFor(deps: ContextPlaneDeps, agent: Agent)
     let usageSeq = -1;
     let lastPrompt = 0;
     let logWindow: number | undefined;
+    const bySeq = new Map<number, unknown>();
     for (const event of sessionEvents(agent.session)) {
       if (event === null || typeof event !== "object") continue;
       const e = event as { type?: unknown; seq?: unknown; data?: Record<string, unknown> };
+      if (typeof e.seq === "number") bySeq.set(e.seq, event);
       if (e.type === "request/header") {
         const header = e.data?.header as { config?: { maxTokens?: unknown } } | undefined;
         const max = header?.config?.maxTokens;
@@ -580,7 +583,8 @@ export function pressureTruncationInputFor(deps: ContextPlaneDeps, agent: Agent)
     }
     if (!(typeof contextWindow === "number" && contextWindow > 0)) contextWindow = logWindow;
     if (!(typeof contextWindow === "number" && contextWindow > 0)) return undefined;
-    const projectedTokens = Math.max(typeof projected === "number" ? projected : 0, lastPrompt);
+    const meterProjected = Math.max(typeof projected === "number" ? projected : 0, lastPrompt);
+    const projectedTokens = meterProjected + denseSurfaceCorrection(agent, bySeq, usageSeq, meterProjected > lastPrompt);
     const executePercentage =
       safeThreshold(deps.historian, agent) ?? deps.historian?.config?.executeThresholdPercentage ?? 65;
     return {
@@ -594,6 +598,75 @@ export function pressureTruncationInputFor(deps: ContextPlaneDeps, agent: Agent)
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Round 23b (P0-1): what DSH's token-meter projection misses. The projection
+ * is the last provider sample plus the surface's movement since, priced at a
+ * FIXED 4 chars/token — common Chinese text is ≈ 0.94 tokens/char (3.75× that
+ * price) and dense digit listings ≈ 2×, so one Chinese `read` put a real rc.5
+ * request at 27 700 tokens of a 24 000 window while the projection said
+ * 63.5 % and the truncation trigger stayed silent (provider overflow; every
+ * later turn re-sent it). Re-price the text of every surface node that joined
+ * after the last usage sample (seq ≥ usageSeq: the sampled assistant message
+ * itself joins after its own sample) with core's tokenizer and add what the
+ * fixed price under-counts. `meterPriced` = the projection already includes
+ * that movement at 4 chars/token (token-meter mounted); without a meter the
+ * fallback is the bare last prompt, so the full re-priced movement is added.
+ * Never negative: an over-price is left to the meter (no truncation earlier
+ * than before for ordinary text). Fail-open (0).
+ */
+export function denseSurfaceCorrection(
+  agent: Agent,
+  bySeq: ReadonlyMap<number, unknown>,
+  usageSeq: number,
+  meterPriced: boolean,
+): number {
+  if (usageSeq < 0) return 0;
+  try {
+    const nodes = (agent.session as unknown as { surface?: { nodes?: readonly number[] } }).surface?.nodes ?? [];
+    let extra = 0;
+    for (const seq of nodes) {
+      if (seq < usageSeq) continue;
+      const event = bySeq.get(seq);
+      if (event === undefined) continue;
+      let message: unknown;
+      try {
+        message = deriveEventMessage(event as never);
+      } catch {
+        continue;
+      }
+      for (const text of messageTexts(message)) {
+        const exact = estimateTokens(text);
+        extra += meterPriced ? Math.max(0, exact - Math.ceil(text.length / 4)) : exact;
+      }
+    }
+    return extra;
+  } catch {
+    return 0;
+  }
+}
+
+/** Every text-bearing leaf of a derived DSH message (text, reasoning, tool-call name + arguments, nested tool-result content). */
+function messageTexts(message: unknown): string[] {
+  const out: string[] = [];
+  const walk = (blocks: unknown, depth: number) => {
+    if (!Array.isArray(blocks) || depth > 4) return;
+    for (const block of blocks) {
+      if (block === null || typeof block !== "object") continue;
+      const b = block as { type?: unknown; text?: unknown; name?: unknown; arguments?: unknown; content?: unknown; output?: unknown };
+      if (typeof b.text === "string") out.push(b.text);
+      if (b.type === "tool-call") {
+        if (typeof b.name === "string") out.push(b.name);
+        if (typeof b.arguments === "string") out.push(b.arguments);
+      }
+      if (typeof b.output === "string") out.push(b.output);
+      walk(b.content, depth + 1);
+      walk(b.output, depth + 1);
+    }
+  };
+  if (message !== null && typeof message === "object") walk((message as { content?: unknown }).content, 0);
+  return out;
 }
 
 /** Protection-window inputs for one pass (config + live DSH context window). */
