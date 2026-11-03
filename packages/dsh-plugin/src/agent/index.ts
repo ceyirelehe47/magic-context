@@ -18,6 +18,7 @@
  * service is optional and read via ctx.get-style structural access.
  */
 import type { Context } from "@deepseek-ai/cordis";
+import { escalationBands } from "@magic-context/core/shared/escalation-bands";
 import { setDshHarness } from "dsh-magic-context-adapter";
 import { fireAndForget } from "./fire-and-forget";
 import { loadPluginConfig, type MagicContextPluginConfig } from "@magic-context/core/config";
@@ -419,6 +420,30 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
     log,
   });
 
+  // Explicit row thresholds (tests/presets) win; otherwise the core resolver
+  // over jsonc + DSH overlay picks the per-model value.
+  const resolveExecuteThreshold = (agent: unknown): number => {
+    const o = live.overrides();
+    if (
+      explicitThreshold !== undefined &&
+      o.executeThresholdPercentage === undefined &&
+      o.executeThresholdByModel === undefined
+    ) {
+      return explicitThreshold;
+    }
+    const a = agent as { options?: { provider?: string; model?: string } };
+    return live.thresholdFor(a);
+  };
+
+  // Round 19: DSH-native pressure compaction stays BEHIND MC on main sessions
+  // — the compaction engine prices its threshold at MC's force-materialization
+  // band for the route (core escalationBands: max(85, execute + 2)). A
+  // context-disabled row / live-disabled MC returns undefined → native defaults.
+  host.registerNativePressurePercentage?.((agent) => {
+    if (rowContext?.enabled === false || !liveEnabled()) return undefined;
+    return escalationBands(resolveExecuteThreshold(agent)).forceMaterializationPercentage;
+  });
+
   // Context plane FIRST, so the knowledge gate below stays the outermost
   // pre-step listener (Phase 2 contract). The plane runs after it (inner):
   // outbox reconciliation + plan derivation + serialized surface application
@@ -433,18 +458,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
       readPressure: readContextPressure(ctx),
       // Explicit row thresholds (tests/presets) win; otherwise the core
       // resolver over jsonc + DSH overlay picks the per-model value.
-      resolveExecuteThreshold: (agent) => {
-        const o = live.overrides();
-        if (
-          explicitThreshold !== undefined &&
-          o.executeThresholdPercentage === undefined &&
-          o.executeThresholdByModel === undefined
-        ) {
-          return explicitThreshold;
-        }
-        const a = agent as unknown as { options?: { provider?: string; model?: string } };
-        return live.thresholdFor(a);
-      },
+      resolveExecuteThreshold,
       fire: ({ db, sessionId, directory: fireDirectory, provider, contextWindow }) => {
         // Fire-and-forget: the pass publishes atomically and only signals
         // deferred work; it must never block the pre-step chain.

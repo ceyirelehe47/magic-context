@@ -68,6 +68,16 @@ export interface MagicContextHostService {
   /** The registered hook, if any (compaction engine bundle reads this). */
   summarizeHook(): MagicSummarizeHook | undefined;
   /**
+   * Round 19: the agent plane registers how high DSH-native pressure
+   * compaction may let an MC-managed main session climb (MC's
+   * force-materialization band for the route); the compaction engine bundle
+   * reads it through `nativePressurePercentage`. `undefined` = MC is not
+   * managing that session (keep DSH's native defaults). Optional for older
+   * host stand-ins.
+   */
+  registerNativePressurePercentage?(fn: (agent: unknown) => number | undefined): void;
+  nativePressurePercentage?(agent: unknown): number | undefined;
+  /**
    * Current DSH override layer (dereferenced on every call, so live
    * `settings.mutate` edits apply without a remount). Optional for older
    * host stand-ins.
@@ -96,6 +106,7 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
     log: (message) => ctx.logger?.info?.(message),
   });
   let summarizeHook: MagicSummarizeHook | undefined;
+  let nativePressure: ((agent: unknown) => number | undefined) | undefined;
   const host: MagicContextHostService = {
     ready,
     canonicalKey(dshSessionId: string): string {
@@ -109,6 +120,13 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
     },
     summarizeHook(): MagicSummarizeHook | undefined {
       return summarizeHook;
+    },
+    registerNativePressurePercentage(fn: (agent: unknown) => number | undefined): void {
+      nativePressure = fn;
+    },
+    nativePressurePercentage(agent: unknown): number | undefined {
+      // No agent plane yet: MC's default force band (the engine's own default).
+      return nativePressure === undefined ? 85 : nativePressure(agent);
     },
     overrides(): MagicDshOverrides {
       return readMagicOverrides(config);

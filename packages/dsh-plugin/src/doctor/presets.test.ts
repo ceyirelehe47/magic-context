@@ -140,6 +140,11 @@ describe("doctor per-preset report", () => {
       expect(preset.detail).toContain("magic-standard: disabled");
       expect(preset.detail).toContain("Magic Context meter");
       expect(report.checks.find((check) => check.id === "profile-wiring.web")?.status).toBe("ok");
+      // Round 19: native pressure compaction is shown and MC-led by default.
+      const pressure = report.checks.find((check) => check.id === "native-pressure.web")!;
+      expect(pressure.status).toBe("ok");
+      expect(pressure.detail).toContain("MC-led");
+      expect(pressure.detail).toContain("128k 85%");
 
       const expecting = await runDshDoctor(["--preset", "minimal", "--disable-preset", "standard"], {
         dshHome,

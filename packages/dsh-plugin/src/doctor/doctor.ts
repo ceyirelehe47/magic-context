@@ -47,6 +47,31 @@ import {
   readManagedBlock,
 } from "../compat/dsh-0.1/profile-patch";
 import { selectionChangeOf } from "./setup";
+import { describePressurePolicy, type PressureRowConfig } from "../compat/dsh-0.1/pressure-policy";
+
+/**
+ * Round 19: the effective `magic-compaction` row config across a patch layer
+ * (managed block + any later hand-written rows with the same id, merged in
+ * order; nested `insert` rows included).
+ */
+export function magicCompactionRowConfig(text: string): PressureRowConfig | undefined {
+  let merged: Record<string, unknown> | undefined;
+  const visit = (rows: unknown): void => {
+    if (!Array.isArray(rows)) return;
+    for (const row of rows as Record<string, unknown>[]) {
+      if (row === null || typeof row !== "object") continue;
+      if (row.id === "magic-compaction" && row.config !== null && typeof row.config === "object") {
+        merged = { ...(merged ?? {}), ...(row.config as Record<string, unknown>) };
+      } else if (row.id === "magic-compaction" && merged === undefined) {
+        merged = {};
+      }
+      visit(row.insert);
+      visit(row.children);
+    }
+  };
+  visit(safeParse(text));
+  return merged;
+}
 
 function safeParse(text: string): Record<string, unknown>[] {
   try {
@@ -408,6 +433,25 @@ export async function runDshDoctor(
             `${plan.patchPath}: managed block up to date${comparison.textEqual ? "" : " (re-serialised by DSH settings; same rows)"}; ` +
             `layout ${plan.layout}; stock ${plan.scannedFile} re-scanned OK.`;
         }
+      }
+      // Round 19: show/check DSH-native pressure compaction against MC's
+      // execute threshold (main sessions must stay MC-led).
+      if (block !== undefined || text.includes("magic-compaction")) {
+        const row = magicCompactionRowConfig(text);
+        const pressure = describePressurePolicy(row);
+        checks.push({
+          id: `native-pressure.${name}`,
+          title: `Native pressure compaction vs MC — profile ${name}`,
+          status: pressure.preemptsMagic ? "warn" : "ok",
+          detail:
+            pressure.text +
+            (pressure.preemptsMagic
+              ? " The user-set values make DSH compact a 128k main session BEFORE MC's 65 % execute threshold (MC historian/drops never run first)."
+              : ""),
+          fix: pressure.preemptsMagic
+            ? "Remove headroomTokens/thresholdRatio from the magic-compaction row (MC then sets the backstop at its force band), or raise thresholdRatio / lower headroomTokens."
+            : undefined,
+        });
       }
       checks.push({
         id: `profile-wiring.${name}`,

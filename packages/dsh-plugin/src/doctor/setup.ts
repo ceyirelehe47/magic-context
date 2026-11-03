@@ -42,7 +42,8 @@ import {
   stringFlag,
   writeFileAtomic,
 } from "./env";
-import { listProfiles } from "./doctor";
+import { listProfiles, magicCompactionRowConfig } from "./doctor";
+import { describePressurePolicy } from "../compat/dsh-0.1/pressure-policy";
 import {
   compareManagedBlock,
   dumpEntryListYaml,
@@ -343,7 +344,8 @@ export async function runDshSetup(
               (plan.layout === "flat"
                 ? "compaction-basic + token-meter disabled; magic-compaction, magic-agent, magic-meter inserted"
                 : `Magic enabled in agent preset(s) ${plan.selection.join(", ")}; token-meter → magic-meter`) +
-              ").",
+              "). " +
+              describePressurePolicy(magicCompactionRowConfig(merged)).text,
           });
         }
       }
