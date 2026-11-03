@@ -74,10 +74,29 @@ if (key !== undefined) {
     : null;
   out.meta = one(
     `select compartment_in_progress, historian_failure_count, historian_last_error, last_context_percentage,
-            memory_block_count, length(cached_m0_bytes) as m0_len, length(cached_m1_bytes) as m1_len
+            memory_block_count, length(cached_m0_bytes) as m0_len, length(cached_m1_bytes) as m1_len,
+            cached_m0_materialized_at, last_response_time, last_input_tokens
        from session_meta where session_id = ?`,
     key,
   );
+  // Round 18: what the cached m0 baseline (the injected <session-history>)
+  // actually carries — never the text itself, only shape facts.
+  out.m0 = safe(() => {
+    const row = db.query("select cached_m0_bytes b from session_meta where session_id = ?").get(key) as
+      | { b: Uint8Array | null }
+      | null;
+    const text = row?.b ? new TextDecoder().decode(row.b) : "";
+    const m = /<session-history>([\s\S]*?)<\/session-history>/.exec(text);
+    const body = m?.[1] ?? "";
+    return {
+      len: text.length,
+      hasSessionHistory: m !== null,
+      sessionHistoryLen: body.trim().length,
+      // DSH/Pi render: one "## <start>-<end> · <title>" heading per compartment.
+      compartmentBlocks: (body.match(/^## \d+-\d+ · /gm) ?? []).length,
+      mentionsCodeword: CODEWORD.length > 0 && body.includes(CODEWORD),
+    };
+  });
   out.leases = all("select holder_id, owner_pid, acquired_at, expires_at, expires_at > ? as live from compartment_state_lease where session_id = ?", now, key);
   out.markers = has("dsh_context_compaction_marker")
     ? all("select ordinal, status, published_at, tokens_before, length(summary) as summary_len from dsh_context_compaction_marker where session_id = ?", key)

@@ -14,7 +14,9 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       historian fired at >= 63 % (threshold-2) with context really > 65 %,
       compartments written, prompt tokens fell below the peak,
       the early codeword is still answerable, no §N§ in visible output, no
-      overlapping / stuck compression
+      overlapping / stuck compression; C7/C8 (round 18) the cached m0
+      <session-history> carries the compartments and the codeword is answered
+      from it without a retrieval tool
   S*  round 17/18: delegated child reads eight <8 KB files on a 24k route:
       the stock compaction-basic summarizer (not only the pruner) ran in the
       child, Magic wrote no child rows, child finished, result reached the parent
@@ -215,6 +217,23 @@ def check_r17(c, out: Path, runs):
     # C4 codeword after compression
     ans = final_text(out / "cmp-q.log") or ""
     c.add("C4", CODEWORD in ans, "early codeword still answered after compression", ans[:200])
+    # C7 (round 18) the compartments really reach the model: the cached m0
+    # baseline's <session-history> is non-empty and carries one block per
+    # compartment (headless = one process per turn; round 17 replayed an empty
+    # one forever), and the codeword compartment is in it.
+    m0 = final.get("m0") if isinstance(final.get("m0"), dict) else {}
+    first_m0 = next((n for n in names if isinstance((dumps.get(n) or {}).get("m0"), dict)
+                     and (dumps[n]["m0"].get("compartmentBlocks") or 0) > 0), None)
+    cw_cmp = any(x.get("mentionsCodeword") for x in comps)
+    c.add("C7", bool(comps) and (m0.get("compartmentBlocks") or 0) >= 1
+          and (m0.get("mentionsCodeword") or not cw_cmp),
+          "cached m0 <session-history> carries the compartments (and the codeword one)",
+          {"m0": m0, "compartments": len(comps), "firstTurnWithHistoryInM0": first_m0, "codewordCompartment": cw_cmp,
+           "materializedAt": (final.get("meta") or {}).get("cached_m0_materialized_at")})
+    # C8 the codeword is answered straight from <session-history>, no retrieval tool
+    used = [t for t in ("ctx_search", "ctx_expand", "ctx_memory") if tool_calls(out / "cmp-q.log", t)[0]]
+    c.add("C8", CODEWORD in ans and not used and (m0.get("mentionsCodeword") is True),
+          "codeword answered from <session-history> without ctx_search/ctx_expand", {"toolsUsed": used, "answer": ans[:120]})
     # C5 no §N§ in user-visible output of any round 17 turn
     leaks = {}
     for n in seq + ["child-parent"]:
