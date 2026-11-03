@@ -42,11 +42,12 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 19, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; push run
-41591790570 @ `6615a8d5b` and dispatch run 41592114076 (`e2e=true`)):
+Baseline (round 19, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; release tag
+`dsh/0.49.35-dsh.1` → `270629e75`; push run 41593684140 @ `270629e75` and
+dispatch run 41593887664 (`e2e=true`)):
 `typecheck:dsh` **0 errors**, core typecheck **0 errors**, `dsh-plugin`
 **485 pass** (65 files; round 19 +17), `adapter-api` **15 pass**,
-`contracts:dsh` **98 pass**, 0 fail; real-model `e2e` **64/65 PASS** on run 41592114076 (only C8 failed: the model answered the codeword correctly but called `ctx_search` first; C8 no longer judges retrieval calls, re-verified by a follow-up dispatch)
+`contracts:dsh` **98 pass**, 0 fail; real-model `e2e` **0 FAIL** on run 41593887664 @ `270629e75` (native backstop 90 %: R6 effective threshold 90, no native compaction up to 77.7 %; MC first fire 73 %; C8 PASS with no retrieval call; C10 repair retry PASS). Previous run 41592114076 @ `6615a8d5b` was 64/65 (only C8: correct answer after a `ctx_search`; C8 no longer judges retrieval calls)
 (round 18's 57 + C10 + R0–R6 = 65 judged). Evidence:
 `docs/dsh/e2e/evidence-round19/`.
 
@@ -332,7 +333,7 @@ Round 17/18 新增检查：
 | C10 | （round 19）e2e 专用开关把 scenario C 第一次 historian 输出换成截断的 XML（只一次，O_EXCL 标记文件）：之后出现 `historian repair retry`，compartment 仍写出，historian 无失败 |
 | R0–R6 | （round 19）scenario P，100k 主会话路由：R1 MC 管理的主会话里没有低于 65 % 的原生压缩；R2 MC historian 先触发（≥63 %，阈值 65）；R3 会话越过旧默认阈值（30.4 %）时没有原生压缩；R4 旧策略（显式写入 compaction-basic 默认值）实测在 65 % 之前原生压缩；R5 所有日志里没有 "leaving no pressure budget"；R6 引擎每步打印的有效主会话阈值 ≥ 65 % |
 
-Round 19：dispatch run 41586948399 @ `9d16d6fab`（2 FAIL：R2，读结果被截到 ~8 KB 且模型自己 ctx_reduce，P 只到 52 %；R4，headless 不打印 ctx.logger）→ 41589483637 @ `34e728b60`（2 FAIL：R4，80k 上 DSH 默认值本身非法：retain 12144 ≥ 阈值 10368；R6 首个 pre-step 没有 header；C10 **PASS**）→ 41591017319 @ `0eb2e69c4`（R0–R6 **全过**；C 场景因模型每轮 ctx_reduce、峰值 61 % 而失败 8 项）→ 41592114076 @ `6615a8d5b`（64/65；仅 C8 失败：模型答对暗号但先调了一次 `ctx_search`，属模型行为。C8 改为只判答案 + m0 含暗号，检索调用仅记录）。
+Round 19：dispatch run 41586948399 @ `9d16d6fab`（2 FAIL：R2，读结果被截到 ~8 KB 且模型自己 ctx_reduce，P 只到 52 %；R4，headless 不打印 ctx.logger）→ 41589483637 @ `34e728b60`（2 FAIL：R4，80k 上 DSH 默认值本身非法：retain 12144 ≥ 阈值 10368；R6 首个 pre-step 没有 header；C10 **PASS**）→ 41591017319 @ `0eb2e69c4`（R0–R6 **全过**；C 场景因模型每轮 ctx_reduce、峰值 61 % 而失败 8 项）→ 41592114076 @ `6615a8d5b`（64/65；仅 C8 失败：模型答对暗号但先调了一次 `ctx_search`，属模型行为。C8 改为只判答案 + m0 含暗号，检索调用仅记录）→ 41593887664 @ `270629e75`（原生兜底改为 90 % 后复验，**0 FAIL**；R6 有效阈值 90；MC 首次触发 73 %；C8、C10 通过）。发行 tag `dsh/0.49.35-dsh.1` 指向 `270629e75`。
 
 Round 18：dispatch run 41550425336 @ `e9e10eca2`（1 FAIL：C1，主动触发在 61.7 % 就压缩，未超过 65 %）→ 41552779443 @ `0e624bfd0`（1 FAIL：C6，historian XML 无效且没有 repair 重试）→ 41554794748 @ `f8c663fee`（**57/57 PASS**）。注意 41554794748 的 C1 是靠触发点的投影值 66 % 通过的，实际发出的 prompt 峰值 52.5 %（同一 pre-step 的 drop 已落地）；实测 prompt 超过 65 % 的是 41552779443（74.2 %）。
 
