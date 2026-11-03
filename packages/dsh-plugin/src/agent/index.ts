@@ -23,7 +23,13 @@ import { nativeBackstopPercentage } from "../compat/dsh-0.1/pressure-policy";
 import { setDshHarness } from "dsh-magic-context-adapter";
 import { fireAndForget } from "./fire-and-forget";
 import type { MagicContextPluginConfig } from "@magic-context/core/config";
-import { createConfigReloadNotices, loadPluginConfigQuiet, type LoadedMagicConfig } from "../settings/config-load";
+import {
+  createConfigReloadNotices,
+  loadPluginConfigQuiet,
+  pendingRestartChanges,
+  type LoadedMagicConfig,
+  type PendingRestartChange,
+} from "../settings/config-load";
 import { getProtectedTokensTierOverrides } from "@magic-context/core/config/project-security";
 import { isCompactionEnabled, isDreamerRunnable, isHistorianRunnable } from "@magic-context/core/config/agent-disable";
 import type { MagicContextHostService } from "../index";
@@ -288,6 +294,34 @@ export interface MagicLiveSettings {
   effective(): EffectiveMagicSettings;
   enabled(): boolean;
   thresholdFor(agent: { options?: { provider?: string; model?: string } }, contextWindow?: number): number;
+  /** Round 21: the current jsonc (same TTL cache as `effective`). */
+  jsonc(): MagicContextPluginConfig | undefined;
+  /** Round 21: the jsonc this agent plane started with (restart-only sections are applied from it). */
+  startup(): MagicContextPluginConfig | undefined;
+  /** Round 21: restart-only sections whose jsonc value changed since startup. */
+  pendingRestart(): PendingRestartChange[];
+}
+
+/**
+ * Round 21: jsonc keys the runtime reads per call / per step are applied live:
+ * DSH override > explicit row config (preset/tests) > current jsonc. Used for
+ * `context.protectedTokens`, `tools.protectedTokens` and `historian.model`.
+ */
+export function createHotConfigGetters(
+  live: Pick<MagicLiveSettings, "overrides" | "jsonc">,
+  explicit: { historianModel?: string; protectedTokens?: number },
+): { historianModel(): string | undefined; protectedTokens(): number | undefined } {
+  return {
+    historianModel: () =>
+      live.overrides().historianModel ?? explicit.historianModel ?? coreHistorianModel(live.jsonc()?.historian),
+    protectedTokens: () => {
+      const o = live.overrides().protectedTokens;
+      if (o !== undefined) return o;
+      if (explicit.protectedTokens !== undefined) return explicit.protectedTokens;
+      const value = (live.jsonc() as { protected_tokens?: unknown } | undefined)?.protected_tokens;
+      return typeof value === "number" ? value : undefined;
+    },
+  };
 }
 
 /**
@@ -334,7 +368,8 @@ export function createLiveSettings(
     notices?.observe(value as LoadedMagicConfig | undefined);
     return value;
   };
-  if (notices !== undefined) jsonc();
+  // Startup snapshot (round 21): the values restart-only sections run with.
+  const startupValue = jsonc();
   const overrides = () => {
     try {
       return host.overrides?.() ?? {};
@@ -347,6 +382,9 @@ export function createLiveSettings(
     overrides,
     effective,
     enabled: () => effective().enabled.value,
+    jsonc,
+    startup: () => startupValue,
+    pendingRestart: () => pendingRestartChanges(startupValue, jsonc()),
     thresholdFor: (agent, contextWindow) => {
       const { provider, model } = agent.options ?? {};
       const ref = provider && model ? `${provider}/${model}` : undefined;
@@ -374,6 +412,13 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   // Explicit row thresholds (preset/tests) are final; captured before the
   // jsonc bridge fills the default.
   const explicitThreshold = config.historian?.executeThresholdPercentage;
+  // Round 21: explicit row values for the hot jsonc keys, captured before the
+  // bridge fills them from the startup jsonc.
+  const explicitHot = {
+    historianModel: config.historian?.model,
+    contextProtectedTokens: config.context?.protectedTokens,
+    toolsProtectedTokens: config.tools?.protectedTokens,
+  };
   config = bridgeMagicConfig(config, config.directory ?? process.cwd());
   const host = readMagicContextHost(ctx);
   if (!host) {
@@ -390,12 +435,21 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   const rowHistorian = config.historian;
   const rowKnowledge = config.knowledge;
   const liveEnabled = () => live.enabled();
+  const hotContext = createHotConfigGetters(live, {
+    historianModel: explicitHot.historianModel,
+    protectedTokens: explicitHot.contextProtectedTokens,
+  });
+  const hotTools = createHotConfigGetters(live, { protectedTokens: explicitHot.toolsProtectedTokens });
+  // The settings page (host bundle) compares the jsonc against what this
+  // plane runs with, to show "running value · pending restart: new value".
+  host.registerRunningConfig?.(() => live.startup());
   config = {
     ...config,
     context: withGetters(rowContext, {
       enabled: () => (rowContext?.enabled === false ? false : liveEnabled()),
-      protectedTokens: () => live.overrides().protectedTokens ?? rowContext?.protectedTokens,
+      protectedTokens: hotContext.protectedTokens,
     }),
+    tools: withGetters(config.tools, { protectedTokens: hotTools.protectedTokens }),
     historian: withGetters(rowHistorian, {
       enabled: () => (rowHistorian?.enabled === false ? false : liveEnabled()),
       executeThresholdPercentage: () => {
@@ -404,7 +458,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
           ? resolveThresholds(live.effective(), undefined).executePercentage
           : rowHistorian?.executeThresholdPercentage;
       },
-      model: () => live.overrides().historianModel ?? rowHistorian?.model,
+      model: hotContext.historianModel,
       awaitAtTurnEndMs: () => live.overrides().historianAwaitAtTurnEndMs ?? rowHistorian?.awaitAtTurnEndMs,
     }),
     knowledge: withGetters(rowKnowledge, {
@@ -563,7 +617,10 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
     resolveProjectIdentity: undefined,
     log,
   };
-  registerCtxTools(ctx, { ...runtime, ...(config.tools ?? {}) });
+  // withGetters (not a spread) keeps tools.protectedTokens live (round 21).
+  registerCtxTools(ctx, withGetters({ ...runtime, ...(config.tools ?? {}) }, {
+    protectedTokens: hotTools.protectedTokens,
+  }) as never);
 
   // Phase 4 seams: dreamer / recomp. The seam factories need the
   // shared DB, which the host bootstrap resolves asynchronously; fill the
@@ -611,6 +668,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
     },
     // The embed seam receives the DB at call time (no host dependency).
     runEmbedDrain: createEmbedSeam({ log }),
+    pendingRestart: () => live.pendingRestart(),
   });
 
   log(

@@ -116,6 +116,30 @@ export interface CtxCommandsOptions extends CtxRuntimeOptions, CtxCommandSeams {
   commitClusterTrigger?: { enabled: boolean; min_clusters: number };
   compactionOff?: boolean;
   log?: (message: string) => void;
+  /**
+   * Round 21: restart-only jsonc sections edited since startup (live view).
+   * /ctx-status lists them as "running value → after restart new value".
+   */
+  pendingRestart?: () => ReadonlyArray<{ key: string; running: unknown; next: unknown }>;
+}
+
+function shortJson(value: unknown): string {
+  let text: string;
+  try {
+    text = value === undefined ? "unset" : JSON.stringify(value);
+  } catch {
+    text = String(value);
+  }
+  return text.length > 160 ? `${text.slice(0, 157)}...` : text;
+}
+
+/** Round 21: "Pending restart" block for /ctx-status ('' when nothing pending). */
+export function pendingRestartStatusBlock(
+  changes: ReadonlyArray<{ key: string; running: unknown; next: unknown }> | undefined,
+): string {
+  if (changes === undefined || changes.length === 0) return "";
+  const lines = changes.map((c) => `- ${c.key}: running ${shortJson(c.running)} → after restart ${shortJson(c.next)}`);
+  return `\n\n### Pending restart (magic-context.jsonc changed; restart DSH to apply)\n${lines.join("\n")}`;
 }
 
 function modelKeyOf(agent: Agent): string | undefined {
@@ -169,7 +193,13 @@ export function registerCtxStatusCommand(ctx: Context, opts: CtxCommandsOptions)
           detectedContextLimit,
           { backlog: dreamerBacklogFor(db, projectIdentity) },
         );
-        return successResult(stripOpenCodeDbStatusLine(statusText));
+        let pending: ReturnType<NonNullable<CtxCommandsOptions["pendingRestart"]>> | undefined;
+        try {
+          pending = opts.pendingRestart?.();
+        } catch {
+          pending = undefined;
+        }
+        return successResult(stripOpenCodeDbStatusLine(statusText) + pendingRestartStatusBlock(pending));
       } catch (error) {
         return errorResult(`## Magic Status — Failed\n\n${describeError(error).brief}`);
       }

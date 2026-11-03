@@ -180,6 +180,18 @@ describe("magicContext/settings + updateSettings (remote)", () => {
     expect(view.precedence).toContain("never written");
   });
 
+  it("round 21: view lists restart-only jsonc changes as running value + pending restart", () => {
+    resetJsoncCache();
+    const { forms } = fakeForms();
+    const h = { ...(host() as object), runningConfig: () => ({ history_budget_percentage: 0.987654 }) } as never;
+    const view = buildSettingsView(forms, h);
+    const entry = view.pendingRestart.find((c) => c.key === "history_budget_percentage");
+    expect(entry?.running).toBe(0.987654);
+    expect(entry?.next).not.toBe(0.987654);
+    // No running snapshot registered (older agent plane): nothing pending.
+    expect(buildSettingsView(forms, host()).pendingRestart).toEqual([]);
+  });
+
   it("writes through settings.mutate with the expected revision", async () => {
     const { forms, calls, user } = fakeForms();
     const result = await applySettingsUpdate(forms, host(), {

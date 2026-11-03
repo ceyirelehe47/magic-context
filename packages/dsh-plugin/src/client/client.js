@@ -98,6 +98,9 @@ window.__ModuleLoader__.load({
 			conflict: ["Settings changed elsewhere since this page loaded. Reloaded the latest values; your edits are kept — review and Save again.", "设置在别处被修改，已载入最新值并保留你的修改；请核对后再次保存。"],
 			unavailable: ["Settings endpoint unavailable", "设置端点不可用"],
 			readonly: ["Read-only", "只读"],
+			pending_title: ["magic-context.jsonc changed — these sections apply after a DSH restart:", "magic-context.jsonc 已修改，以下配置需重启 DSH 后生效："],
+			pending_running: ["running", "运行中的值"],
+			pending_next: ["pending restart", "待重启生效"],
 			configPath: ["Config file", "配置文件"],
 			invalid: ["Invalid value", "无效值"],
 			meter_aria: ["Magic Context: {p} of context used", "Magic Context：上下文已用 {p}"],
@@ -429,6 +432,11 @@ window.__ModuleLoader__.load({
 		}
 
 		/* -------------------------------------- settings editor */
+		function pendingJson(v) {
+			var t;
+			try { t = v === undefined ? "—" : JSON.stringify(v); } catch (e) { t = String(v); }
+			return t.length > 120 ? t.slice(0, 117) + "..." : t;
+		}
 		var SCALAR_FIELDS = ["enabled", "historianModel", "historianAwaitAtTurnEndMs", "executeThresholdPercentage", "protectedTokens"];
 
 		/** Draft from the user layer: present = override, absent = inherit. */
@@ -659,6 +667,14 @@ window.__ModuleLoader__.load({
 				children: [
 					jsx("h3", { className: "ckmc-title", children: L("title") + " · " + L("settings") }),
 					jsx("p", { className: "ckmc-desc", children: L("precedence") }),
+					Array.isArray(view.pendingRestart) && view.pendingRestart.length > 0
+						? jsxs("div", { className: "ckmc-notice", children: [
+							jsx("p", { children: L("pending_title") }),
+							jsx("ul", { children: view.pendingRestart.map(function (c) {
+								return jsx("li", { children: c.key + " — " + L("pending_running") + ": " + pendingJson(c.running) + " · " + L("pending_next") + ": " + pendingJson(c.next) }, c.key);
+							}) })
+						] })
+						: null,
 					view.available !== true || view.writable !== true
 						? jsx("p", { className: "ckmc-notice ckmc-noticeErr", children: L("readonly") + (view.reason ? ": " + view.reason : "") })
 						: null,

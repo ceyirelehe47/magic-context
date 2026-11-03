@@ -29,7 +29,7 @@ import { MAGIC_CONTEXT_REMOTE_NAMESPACE } from "../compat/dsh-0.1/typert";
 import type { MagicContextHostService } from "../index";
 import { MAGIC_CONTEXT_PACKAGE } from "../doctor/env";
 import type { MagicContextPluginConfig } from "@magic-context/core/config";
-import { loadPluginConfigQuiet } from "../settings/config-load";
+import { loadPluginConfigQuiet, pendingRestartChanges, type PendingRestartChange } from "../settings/config-load";
 import {
   MAGIC_OVERRIDE_BOUNDS,
   MAGIC_OVERRIDE_FIELDS,
@@ -98,6 +98,11 @@ export interface MagicSettingsView {
   readonly bounds: typeof MAGIC_OVERRIDE_BOUNDS;
   readonly fields: readonly string[];
   readonly precedence: string;
+  /**
+   * Round 21: restart-only jsonc sections edited since the agent plane
+   * started — `running` is applied now, `next` after a DSH restart.
+   */
+  readonly pendingRestart: readonly PendingRestartChange[];
 }
 
 export type MagicUpdateSettingsResult =
@@ -486,6 +491,15 @@ function effectiveFor(host: MagicContextHostService): EffectiveMagicSettings {
   return resolveEffectiveSettings(loadJsoncForHost(), host.overrides?.() ?? {});
 }
 
+function pendingRestartFor(host: MagicContextHostService): PendingRestartChange[] {
+  try {
+    const running = host.runningConfig?.() as Partial<MagicContextPluginConfig> | undefined;
+    return pendingRestartChanges(running, loadJsoncForHost());
+  } catch {
+    return [];
+  }
+}
+
 function pickOverlay(section: unknown): MagicDshOverrides {
   if (section === null || typeof section !== "object") return {};
   const out: Record<string, unknown> = {};
@@ -511,6 +525,7 @@ export function buildSettingsView(
     bounds: MAGIC_OVERRIDE_BOUNDS,
     fields: MAGIC_OVERRIDE_FIELDS,
     precedence: MAGIC_SETTINGS_PRECEDENCE,
+    pendingRestart: pendingRestartFor(host),
   };
   if (forms === undefined) {
     return {

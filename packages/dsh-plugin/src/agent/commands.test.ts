@@ -189,6 +189,43 @@ describe("/ctx-status on DSH (round 17)", () => {
   });
 });
 
+describe("/ctx-status pending restart (round 21)", () => {
+  it("shows restart-only jsonc changes as running value + pending restart", async () => {
+    const { db, dir } = await openDb();
+    try {
+      const { ctx, registered } = makeFakeCtx();
+      registerCtxCommands(ctx, {
+        ...baseOpts(db),
+        pendingRestart: () => [{ key: "history_budget_percentage", running: 0.15, next: 0.2 }],
+      });
+      const command = findCommand(registered, "ctx-status");
+      const result = (await command.handler(invocation(makeFakeAgent(SESSION_ID, "/tmp/dsh-proj")))) as CommandResult;
+      expect(result.kind).toBe("success");
+      if (result.kind !== "success") return;
+      expect(result.text).toContain("Pending restart");
+      expect(result.text).toContain("history_budget_percentage: running 0.15 → after restart 0.2");
+    } finally {
+      db.close();
+      await removeTestDir(dir);
+    }
+  });
+
+  it("no pending changes: no section", async () => {
+    const { db, dir } = await openDb();
+    try {
+      const { ctx, registered } = makeFakeCtx();
+      registerCtxCommands(ctx, { ...baseOpts(db), pendingRestart: () => [] });
+      const command = findCommand(registered, "ctx-status");
+      const result = (await command.handler(invocation(makeFakeAgent(SESSION_ID, "/tmp/dsh-proj")))) as CommandResult;
+      if (result.kind !== "success") throw new Error("status failed");
+      expect(result.text).not.toContain("Pending restart");
+    } finally {
+      db.close();
+      await removeTestDir(dir);
+    }
+  });
+});
+
 describe("/ctx-flush", () => {
   it("flushes pending drops and marks tags dropped", async () => {
     const { db, dir } = await openDb();

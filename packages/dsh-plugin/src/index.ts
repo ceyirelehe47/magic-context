@@ -87,6 +87,13 @@ export interface MagicContextHostService {
   registerHistorianBusy?(fn: (agent: unknown) => boolean): void;
   historianBusy?(agent: unknown): boolean;
   /**
+   * Round 21: the jsonc the running agent plane started with (restart-only
+   * sections run with it); the settings page shows changed sections as
+   * "running value · pending restart: new value". Optional.
+   */
+  registerRunningConfig?(fn: () => unknown): void;
+  runningConfig?(): unknown;
+  /**
    * Current DSH override layer (dereferenced on every call, so live
    * `settings.mutate` edits apply without a remount). Optional for older
    * host stand-ins.
@@ -117,6 +124,7 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
   let summarizeHook: MagicSummarizeHook | undefined;
   let nativePressure: ((agent: unknown) => number | undefined) | undefined;
   let historianBusy: ((agent: unknown) => boolean) | undefined;
+  let runningConfig: (() => unknown) | undefined;
   const host: MagicContextHostService = {
     ready,
     canonicalKey(dshSessionId: string): string {
@@ -143,6 +151,12 @@ export function apply(ctx: Context, config: MagicHostConfig = {}): void {
     },
     historianBusy(agent: unknown): boolean {
       return historianBusy === undefined ? false : historianBusy(agent);
+    },
+    registerRunningConfig(fn: () => unknown): void {
+      runningConfig = fn;
+    },
+    runningConfig(): unknown {
+      return runningConfig?.();
     },
     overrides(): MagicDshOverrides {
       return readMagicOverrides(config);

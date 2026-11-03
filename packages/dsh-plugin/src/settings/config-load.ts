@@ -69,9 +69,57 @@ export const RESTART_ONLY_SECTIONS = [
   "prompt_surface",
   "cache_ttl",
   "protected_tags",
-  "protected_tokens",
   "history_budget_percentage",
 ] as const;
+
+/**
+ * Round 21: jsonc keys the runtime reads per call / per step, so an edit is
+ * applied live (agent plane getters over the live jsonc view): `historian.model`
+ * (incl. the per-harness `historian.opencode.model`) and `protected_tokens`.
+ * They are excluded from the restart notice and the pending-restart view.
+ */
+export const HOT_JSONC_KEYS = ["historian.model", "historian.opencode.model", "protected_tokens"] as const;
+
+/** A restart-only section's value with its hot keys removed (comparison view). */
+function restartView(key: string, value: unknown): unknown {
+  if (key !== "historian" || value === null || typeof value !== "object") return value;
+  const { model: _model, opencode, ...rest } = value as Record<string, unknown>;
+  if (opencode !== null && typeof opencode === "object") {
+    const { model: _ocModel, ...ocRest } = opencode as Record<string, unknown>;
+    if (Object.keys(ocRest).length > 0) return { ...rest, opencode: ocRest };
+    return rest;
+  }
+  return opencode === undefined ? rest : { ...rest, opencode };
+}
+
+/** One restart-only section that differs between the running and current jsonc. */
+export interface PendingRestartChange {
+  readonly key: string;
+  /** Value the running agent plane started with (applied now). */
+  readonly running: unknown;
+  /** Value in magic-context.jsonc now (applied after a DSH restart). */
+  readonly next: unknown;
+}
+
+/**
+ * Round 21: restart-only sections whose current jsonc value differs from the
+ * value the running agent plane started with. `running` undefined (no
+ * snapshot registered) → nothing pending.
+ */
+export function pendingRestartChanges(
+  running: Partial<MagicContextPluginConfig> | undefined,
+  current: Partial<MagicContextPluginConfig> | undefined,
+): PendingRestartChange[] {
+  if (running === undefined || current === undefined) return [];
+  const r = running as Record<string, unknown>;
+  const c = current as Record<string, unknown>;
+  const out: PendingRestartChange[] = [];
+  for (const key of RESTART_ONLY_SECTIONS) {
+    if (stable(restartView(key, r[key])) === stable(restartView(key, c[key]))) continue;
+    out.push({ key, running: r[key], next: c[key] });
+  }
+  return out;
+}
 
 function stable(value: unknown): string {
   if (value === undefined) return "undefined";
@@ -111,7 +159,7 @@ export function createConfigReloadNotices(warn: (message: string) => void): {
         say(`[magic-context] magic-context.jsonc: ${warning}`);
       }
       const record = config as unknown as Record<string, unknown>;
-      const now = new Map(RESTART_ONLY_SECTIONS.map((key) => [key, stable(record[key])]));
+      const now = new Map(RESTART_ONLY_SECTIONS.map((key) => [key, stable(restartView(key, record[key]))]));
       if (baseline === undefined) {
         baseline = now;
         return;
