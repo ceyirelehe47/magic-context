@@ -131,6 +131,11 @@ function expectCompartmentsContiguous(db: Database, key: string) {
   return c;
 }
 
+function expectIntegrity(db: Database) {
+  const integrity = db.prepare("PRAGMA integrity_check").get() as Record<string, string>;
+  expect(Object.values(integrity)[0]).toBe("ok");
+}
+
 function leaseRows(db: Database, key: string) {
   return db
     .prepare("SELECT holder_id, owner_pid, expires_at FROM compartment_state_lease WHERE session_id = ?")
@@ -160,6 +165,7 @@ async function recoverPlane(dir: string, sid: string) {
   const key = keyOf(sid);
   const db = await createTestDb(join(dir, "context.db"));
   initializeDshAdapterTables(db);
+  expectIntegrity(db);
   const { session, events } = restoreSession(sid, join(dir, `${sid}.events.jsonl`));
   const applied: string[] = [];
   const deps = planeDeps(db, (m) => {
@@ -217,6 +223,7 @@ async function recoverHistorian(dir: string, sid: string) {
   const key = keyOf(sid);
   const db = await createTestDb(join(dir, "context.db"));
   initializeDshAdapterTables(db);
+  expectIntegrity(db);
   const { session, events } = restoreSession(sid, join(dir, `${sid}.events.jsonl`));
   return { db, key, session, events };
 }

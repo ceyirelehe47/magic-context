@@ -29,6 +29,7 @@
  */
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { e2eCrashPoint } from "./e2e-hooks";
+import { isLeaseOwnerGone } from "./lease-liveness";
 import { randomUUID } from "node:crypto";
 import { closeSync, openSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -872,7 +873,10 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
  * instead of failing "lease busy". Expired leases do not count.
  */
 export function isDshHistorianBusy(db: Database, sessionId: string): boolean {
-  return getCompartmentLeaseBlocker(db, sessionId) !== null;
+  const blocker = getCompartmentLeaseBlocker(db, sessionId);
+  // Round 23c (P0-2): an unexpired lease whose owner process is confirmed dead
+  // (SIGKILL mid-pass) is not a running pass; the next acquire reclaims it.
+  return blocker !== null && !isLeaseOwnerGone(blocker.ownerPid);
 }
 
 /* ──────────────────────── magicSummarize hook (Magic 压缩策略) ─────────────────────── */

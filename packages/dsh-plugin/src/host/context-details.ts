@@ -8,9 +8,10 @@
  * knowledge, nudges — is read here on demand (popover open), every query
  * fail-open so an older schema or a missing table degrades to absent fields.
  */
-type Database = { prepare(sql: string): { get(...params: unknown[]): unknown } };
+type Database = { prepare(sql: string): { get(...params: unknown[]): unknown; all(...params: unknown[]): unknown[] } };
 import type { EffectiveMagicSettings, MagicThresholds } from "../settings/magic-settings";
 import { countPressureTruncations } from "../agent/pressure-truncation";
+import { isLeaseOwnerGone } from "../agent/lease-liveness";
 
 export interface MagicSessionContextDetails {
   readonly sessionId: string;
@@ -111,6 +112,13 @@ export function readSessionContextDetails(input: ContextDetailsInput): MagicSess
       return undefined;
     }
   };
+  const all = <T>(sql: string, ...params: (string | number)[]): T[] | undefined => {
+    try {
+      return db.prepare(sql).all(...params) as T[];
+    } catch {
+      return undefined;
+    }
+  };
   const count = (sql: string, ...params: (string | number)[]): number =>
     one<{ n: number }>(sql, ...params)?.n ?? 0;
 
@@ -142,13 +150,16 @@ export function readSessionContextDetails(input: ContextDetailsInput): MagicSess
   // forever. It counts only while a compartment lease is live (the pass holds
   // one; it expires once the holder is gone). No lease table (older schema)
   // → trust the flag.
-  const liveLease = one<{ n: number }>(
-    "SELECT COUNT(*) AS n FROM compartment_state_lease WHERE session_id = ? AND expires_at > ?",
+  // Round 23c (P0-2): a lease whose owner process is confirmed dead does not
+  // count either (SIGKILL inside the TTL window).
+  const leaseOwners = all<{ pid: number | null }>(
+    "SELECT owner_pid AS pid FROM compartment_state_lease WHERE session_id = ? AND expires_at > ?",
     sid,
     Date.now(),
   );
   const inProgress =
-    Number(meta.compartment_in_progress ?? 0) > 0 && (liveLease === undefined || Number(liveLease.n) > 0);
+    Number(meta.compartment_in_progress ?? 0) > 0 &&
+    (leaseOwners === undefined || leaseOwners.some((row) => !isLeaseOwnerGone(row.pid)));
   const failureCount = Number(meta.historian_failure_count ?? 0) || 0;
   const lastFailureAt = typeof meta.historian_last_failure_at === "number" ? meta.historian_last_failure_at : undefined;
   const lastCompartmentAt = typeof lastCompartment === "number" ? lastCompartment : undefined;
