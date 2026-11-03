@@ -43,12 +43,12 @@ cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
 Baseline (round 23, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; release tags
-unchanged — `dsh/0.49.35-dsh.2` → `7848c0430`; push run @@PUSHRUN@@ @ `@@SHA@@` and
-dispatch run @@E2ERUN@@ (`e2e=true`)):
+unchanged — `dsh/0.49.35-dsh.2` → `7848c0430`; push run 41628170286 @ `a39dc5ea7` and
+dispatch run 41628590609 (`e2e=true`)):
 `typecheck:dsh` **0 errors**, test-file typecheck **0 errors**, core typecheck
-**0 errors**, `dsh-plugin` **@@TESTS@@ pass** (round 23 +11 over round 22's 525),
+**0 errors**, `dsh-plugin` **536 pass** (round 23 +11 over round 22's 525),
 `adapter-api` **15 pass**, `contracts:dsh` **99 pass**, 0 fail; real-model
-`e2e` **@@E2E@@** on run @@E2ERUN@@ (79 judged = round 22's 78 + R14).
+`e2e` **78/79 PASS (R12 FAIL — scenario timing, made deterministic in round 23b)** on run 41628590609 (79 judged = round 22's 78 + R14).
 Evidence: `docs/dsh/e2e/evidence-round23/`.
 
 Round 23 fixes (adapter only, no core change; red test first, on the REAL
@@ -1368,8 +1368,12 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       post-compaction turn as drop candidates); `ctx_expand` numbering
       (`d2ee6281c`); the backstop retry over its own fresh checkpoint
       (`a39dc5ea7`, surfaced by the first e2e of the ordinal fix). Verified: unit replay of run 41619627652's log (7/7 + 1),
-      e2e @@E2ERUN@@ R13 (timeout branch now runs) and R14 (second compaction
+      e2e 41628590609 R13 (timeout branch now runs) and R14 (second compaction
       keeps lock-c's prompt + checksums visible or inside a compartment).
+      The final run 41628590609 @ `a39dc5ea7` also confirmed `a39dc5ea7`: R10/R11
+      PASS (no 'summary is not smaller' error after a committed compaction).
+      Its only FAIL, R12, was scenario timing (no lease held when `/compact`
+      started), fixed in round 23b (`c34eb964e`).
     - **Known, not changed — the first compaction's uncovered tail.** When the
       mini-historian leaves a trailing part of the `/compact` region
       unprocessed (`<unprocessed_from>`), the summary renders only what was
