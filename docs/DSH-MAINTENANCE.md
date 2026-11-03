@@ -42,6 +42,58 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
+Baseline (round 20, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; HEAD after
+the round 20 fixes, release tag `dsh/0.49.35-dsh.1` unchanged → `270629e75`;
+push run 41600879637 @ `542c6569e` and dispatch run __E2E_RUN__ (`e2e=true`)):
+`typecheck:dsh` **0 errors**, core typecheck **0 errors**, `dsh-plugin`
+**494 pass** (66 files; round 20 +9), `adapter-api` **15 pass**,
+`contracts:dsh` **99 pass**, 0 fail; real-model `e2e` __E2E_RESULT__
+(66 judged = round 19's 65 + R7). New informational step: `*.test.ts`
+typecheck (`packages/dsh-plugin/tsconfig.test.json`) — **156 errors**, all in
+test fixtures (DSH branded types `ToolCallId`, `stream` on assistant events,
+`react` without types); it does not fail the job (see Known limitations 14).
+
+Round 20 fixes (adapter only, no core change; each with a red test first):
+- `ba38bff7f` **main-session native compaction no longer fails "summarize
+  range unresolvable".** compaction-basic `buildSummarizationInput` prepends
+  the system/message (surface node 0) to the region, and a region can end on
+  a Magic op copy whose surface id the transcript view does not carry. The MC
+  summarize hook resolved the literal first/last ids, so EVERY native
+  compaction of an MC main session — the 90 % backstop and `/compact` — closed
+  `compaction/end` with an error (real rc.5 run 41593887664, `pold-03/04`; the
+  round 19 R4 check counted `compaction/start` only). The hook now skips system
+  prompts and resolves the range as min..max over the ids the view knows, and
+  the transcript provider maps surface event ids (op copies, via the view
+  message spans) to the message they cover. Real: run 41599626978 R7 PASS (the
+  pold native compaction completed, 0 errors).
+- `b5710f7b9` **config reload** (two items, one module
+  `settings/config-load.ts`): (a) core `parsePluginConfig` logs
+  `clear_reasoning_age is deprecated …` on every parse and the agent plane /
+  settings endpoints re-parse on a 3 s TTL, so the line repeated every few
+  seconds — the load now runs behind a temporary core log-line forwarder that
+  passes each distinct line once per process; (b) `createLiveSettings` reports
+  each `configWarnings` entry once and, when a section bridged only at
+  startup (`memory`, `dreamer`, `compaction`, `historian`, `mural`, caveman,
+  commit-cluster, temporal, prompt surface, cache TTL, protected_*,
+  history budget) differs from the startup config, warns once per new value
+  (`ctx.logger.warn`) that DSH must be restarted. Live keys (`enabled`,
+  `execute_threshold_*`) do not trigger it. Unit tests only (no e2e check).
+- `542c6569e` **historian lease holder id unique per pass.** Core's compartment
+  lease re-grants a lease to its own holder, and every DSH pass used
+  `dsh-historian:<session>`; the trigger fires on each step above the
+  threshold, so overlapping passes both "held" the lease and raced to publish
+  the same sequence (real run 41599626978 `cmp-04`: `UNIQUE constraint failed:
+  compartments.session_id, compartments.sequence`, historian `failed` → C6/C10
+  FAIL). Now `dsh-historian:<session>:<pid>:<rand>`; an overlapping pass logs
+  "lease busy" and skips. Side effect: a compaction mini-historian that starts
+  while a background pass holds the lease fails closed ("lease busy") instead
+  of racing.
+- `a91cca79c` CI: `tsconfig.test.json` + informational test-file typecheck
+  step (count shown in the Summary). `4ee4a04ba` e2e: **R7** — a main-session
+  native compaction must complete (no `compaction/end` error, no
+  "summarize range unresolvable" in any log); red on run 41593887664's
+  artifacts.
+
 Baseline (round 19, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; release tag
 `dsh/0.49.35-dsh.1` → `270629e75`; push run 41593684140 @ `270629e75` and
 dispatch run 41593887664 (`e2e=true`)):
@@ -332,6 +384,7 @@ Round 17/18 新增检查：
 | S0–S7 | 子会话（24k 路由）读 8 个生成的 <8 KB 文件：委派成功；compaction-basic 走到 **summary**（不只是 prune）；摘要不是 MC 输出；子会话在 Magic 表 0 行；父会话增长只属于自己；子会话 completed；≥6/8 个 CHECKSUM 回到父会话或子会话最终回复 |
 | C10 | （round 19）e2e 专用开关把 scenario C 第一次 historian 输出换成截断的 XML（只一次，O_EXCL 标记文件）：之后出现 `historian repair retry`，compartment 仍写出，historian 无失败 |
 | R0–R6 | （round 19）scenario P，100k 主会话路由：R1 MC 管理的主会话里没有低于 65 % 的原生压缩；R2 MC historian 先触发（≥63 %，阈值 65）；R3 会话越过旧默认阈值（30.4 %）时没有原生压缩；R4 旧策略（显式写入 compaction-basic 默认值）实测在 65 % 之前原生压缩；R5 所有日志里没有 "leaving no pressure budget"；R6 引擎每步打印的有效主会话阈值 ≥ 65 % |
+| R7 | （round 20）主会话原生压缩（MC summarize hook）必须成功：pold/pnew 会话里至少有一次 `compaction/end` 且都没有 error，所有日志里没有 "summarize range unresolvable" |
 
 Round 19：dispatch run 41586948399 @ `9d16d6fab`（2 FAIL：R2，读结果被截到 ~8 KB 且模型自己 ctx_reduce，P 只到 52 %；R4，headless 不打印 ctx.logger）→ 41589483637 @ `34e728b60`（2 FAIL：R4，80k 上 DSH 默认值本身非法：retain 12144 ≥ 阈值 10368；R6 首个 pre-step 没有 header；C10 **PASS**）→ 41591017319 @ `0eb2e69c4`（R0–R6 **全过**；C 场景因模型每轮 ctx_reduce、峰值 61 % 而失败 8 项）→ 41592114076 @ `6615a8d5b`（64/65；仅 C8 失败：模型答对暗号但先调了一次 `ctx_search`，属模型行为。C8 改为只判答案 + m0 含暗号，检索调用仅记录）→ 41593887664 @ `270629e75`（原生兜底改为 90 % 后复验，**0 FAIL**；R6 有效阈值 90；MC 首次触发 73 %；C8、C10 通过）。发行 tag `dsh/0.49.35-dsh.1` 指向 `270629e75`。
 
@@ -1093,6 +1146,31 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     - The historian repair retry (`f8c663fee`) — **verified on the real host
       in round 19** (C10, e2e-only one-shot injection).
 
+
+14. **Round 20 scan (2026-11-03) — status.**
+    - **Fixed:** main-session native compaction failing "summarize range
+      unresolvable" (`ba38bff7f`, real R7); deprecated-key log lines every
+      ~3 s (`b5710f7b9`, unit); restart-only jsonc sections silently ignored
+      by hot reload — now a one-time restart notice, the values are still
+      applied only at startup (`b5710f7b9`, unit); overlapping historian
+      passes double-publishing a compartment sequence (`542c6569e`).
+    - **Partly:** `typecheck:dsh` still excludes `*.test.ts`; the new
+      informational step type-checks them (156 errors in fixtures:
+      branded `ToolCallId`, assistant events without `stream`, untyped
+      `react`). Fixing them is mechanical but touches ~30 test files; make the
+      step gating once it reaches 0.
+    - **Not changed:** the agent-plane coordinator keeps `appliedOps` (one opId
+      string per applied plan) and one settled promise per session for the
+      process lifetime — small, bounded by the session's plan count, only
+      matters for a very long-lived web server; the settings page shows a
+      jsonc `historian.model` / `protected_tokens` as effective immediately
+      while the agent applies them at restart (now announced by the restart
+      notice); the first pre-step of a fresh session has no request header
+      (`pct=?` in the native pressure diagnostic) — cosmetic.
+    - **Side effect to know:** with unique lease holders, `/compact` or the
+      90 % backstop on a main session fails closed ("mini-historian lease
+      busy") when a background historian pass is running at that moment; the
+      next pressure check retries.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
