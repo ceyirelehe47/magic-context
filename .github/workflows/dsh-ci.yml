@@ -66,6 +66,14 @@ jobs:
         continue-on-error: true
         run: bun run typecheck:dsh
 
+      - name: dsh-plugin test-file typecheck (*.test.ts, round 20; informational)
+        id: tc_tests
+        continue-on-error: true
+        run: |
+          bun run --cwd packages/dsh-plugin tsc --noEmit -p tsconfig.test.json 2>&1 | tee "$RUNNER_TEMP/tc-tests.log"; rc=${PIPESTATUS[0]}
+          echo "test-file type errors: $(grep -c 'error TS' "$RUNNER_TEMP/tc-tests.log")"
+          exit $rc
+
       - name: core typecheck (packages/plugin)
         id: tc_core
         continue-on-error: true
@@ -95,6 +103,7 @@ jobs:
             echo "| step | outcome | pass | fail |"
             echo "|---|---|---|---|"
             echo "| typecheck:dsh | ${{ steps.tc_dsh.outcome }} | | |"
+            echo "| test-file typecheck (informational) | ${{ steps.tc_tests.outcome }} | | $(grep -c 'error TS' "$RUNNER_TEMP/tc-tests.log" 2>/dev/null) |"
             echo "| core typecheck | ${{ steps.tc_core.outcome }} | | |"
             echo "| dsh-plugin | ${{ steps.t_dsh.outcome }} | $(count dsh-plugin pass) | $(count dsh-plugin fail) |"
             echo "| adapter-api | ${{ steps.t_api.outcome }} | $(count adapter-api pass) | $(count adapter-api fail) |"
