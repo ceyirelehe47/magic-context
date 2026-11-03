@@ -742,14 +742,25 @@ def check_x(c, out: Path, runs):
     seen = {}
     for n in names:
         seen.update(rows[n])
+    # Hashes taken by ci-x.sh before the redact step ($HOME → "~" changes the
+    # text); fall back to hashing the (possibly redacted) log here.
+    pre = {}
+    try:
+        pre = json.loads((out / "x-session-sha.json").read_text())
+    except Exception:
+        pre = {}
     for tag, r in seen.items():
         want = r.get("original_sha")
-        if not any(hashlib.sha256(f"\u00a7{tag}\u00a7 {t}".encode()).hexdigest() == want
-                   or hashlib.sha256(t.encode()).hexdigest() == want for t in raws):
+        if pre:
+            ok = want in (pre.get("raw") or []) or want in ((pre.get("prefixed") or {}).get(str(tag)) or [])
+        else:
+            ok = any(hashlib.sha256(f"\u00a7{tag}\u00a7 {t}".encode()).hexdigest() == want
+                     or hashlib.sha256(t.encode()).hexdigest() == want for t in raws)
+        if not ok:
             lost.append(tag)
     c.add("X6", bool(seen) and not lost,
           "every truncated tool result's untruncated original (sha256 in dsh_pressure_truncations) is still in the DSH session log (historian / ctx_expand / re-read source)",
-          {"truncated": sorted(seen), "originalMissing": lost, "toolResults": len(raws)})
+          {"truncated": sorted(seen), "originalMissing": lost, "toolResults": len(raws), "hashedBeforeRedact": bool(pre)})
     # X7 — never an over-window request in the whole scenario
     c.add("X7", bool(main) and not over,
           "scenario X: the mock (real BPE count, 24k enforced) never received a request over the window",
@@ -996,9 +1007,35 @@ def redact(out: Path) -> int:
     return 0
 
 
+def xsha(out: Path) -> int:
+    """sha256 of every tool/result text in x-session.jsonl, raw and with each
+    truncated tag's "§N§ " prefix (tags from the db-x-*.json dumps)."""
+    texts = []
+    for line in (out / "x-session.jsonl").read_text().splitlines():
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        if e.get("type") == "tool/result":
+            for b in ((e.get("data") or {}).get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and isinstance(b.get("text"), str):
+                    texts.append(b["text"])
+    tags = set()
+    for p in out.glob("db-x-*.json"):
+        try:
+            for r in json.loads(p.read_text()).get("truncations") or []:
+                tags.add(r.get("tag_number"))
+        except Exception:
+            pass
+    sha = lambda t: hashlib.sha256(t.encode()).hexdigest()
+    print(json.dumps({"raw": [sha(t) for t in texts],
+                      "prefixed": {str(n): [sha(f"\u00a7{n}\u00a7 {t}") for t in texts] for n in sorted(tags)}}))
+    return 0
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] not in ("check", "redact"):
+    if len(sys.argv) != 3 or sys.argv[1] not in ("check", "redact", "xsha"):
         print(__doc__)
         sys.exit(2)
     d = Path(sys.argv[2])
-    sys.exit(check(d) if sys.argv[1] == "check" else redact(d))
+    sys.exit(check(d) if sys.argv[1] == "check" else redact(d) if sys.argv[1] == "redact" else xsha(d))

@@ -106,6 +106,9 @@ if [[ -n "$XSID" ]]; then
   xdb "$XSID" x-5
   f="$(ls "$DSH_HOME"/sessions/*/"$XSID"/session.v4.jsonl.zstd 2>/dev/null | head -n 1)"
   [[ -n "$f" ]] && zstd -qdc "$f" > "$OUT/x-session.jsonl" 2>/dev/null
+  # X6 compares sha256 of the originals; the redact step (run before check)
+  # rewrites $HOME to "~" inside the tool results, so hash them NOW (round 23c).
+  [[ -s "$OUT/x-session.jsonl" ]] && python3 "$HERE/ci-check.py" xsha "$OUT" > "$OUT/x-session-sha.json" 2>/dev/null
 fi
 kill "$MOCK_PID" 2>/dev/null
 wait "$MOCK_PID" 2>/dev/null
