@@ -26,7 +26,7 @@ import {
   buildCompartmentAgentPrompt,
 } from "@magic-context/core/hooks/magic-context/compartment-prompt";
 import { buildHistorianRepairPrompt } from "@magic-context/core/hooks/magic-context/compartment-runner-validation";
-import { readDshTranscript } from "./transcript";
+import { messageNodeSpan, readDshTranscript } from "./transcript";
 import { isMagicChildSession } from "./worker";
 import {
   createMagicSummarizeHook,
@@ -260,14 +260,27 @@ export function createLlmSummarizeCall(
   };
 }
 
+/** Message id of a surface event (`user/message` data.id, else data.message.id). */
+function surfaceEventMessageId(event: unknown): string | undefined {
+  if (event === null || typeof event !== "object") return undefined;
+  const data = (event as { data?: unknown }).data;
+  if (data === null || typeof data !== "object") return undefined;
+  const direct = (data as { id?: unknown }).id;
+  if (typeof direct === "string") return direct;
+  const message = (data as { message?: unknown }).message;
+  const nested = message !== null && typeof message === "object" ? (message as { id?: unknown }).id : undefined;
+  return typeof nested === "string" ? nested : undefined;
+}
+
 /** Transcript-backed RawMessageProvider for one live session (read-only). */
 export function transcriptRawMessageProvider(
   agent: Agent,
   canonicalSessionId: string,
 ): RawMessageProvider {
+  const events = sessionEvents(agent.session);
   const view = readDshTranscript({
     session: {
-      events: sessionEvents(agent.session),
+      events,
       surface: agent.session.surface,
       header: { cwd: agent.session.header.cwd },
     },
@@ -275,10 +288,27 @@ export function transcriptRawMessageProvider(
   });
   const byId = new Map(view.messages.map((message) => [message.id, message]));
   const ordinalById = new Map(view.messages.map((message, index) => [message.id, index + 1]));
+  // Round 20: compaction-basic hands the summarize hook SURFACE messages. A
+  // Magic op copy (or a folded tool result) has a surface id the view does not
+  // carry — the view expands copies back into their source events. Map every
+  // surface event id a view message covers (its span seqs) to that message's
+  // ordinal (the last covering message wins), so a region ending on a copy
+  // resolves to the message it re-renders.
+  const surfaceOrdinalById = new Map<string, number>();
+  const eventBySeq = new Map(events.map((event) => [Number((event as { seq?: unknown }).seq), event]));
+  view.messages.forEach((message, index) => {
+    const span = messageNodeSpan(message);
+    if (span === null) return;
+    for (const seq of span.seqs) {
+      const id = surfaceEventMessageId(eventBySeq.get(seq));
+      if (id !== undefined && !ordinalById.has(id)) surfaceOrdinalById.set(id, index + 1);
+    }
+  });
   return {
     readMessages: () => [...view.messages],
     readMessageById: (messageId: string) => byId.get(messageId) ?? null,
-    readMessageOrdinalById: (messageId: string) => ordinalById.get(messageId) ?? null,
+    readMessageOrdinalById: (messageId: string) =>
+      ordinalById.get(messageId) ?? surfaceOrdinalById.get(messageId) ?? null,
     getMessageCount: () => view.messages.length,
   };
 }

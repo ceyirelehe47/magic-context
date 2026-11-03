@@ -896,8 +896,20 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
     const lastId = String(messages[messages.length - 1]!.id);
 
     return withRawMessageProvider(sessionId, deps.provider, async () => {
-      const firstOrdinal = readRawSessionMessageOrdinalById(sessionId, firstId);
-      const lastOrdinal = readRawSessionMessageOrdinalById(sessionId, lastId);
+      // Round 20: compaction-basic prepends the conversation's system prompt
+      // (surface node 0) to the region, and a region boundary can be a
+      // surface message the view does not carry by id (a Magic op copy, a
+      // folded tool result). Resolve the range over every message the view
+      // knows (system prompts skipped) instead of the literal first/last ids.
+      let firstOrdinal: number | null = null;
+      let lastOrdinal: number | null = null;
+      for (const message of messages) {
+        if ((message as { role?: unknown }).role === "system") continue;
+        const ordinal = readRawSessionMessageOrdinalById(sessionId, String(message.id));
+        if (ordinal === null) continue;
+        if (firstOrdinal === null || ordinal < firstOrdinal) firstOrdinal = ordinal;
+        if (lastOrdinal === null || ordinal > lastOrdinal) lastOrdinal = ordinal;
+      }
       if (firstOrdinal === null || lastOrdinal === null || lastOrdinal < firstOrdinal) {
         throw new Error(
           `magic-context: summarize range unresolvable for ${sessionId} (messages ${firstId}..${lastId})`,
