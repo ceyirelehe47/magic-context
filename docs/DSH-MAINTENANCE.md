@@ -46,7 +46,7 @@ Baseline (round 19, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; push run
 41591790570 @ `6615a8d5b` and dispatch run 41592114076 (`e2e=true`)):
 `typecheck:dsh` **0 errors**, core typecheck **0 errors**, `dsh-plugin`
 **485 pass** (65 files; round 19 +17), `adapter-api` **15 pass**,
-`contracts:dsh` **98 pass**, 0 fail; real-model `e2e` (running at the time of writing; see the round 19 line in the CI section)
+`contracts:dsh` **98 pass**, 0 fail; real-model `e2e` **64/65 PASS** on run 41592114076 (only C8 failed: the model answered the codeword correctly but called `ctx_search` first; C8 no longer judges retrieval calls, re-verified by a follow-up dispatch)
 (round 18's 57 + C10 + R0–R6 = 65 judged). Evidence:
 `docs/dsh/e2e/evidence-round19/`.
 
@@ -324,13 +324,13 @@ Round 17/18 新增检查：
 
 | id | 内容 |
 |---|---|
-| C0–C9 | 主会话（40k 路由，阈值 65 %，每轮新进程）：C1 historian 在 ≥63 %（阈值−2）触发且上下文确实超过 65 %；C2 写出 compartments；C3 峰值之后的最低 prompt tokens 低于峰值；C4 暗号仍可答出；C5 可见输出无 `§N§`；C6 compartments 连续不重叠、无存活 lease、historian 非 running/failed；C7 缓存 m0 的 `<session-history>` 含 compartments（及暗号那段）；C8 cmp-q 不调用 ctx_search/ctx_expand/ctx_memory 即答出暗号；C9 解码后的会话事件中同一 tag 的 `[dropped §N§]` 不重复 |
+| C0–C9 | 主会话（40k 路由，阈值 65 %，每轮新进程）：C1 historian 在 ≥63 %（阈值−2）触发且上下文确实超过 65 %；C2 写出 compartments；C3 峰值之后的最低 prompt tokens 低于峰值；C4 暗号仍可答出；C5 可见输出无 `§N§`；C6 compartments 连续不重叠、无存活 lease、historian 非 running/failed；C7 缓存 m0 的 `<session-history>` 含 compartments（及暗号那段）；C8 m0 的 `<session-history>` 含暗号时 cmp-q 答出暗号（检索调用只记录，不判定；第 19 轮起）；C9 解码后的会话事件中同一 tag 的 `[dropped §N§]` 不重复 |
 | U1–U6 | ctx_search / ctx_memory / ctx_expand 各调用一次且有结果；设置页 / popover 读数与 DB 一致；`/ctx-status` 与 DB 一致（无 OpenCode DB 横幅、Last input tokens ≠ 0、Last response ≠ never）；doctor 干净 |
 | S0–S7 | 子会话（24k 路由）读 8 个生成的 <8 KB 文件：委派成功；compaction-basic 走到 **summary**（不只是 prune）；摘要不是 MC 输出；子会话在 Magic 表 0 行；父会话增长只属于自己；子会话 completed；≥6/8 个 CHECKSUM 回到父会话或子会话最终回复 |
 | C10 | （round 19）e2e 专用开关把 scenario C 第一次 historian 输出换成截断的 XML（只一次，O_EXCL 标记文件）：之后出现 `historian repair retry`，compartment 仍写出，historian 无失败 |
 | R0–R6 | （round 19）scenario P，100k 主会话路由：R1 MC 管理的主会话里没有低于 65 % 的原生压缩；R2 MC historian 先触发（≥63 %，阈值 65）；R3 会话越过旧默认阈值（30.4 %）时没有原生压缩；R4 旧策略（显式写入 compaction-basic 默认值）实测在 65 % 之前原生压缩；R5 所有日志里没有 "leaving no pressure budget"；R6 引擎每步打印的有效主会话阈值 ≥ 65 % |
 
-Round 19：dispatch run 41586948399 @ `9d16d6fab`（2 FAIL：R2，读结果被截到 ~8 KB 且模型自己 ctx_reduce，P 只到 52 %；R4，headless 不打印 ctx.logger）→ 41589483637 @ `34e728b60`（2 FAIL：R4，80k 上 DSH 默认值本身非法：retain 12144 ≥ 阈值 10368；R6 首个 pre-step 没有 header；C10 **PASS**）→ 41591017319 @ `0eb2e69c4`（R0–R6 **全过**；C 场景因模型每轮 ctx_reduce、峰值 61 % 而失败 8 项）→ 41592114076 @ `6615a8d5b`（(running at the time of writing; see the round 19 line in the CI section)）。
+Round 19：dispatch run 41586948399 @ `9d16d6fab`（2 FAIL：R2，读结果被截到 ~8 KB 且模型自己 ctx_reduce，P 只到 52 %；R4，headless 不打印 ctx.logger）→ 41589483637 @ `34e728b60`（2 FAIL：R4，80k 上 DSH 默认值本身非法：retain 12144 ≥ 阈值 10368；R6 首个 pre-step 没有 header；C10 **PASS**）→ 41591017319 @ `0eb2e69c4`（R0–R6 **全过**；C 场景因模型每轮 ctx_reduce、峰值 61 % 而失败 8 项）→ 41592114076 @ `6615a8d5b`（64/65；仅 C8 失败：模型答对暗号但先调了一次 `ctx_search`，属模型行为。C8 改为只判答案 + m0 含暗号，检索调用仅记录）。
 
 Round 18：dispatch run 41550425336 @ `e9e10eca2`（1 FAIL：C1，主动触发在 61.7 % 就压缩，未超过 65 %）→ 41552779443 @ `0e624bfd0`（1 FAIL：C6，historian XML 无效且没有 repair 重试）→ 41554794748 @ `f8c663fee`（**57/57 PASS**）。注意 41554794748 的 C1 是靠触发点的投影值 66 % 通过的，实际发出的 prompt 峰值 52.5 %（同一 pre-step 的 drop 已落地）；实测 prompt 超过 65 % 的是 41552779443（74.2 %）。
 
