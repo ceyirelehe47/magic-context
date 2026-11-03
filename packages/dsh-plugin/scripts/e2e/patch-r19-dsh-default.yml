@@ -1,9 +1,12 @@
 # Round 19 scenario P-old (ci-e2e.sh): the PRE-round-19 native pressure policy,
 # reproduced by setting compaction-basic's own defaults EXPLICITLY on the
 # magic-compaction row (thresholdRatio 0.8, headroomTokens 65 536). Explicit
-# user values are respected by MagicCompactionEngine, so on the 80k route the
-# native threshold is min(0.8 x 80000, 80000 - 4096 - 65536) = 10 368 tokens
-# (13 %): this measures, in real DSH, how early the old default pre-empted MC.
+# user values are respected by MagicCompactionEngine, so on the 100k route the
+# native threshold is min(0.8 x 100000, 100000 - 4096 - 65536) = 30 368 tokens
+# (30.4 %; retain 0.16 x 95904 = 15 344 < threshold, so the policy is legal):
+# this measures, in real DSH, how early the old default pre-empted MC.
+# (Round 19 run 41589483637 used an 80k route: there the DSH default is not
+# even legal — retainTokens 12144 >= threshold 10368 — so it never fired.)
 - id: magic-compaction
   config:
     auto: true

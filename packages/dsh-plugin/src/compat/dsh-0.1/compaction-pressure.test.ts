@@ -141,6 +141,16 @@ describe("native pressure threshold: MC leads on main sessions (round 19)", () =
     });
   }
 
+  it("80k child window (real rc.5 run 41589483637): default retention >= shrunken threshold no longer throws", async () => {
+    // DSH default: threshold min(64000, 80000-4096-65536=10368), retain 0.16×75904=12144 ≥ 10368 → error.
+    expect((await probe({ window: 80_000, maxTokens: 4_096, pct: 0.5, child: true })).fired).toBe(false);
+    expect((await probe({ window: 80_000, maxTokens: 4_096, pct: 0.81, child: true })).fired).toBe(true);
+    // An explicit user retention keeps its own error.
+    await expect(
+      probe({ window: 80_000, maxTokens: 4_096, pct: 0.81, child: true, config: { retainTokens: 70_000 } }),
+    ).rejects.toThrow(/retainTokens/);
+  });
+
   it("128k child session keeps the round 16 native policy (DSH default ≈ 44 %)", async () => {
     expect((await probe({ window: 131_072, maxTokens: 8_192, pct: 0.5, child: true })).fired).toBe(true);
     expect((await probe({ window: 131_072, maxTokens: 8_192, pct: 0.4, child: true })).fired).toBe(false);
@@ -180,6 +190,11 @@ describe("pressure-policy view for setup/doctor (round 19)", () => {
     expect(thresholdPercent(131_072, 8_192, p.child)).toBe(43.8);
     expect(thresholdPercent(24_576, 2_048, p.child)).toBeNull();
     expect(thresholdPercent(24_576, 2_048, p.child, true)).toBe(80);
+    // 80k: DSH default is illegal (retain 12144 >= threshold 10368); fallback → 80 %
+    expect(thresholdPercent(80_000, 4_096, p.child)).toBeNull();
+    expect(thresholdPercent(80_000, 4_096, p.child, true)).toBe(80);
+    // 100k: DSH default legal at 30.4 %
+    expect(thresholdPercent(100_000, 4_096, p.child)).toBe(30.4);
     const d = describePressurePolicy({});
     expect(d.preemptsMagic).toBe(false);
     expect(d.text).toContain("128k 85%");

@@ -23,12 +23,13 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       child, Magic wrote no child rows, child finished, result reached the parent
   U*  round 17: ctx_search / ctx_memory / ctx_expand used once each; the
       settings-page readout and /ctx-status agree with the DB; doctor clean
-  R*  round 19: native pressure compaction vs MC on an 80k main route —
+  R*  round 19: native pressure compaction vs MC on a 100k main route —
       R1 no native compaction below 65 % in the MC-led session, R2 MC's
       historian fired first (pct >= 63, threshold 65), R3 the session passed
-      the old DSH-default threshold (13 %) without native compaction, R4 the
+      the old DSH-default threshold (30.4 %) without native compaction, R4 the
       pre-round-19 policy (explicit DSH defaults) measured firing < 65 %,
-      R5 no "leaving no pressure budget" config error in any run
+      R5 no "leaving no pressure budget" config error in any run, R6 the
+      engine's per-step pressure checks show an effective main threshold >= 65 %
   P1  no dsh process left after the runs
 """
 import json
@@ -414,7 +415,7 @@ def ordered_pressure_events(path: Path):
 
 
 def check_r19(c, out: Path, runs):
-    window, max_tokens = 80000, 4096
+    window, max_tokens = 100000, 4096
     old_threshold = min(0.8 * window, window - max_tokens - 65536)
     old_pct = round(100 * old_threshold / window, 1)
     pnew = sorted(n for n in runs if n.startswith("pnew-"))
@@ -466,7 +467,9 @@ def check_r19(c, out: Path, runs):
                 rows += [(n,) + tuple(m.groups()) for m in CHECK.finditer(p_.read_text(errors="replace"))]
         return rows
     nc, oc = checks_of(pnew), checks_of(pold)
-    c.add("R6", bool(nc) and all(r[3] != "?" and float(r[3]) >= 65 for r in nc if r[1] == "false"),
+    # the very first pre-step of a fresh session has no request header yet (pct/threshold "?")
+    c.add("R6", bool(nc) and all(float(r[3]) >= 65 for r in nc if r[1] == "false" and r[3] != "?")
+          and any(r[3] != "?" for r in nc),
           "native pressure checks ran on the MC main session with an effective threshold >= 65 %",
           {"pnew": [(r[0], r[2], r[3], r[5][:40]) for r in nc][-6:], "pold": [(r[0], r[2], r[3], r[5][:40]) for r in oc][-6:]})
     c.add("R5", not nobudget, "no TargetPressureConfigError ('leaving no pressure budget') in any run log", nobudget or "clean")

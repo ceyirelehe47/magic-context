@@ -94,7 +94,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
   protected readonly magicSummarize?: SummarizeHook;
 
   /** Which top-level pressure keys the user set explicitly (those always win). */
-  protected readonly explicitPressure: { headroomTokens: boolean; thresholdRatio: boolean };
+  protected readonly explicitPressure: { headroomTokens: boolean; thresholdRatio: boolean; retain: boolean };
 
   constructor(ctx: Context, config: BasicCompactionConfig & { summarize?: SummarizeHook }) {
     super(ctx, { ...config, auto: config.auto ?? true });
@@ -102,6 +102,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     this.explicitPressure = {
       headroomTokens: config.headroomTokens !== undefined,
       thresholdRatio: config.thresholdRatio !== undefined,
+      retain: config.retainTokens !== undefined || config.retainRatio !== undefined,
     };
   }
 
@@ -121,8 +122,9 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
    *    plane through `magicContextHost.nativePressurePercentage`. Native
    *    pressure compaction is then only the backstop behind MC.
    *  - CHILD session (round 16: stock summarizer): native policy unchanged;
-   *    only when the DEFAULT headroom leaves no budget does it retry with
-   *    `headroomTokens: 0` (a legal `window × thresholdRatio` threshold).
+   *    only when the DEFAULT headroom makes the policy illegal (no pressure
+   *    budget, or the default retention not below the threshold) does it
+   *    retry with `headroomTokens: 0` (a legal `window × thresholdRatio`).
    *  - Explicit user values (top-level keys or a per-route `modelPolicies`
    *    entry) always win; a per-route entry already beats these top-level
    *    defaults inside compaction-basic's `resolveTargetPolicy`.
@@ -229,7 +231,9 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     try {
       return await super.compactIfNeeded(agent, trigger, signal);
     } catch (error) {
-      if (this.explicitPressure.headroomTokens || !isNoPressureBudgetError(error)) throw error;
+      if (this.explicitPressure.headroomTokens || !isDefaultHeadroomConfigError(error, this.explicitPressure.retain)) {
+        throw error;
+      }
       const legal = withConfigOverrides(base, { headroomTokens: 0 });
       this.notePressureThreshold(legal, agent, probe);
       return this.withPressureConfig(legal, () => super.compactIfNeeded(agent, trigger, signal));
@@ -346,13 +350,18 @@ function withConfigOverrides(
   return Object.freeze({ ...base, ...overrides }) as ResolvedConfig;
 }
 
-/** compaction-basic's TargetPressureConfigError for "no pressure budget". */
-function isNoPressureBudgetError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    typeof (error as { targetKey?: unknown }).targetKey === "string" &&
-    /leaving no pressure budget/.test(error.message)
-  );
+/**
+ * compaction-basic `TargetPressureConfigError`s that only the DEFAULT 65 536
+ * headroom causes: "no pressure budget" (window ≤ ~65k + maxTokens) and the
+ * default retention (0.16 × message budget) not below the shrunken threshold
+ * (≈ 70–82k windows; real rc.5 round 19 e2e run 41589483637 on an 80k route:
+ * "retainTokens (12144) must be less than threshold tokens 10368"). An
+ * explicit user retention keeps its own error.
+ */
+function isDefaultHeadroomConfigError(error: unknown, explicitRetain: boolean): boolean {
+  if (!(error instanceof Error) || typeof (error as { targetKey?: unknown }).targetKey !== "string") return false;
+  if (/leaving no pressure budget/.test(error.message)) return true;
+  return !explicitRetain && /retainTokens \(\d+\) must be less than threshold tokens/.test(error.message);
 }
 
 /** Read the hook the agent plane registered on the host service (if any). */

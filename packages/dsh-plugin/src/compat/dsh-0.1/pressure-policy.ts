@@ -12,6 +12,7 @@
 /** compaction-basic defaults (rc.5 `resolveConfig`). */
 export const DSH_DEFAULT_THRESHOLD_RATIO = 0.8;
 export const DSH_DEFAULT_HEADROOM_TOKENS = 65_536;
+export const DSH_DEFAULT_RETAIN_RATIO = 0.16;
 
 /** MC's default force-materialization band (core escalationBands(65)). */
 export const DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE = 85;
@@ -19,17 +20,21 @@ export const DEFAULT_MAGIC_NATIVE_PRESSURE_PERCENTAGE = 85;
 /**
  * Pure mirror of compaction-basic's pressure threshold, or `null` when the
  * configuration leaves no pressure budget (compaction-basic throws
- * `TargetPressureConfigError` and pressure compaction never fires).
+ * `TargetPressureConfigError` and pressure compaction never fires), or when
+ * the retention (default 0.16 × message budget) is not below the threshold.
  */
 export function nativePressureThresholdTokens(
   contextWindow: number,
   maxTokens: number,
-  policy: { thresholdRatio: number; headroomTokens: number },
+  policy: { thresholdRatio: number; headroomTokens: number; retainRatio?: number; retainTokens?: number },
 ): number | null {
   const messageBudget = contextWindow - maxTokens;
   const pressureBudget = messageBudget - policy.headroomTokens;
   if (messageBudget <= 0 || pressureBudget <= 0) return null;
-  return Math.floor(Math.min(contextWindow * policy.thresholdRatio, pressureBudget));
+  const threshold = Math.floor(Math.min(contextWindow * policy.thresholdRatio, pressureBudget));
+  // compaction-basic also refuses a retention that is not below the threshold.
+  const retain = policy.retainTokens ?? Math.floor(messageBudget * (policy.retainRatio ?? DSH_DEFAULT_RETAIN_RATIO));
+  return retain >= threshold ? null : threshold;
 }
 
 export interface PressureRowConfig {
@@ -93,10 +98,11 @@ export function describePressurePolicy(row: PressureRowConfig | undefined, execu
   preemptsMagic: boolean;
 } {
   const p = effectivePressurePolicy(row);
-  const fmt = (v: number | null) => (v === null ? "none (no pressure budget)" : `${v}%`);
+  const fmt = (v: number | null) => (v === null ? "none (config error: no budget / retain >= threshold)" : `${v}%`);
   const windows: [string, number, number][] = [
     ["24k", 24_576, 2_048],
     ["40k", 40_960, 4_096],
+    ["80k", 80_000, 4_096],
     ["128k", 131_072, 8_192],
   ];
   const main = windows.map(([n, w, m]) => `${n} ${fmt(thresholdPercent(w, m, p.main))}`).join(", ");

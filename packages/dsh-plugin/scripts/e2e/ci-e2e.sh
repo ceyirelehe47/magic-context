@@ -17,8 +17,8 @@
 #   use-*             round 17 U: ctx_search / ctx_memory / ctx_expand in it
 #   child-parent      round 17/18 S: `subagent` child on a 24k route reads eight
 #                     <8 KB files until compaction-basic must summarize
-#   pnew-* / pold-*   round 19 P: native pressure compaction vs MC 65 % on an
-#                     80k main route (shipped policy vs explicit DSH defaults)
+#   pnew-* / pold-*   round 19 P: native pressure compaction vs MC 65 % on a
+#                     100k main route (shipped policy vs explicit DSH defaults)
 # Everything lands in $CI_OUT (default $E2E_ROOT/ci); ci-check.py judges it.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -226,17 +226,17 @@ fi
 unset MC_E2E_MAIN_PROVIDER
 
 # ============================ round 19 scenario P ============================
-# Native pressure compaction vs MC on an 80k main route (MC 65 % unchanged).
+# Native pressure compaction vs MC on a 100k main route (MC 65 % unchanged).
 #   P-new  shipped policy: MC-led (headroom 0, ratio = MC force band 85 %);
 #          the session is pushed past 65 % so MC's historian fires first and
 #          no native compaction may happen below 65 %.
 #   P-old  the pre-round-19 policy (compaction-basic defaults set explicitly,
 #          patch-r19-dsh-default.yml): measures where native compaction fired.
-export MC_E2E_MAIN_PROVIDER=opencode-go-80k
-P_MODEL_KEY="opencode-go-80k/deepseek-v4.1-flash"
+export MC_E2E_MAIN_PROVIDER=opencode-go-100k
+P_MODEL_KEY="opencode-go-100k/deepseek-v4.1-flash"
 # Round 19 run 41586948399: DSH caps a read result at ~8 KB and the model
 # ctx_reduce'd its own reads, so file pairs never got past 52 %. Now: 40
-# generated ~7.6 KB files, eight per turn (~17 % of 80k per turn), and the
+# generated ~7.6 KB files, eight per turn (~17k tokens ≈ 17 % of 100k), and the
 # model is told not to drop anything — the MC historian/drops must still lead.
 P_FIX="e2e-pressure-fixtures"
 python3 - "$P_FIX" <<'PY'
@@ -261,7 +261,7 @@ PNSID="$(session_of "$OUT/pnew-01.log")"
 echo "$PNSID" > "$OUT/pnew.sid"
 if [[ -n "$PNSID" ]]; then
   k=2
-  for batch in 0 1 2 3 4; do
+  for batch in 0 1 2 3 4; do  # 40 fixtures = 5 batches
     files="$(for j in 1 2 3 4 5 6 7 8; do printf '%s/p%02d.txt, ' "$P_FIX" $((batch * 8 + j)); done | sed 's/, $//')"
     name="pnew-$(printf %02d "$k")"
     run "$name" "Use the read tool to read each of these eight files (whole file each): $files. Do not call ctx_reduce or any tool other than read. Then reply with one line per file: <path>: <its CHECKSUM code>." "$PNSID"
@@ -279,7 +279,9 @@ echo "$POSID" > "$OUT/pold.sid"
 if [[ -n "$POSID" ]]; then
   files="$(for j in 1 2 3 4 5 6 7 8; do printf '%s/p%02d.txt, ' "$P_FIX" "$j"; done | sed 's/, $//')"
   EXTRA_PATCH="$HERE/patch-r19-dsh-default.yml" run pold-02 "Use the read tool to read each of these eight files (whole file each): $files. Do not call ctx_reduce or any tool other than read. Then reply with one line per file: <path>: <its CHECKSUM code>." "$POSID"
-  EXTRA_PATCH="$HERE/patch-r19-dsh-default.yml" run pold-03 "Without calling any tool: in one sentence, which files did you read in this session?" "$POSID"
+  files="$(for j in 9 10 11 12 13 14 15 16; do printf '%s/p%02d.txt, ' "$P_FIX" "$j"; done | sed 's/, $//')"
+  EXTRA_PATCH="$HERE/patch-r19-dsh-default.yml" run pold-03 "Use the read tool to read each of these eight files (whole file each): $files. Do not call ctx_reduce or any tool other than read. Then reply with one line per file: <path>: <its CHECKSUM code>." "$POSID"
+  EXTRA_PATCH="$HERE/patch-r19-dsh-default.yml" run pold-04 "Without calling any tool: in one sentence, how many files did you read in this session?" "$POSID"
   decode_session "$POSID" "$OUT/pold-session.jsonl"
 fi
 unset MC_E2E_MAIN_PROVIDER
