@@ -421,6 +421,12 @@ fi
 cp "$OUT/k-jsonc.orig" "$CFG"
 unset MC_E2E_MAIN_PROVIDER
 
+# ============================ round 23b scenario X ============================
+# Extreme context pressure on a 24k window with the deterministic mock model
+# (no key; requests priced with a real BPE count and the window enforced):
+# checks X1–X8. See ci-x.sh.
+bash "$HERE/ci-x.sh"
+
 # --- U: doctor after all runs (shared DB opens, no live liveness markers left)
 node "$HERE/../../dist/cli.js" doctor --profile test > "$OUT/doctor-after.txt" 2>&1
 echo "rc=$?" >> "$OUT/doctor-after.txt"

@@ -62,7 +62,42 @@ function textOf(content) {
   return content == null ? "" : JSON.stringify(content);
 }
 
-const progress = new Map(); // `${session}\0${plan}` -> { done, lastEmitted, emits }
+/**
+ * A minimal VALID historian answer: one compartment over every `[N]` / `[N-M]`
+ * ordinal block of the chunk (the user turn), `unprocessed_from` = last + 1.
+ * MOCK_HISTORIAN=invalid answers an empty output instead (historian failure).
+ */
+function historianXml(messages) {
+  if (process.env.MOCK_HISTORIAN === "invalid") return "<output><compartments></compartments></output>";
+  const user = [...messages].reverse().find((m) => m.role === "user");
+  const text = textOf(user?.content);
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const m of text.matchAll(/^\[(\d+)(?:-(\d+))?\]/gm)) {
+    lo = Math.min(lo, Number(m[1]));
+    hi = Math.max(hi, Number(m[2] ?? m[1]));
+  }
+  if (!Number.isFinite(lo)) return "<output><compartments></compartments></output>";
+  return `<output>
+<compartments>
+<compartment start="${lo}" end="${hi}" title="mock work ${lo}-${hi}" episode_type="design" importance="50">
+<p1>The user ran mock plan steps ${lo}-${hi} (file reads).</p1>
+<p2>Mock reads ${lo}-${hi}.</p2>
+<p3>Reads completed.</p3>
+<p4>MOCK ${lo}-${hi}</p4>
+</compartment>
+</compartments>
+<facts>
+</facts>
+<meta>
+<messages_processed>${lo}-${hi}</messages_processed>
+<unprocessed_from>${hi + 1}</unprocessed_from>
+</meta>
+</output>`;
+}
+
+const progress = new Map();
+const lastPlan = new Map(); // session -> newest plan seen // `${session}\0${plan}` -> { done, lastEmitted, emits }
 let seq = 0;
 
 function decide(body, session) {
@@ -70,7 +105,7 @@ function decide(body, session) {
   const system = messages.filter((m) => m.role === "system").map((m) => textOf(m.content)).join("\n");
   const all = messages.map((m) => textOf(m.content) + (m.tool_calls ? JSON.stringify(m.tool_calls) : "")).join("\n");
   if (/<compartment|compartments?\b.*historian|You are a historian/i.test(system)) {
-    return { kind: "historian", text: "<output><compartments></compartments></output>" };
+    return { kind: "historian", text: historianXml(messages) };
   }
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
   const lastUserText = textOf(lastUser?.content);
@@ -87,7 +122,11 @@ function decide(body, session) {
     const m = /\[\[MOCK:([a-z0-9_-]+)\]\]/i.exec(all);
     if (m) plan = m[1];
   }
+  // The plan's user message can be summarized away by a compaction mid-plan:
+  // keep following the session's last plan.
+  if (plan === undefined) plan = lastPlan.get(session);
   if (plan === undefined || !Array.isArray(plans[plan])) return { kind: "text", text: "ok" };
+  lastPlan.set(session, plan);
   const steps = plans[plan];
   const key = `${session}\0${plan}`;
   const st = progress.get(key) ?? { done: 0, lastEmitted: 0, emits: 0 };

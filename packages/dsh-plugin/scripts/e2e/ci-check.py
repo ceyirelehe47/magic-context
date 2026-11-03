@@ -41,6 +41,7 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       U12 the page's historian model is the one the agent runs with
   P1  no dsh process left after the runs
 """
+import hashlib
 import json
 import os
 import re
@@ -629,6 +630,143 @@ def check_r23_history(c, out: Path, runs):
            "lost": lost, "error": (out / "history-lock.err").read_text(errors="replace")[-300:] if (out / "history-lock.err").exists() else ""})
 
 
+X_WINDOW = 24000
+
+
+def x_requests(out: Path):
+    rows = []
+    p = out / "x-requests.jsonl"
+    if p.exists():
+        for line in p.read_text(errors="replace").splitlines():
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                pass
+    return rows
+
+
+def check_x(c, out: Path, runs):
+    """Round 23b scenario X (mock model enforcing a 24k window with a real BPE
+    count; ci-x.sh). X1–X8: no over-window request, truncation of dense / huge
+    outputs, historian hold, 90 % backstop, restart, recoverability, no loop."""
+    names = ("x-1", "x-2", "x-2r", "x-3", "x-4", "x-5")
+    if not any(n in runs for n in names):
+        c.add("X0", False, "scenario X ran (mock model)", "no x-* runs")
+        return
+    reqs = x_requests(out)
+    main = [r for r in reqs if r.get("window") == X_WINDOW and r.get("outcome") != "title"]
+    over = [r for r in reqs if r.get("outcome") == "context_length_exceeded"]
+    by_plan = {}
+    for r in main:
+        if r.get("plan"):
+            by_plan.setdefault(r["plan"], []).append(r)
+    dumps = {n: load_json(out / f"db-{n}.json") or {} for n in names}
+    rows = {n: {t["tag_number"]: t for t in (dumps[n].get("truncations") or [])} for n in names}
+    rc = {n: runs.get(n, ("", "missing"))[1] for n in names}
+    def new_rows(a, b):
+        return sorted(set(rows[b]) - set(rows[a])) if a else sorted(rows[b])
+    def maxp(plan):
+        return max((r.get("promptTokens") or 0) for r in by_plan.get(plan, [])) if by_plan.get(plan) else None
+    # X1 — one read larger than the whole window
+    x1_steps = sorted({r.get("step") for r in by_plan.get("x1", [])})
+    c.add("X1", rc["x-1"].startswith("rc=0") and not [r for r in over] and bool(new_rows(None, "x-1"))
+          and (maxp("x1") or 0) <= X_WINDOW and 2 in x1_steps,
+          "x-1: a 50 KB Chinese read (> the whole 24k window, meter ≈ 12.5k) is truncated before the next request; no request over the window",
+          {"rc": rc["x-1"], "truncated": new_rows(None, "x-1"), "maxPrompt": maxp("x1"), "steps": x1_steps,
+           "requests": [(r.get("promptTokens"), r.get("maxTokens"), r.get("outcome")) for r in by_plan.get("x1", [])]})
+    # X2 — consecutive dense outputs near the limit
+    x2_steps = sorted({r.get("step") for r in by_plan.get("x2", [])})
+    c.add("X2", rc["x-2"].startswith("rc=0") and (maxp("x2") or 0) <= X_WINDOW and len(new_rows("x-1", "x-2")) >= 1
+          and x2_steps == [1, 2, 3, 4, 5],
+          "x-2: four 5 000-char Chinese reads in a row — truncated as they accumulate, every request within the window, all steps ran",
+          {"rc": rc["x-2"], "truncated": new_rows("x-1", "x-2"), "maxPrompt": maxp("x2"), "steps": x2_steps,
+           "prompts": [r.get("promptTokens") for r in by_plan.get("x2", [])]})
+    # X3 — big outputs while a historian pass holds the lease
+    held = e2e_lines(out / "x-3.log", "historian holding the compartment lease")
+    c.add("X3", rc["x-3"].startswith("rc=0") and bool(held) and (maxp("x3") or 0) <= X_WINDOW and len(new_rows("x-2", "x-3")) >= 1,
+          "x-3: a 49 KB English and a big Chinese read arrive while the historian holds the lease (e2e hold): truncated anyway, within the window",
+          {"rc": rc["x-3"], "holds": len(held), "truncated": new_rows("x-2", "x-3"), "maxPrompt": maxp("x3"),
+           "prompts": [r.get("promptTokens") for r in by_plan.get("x3", [])]})
+    # X4 — the native 90 % backstop (24k: 82.9 % effective) compacts, no loop
+    t4 = (out / "x-4.log").read_text(errors="replace") if (out / "x-4.log").exists() else ""
+    compacted = re.findall(r"native pressure check: child=false pct=([0-9.]+) thresholdPct=([0-9.]+) window=24000 outcome=compacted", t4)
+    ev4 = events(out / "x-4.log")
+    sess = events(out / "x-session.jsonl")
+    ends = [(e.get("data") or {}) for e in sess if e.get("type") == "compaction/end"]
+    errs = [str(d.get("error"))[:160] for d in ends if d.get("error")]
+    # no step compacted twice: compaction/start events between two step/start events
+    per_step, cur, loops = [], 0, 0
+    for e in sess:
+        if e.get("type") == "step/start":
+            per_step.append(cur)
+            cur = 0
+        elif e.get("type") == "compaction/start":
+            cur += 1
+    per_step.append(cur)
+    loops = max(per_step) if per_step else 0
+    x4_steps = sorted({r.get("step") for r in by_plan.get("x4", [])})
+    clamped = [(r.get("promptTokens"), r.get("maxTokens")) for r in main if (r.get("maxTokens") or 4096) < 256]
+    c.add("X4", rc["x-4"].startswith("rc=0") and bool(compacted) and not errs and loops <= 1 and (maxp("x4") or 0) <= X_WINDOW
+          and x4_steps[-1:] == [15],
+          "x-4: fourteen sub-floor English reads at MC 95 %: the native backstop compacts (no error), at most one compaction per step, all steps ran, within the window",
+          {"rc": rc["x-4"], "compacted": compacted[:4], "compactionErrors": errs[:2], "maxCompactionsPerStep": loops,
+           "steps": x4_steps, "maxPrompt": maxp("x4"),
+           "piAiClampedRequests(info, limitation 17)": clamped[:6]})
+    # X5 — restart: no re-decision / duplicate row, dead rows pruned only for dropped tags, outbox settled
+    before, after = rows["x-4"], rows["x-5"]
+    st5 = {t.get("tag_number"): t.get("status") for t in (dumps["x-5"].get("tags") or [])}
+    added = sorted(set(after) - set(before))
+    changed = [t for t in after if t in before and after[t] != before[t]]
+    removed = sorted(set(before) - set(after))
+    bad_prune = [t for t in removed if st5.get(t) not in ("dropped", "compacted")]
+    ob = {o.get("status"): o.get("n") for o in (dumps["x-5"].get("outbox") or [])}
+    live = [l for l in (dumps["x-5"].get("leases") or []) if (l.get("expires_at") or 0) > (l.get("now") or 0)]
+    st2 = {t.get("tag_number"): t.get("status") for t in (dumps["x-2r"].get("tags") or [])}
+    live2 = sorted(t for t in rows["x-2"] if st2.get(t) == "active")
+    same2 = rows["x-2"] == rows["x-2r"]
+    c.add("X5", rc["x-5"].startswith("rc=0") and rc["x-2r"].startswith("rc=0") and same2 and bool(live2)
+          and bool(before) and bool(after) and bool(after) and not added and not changed and not bad_prune
+          and set(ob) <= {"committed", "superseded", "abandoned"} and not live and (maxp("x5") or 0) <= X_WINDOW,
+          "x-2r / x-5 (new processes, same session): truncations of active tags replay unchanged; no truncation re-decided or duplicated (kept rows byte-identical), only rows of dropped tags pruned (latch kept), outbox settled, no live lease",
+          {"rc": rc["x-5"], "restartAfterX2": {"rc": rc["x-2r"], "rows": sorted(rows["x-2r"]), "identicalToX2": same2, "activeTruncatedTags": live2},
+           "rowsBefore": sorted(before), "rowsAfter": sorted(after), "added": added, "changed": changed,
+           "prunedNotDropped": bad_prune, "outbox": ob, "liveLeases": live})
+    # X6 — the untruncated original of every truncated tag is still in the session log
+    raws = []
+    for e in sess:
+        if e.get("type") == "tool/result":
+            for b in ((e.get("data") or {}).get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and isinstance(b.get("text"), str):
+                    raws.append(b["text"])
+    lost = []
+    seen = {}
+    for n in names:
+        seen.update(rows[n])
+    for tag, r in seen.items():
+        want = r.get("original_sha")
+        if not any(hashlib.sha256(f"\u00a7{tag}\u00a7 {t}".encode()).hexdigest() == want
+                   or hashlib.sha256(t.encode()).hexdigest() == want for t in raws):
+            lost.append(tag)
+    c.add("X6", bool(seen) and not lost,
+          "every truncated tool result's untruncated original (sha256 in dsh_pressure_truncations) is still in the DSH session log (historian / ctx_expand / re-read source)",
+          {"truncated": sorted(seen), "originalMissing": lost, "toolResults": len(raws)})
+    # X7 — never an over-window request in the whole scenario
+    c.add("X7", bool(main) and not over,
+          "scenario X: the mock (real BPE count, 24k enforced) never received a request over the window",
+          {"requests": len(reqs), "overWindow": [(r.get("n"), r.get("promptTokens")) for r in over][:5],
+           "maxPrompt": max((r.get("promptTokens") or 0) for r in main) if main else None})
+    # X8 — no request storm: each plan step was requested at most 3 times
+    repeats = {}
+    for r in main:
+        if r.get("plan") and r.get("step"):
+            k = f"{r['plan']}:{r['step']}"
+            repeats[k] = repeats.get(k, 0) + 1
+    worst = max(repeats.values()) if repeats else 0
+    c.add("X8", bool(repeats) and worst <= 3,
+          "no loop: no plan step was requested more than 3 times (a retry storm or a compaction loop would repeat it)",
+          {"maxRepeats": worst, "repeated": {k: v for k, v in repeats.items() if v > 1}})
+
+
 def k_rows(out: Path):
     p1, p2 = [], []
     path = out / "k-dump.jsonl"
@@ -807,6 +945,7 @@ def check(out: Path) -> int:
     check_r19(c, out, runs)
     check_r22_lock(c, out, runs)
     check_r23_history(c, out, runs)
+    check_x(c, out, runs)
     check_r22_k(c, out, runs)
 
     # --- P: process hygiene
