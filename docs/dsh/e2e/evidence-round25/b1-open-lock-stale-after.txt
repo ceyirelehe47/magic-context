@@ -1,0 +1,11 @@
+bun test v1.4.4 (38afee6c8)
+
+src/host/open-lock-stale.test.ts:
+(pass) dsh open lock: holder pid alive but not the lock's writer (round 25 B1) > a lock left by an earlier process with OUR pid is taken over at once [4.02ms]
+(pass) dsh open lock: holder pid alive but not the lock's writer (round 25 B1) > a lock whose pid was reused by a process started later is taken over at once [108.09ms]
+(pass) dsh open lock: holder pid alive but not the lock's writer (round 25 B1) > control: a live holder that took the lock after it started is still waited for [1644.70ms]
+
+ 3 pass
+ 0 fail
+ 8 expect() calls
+Ran 3 tests across 1 file. [1.96s]

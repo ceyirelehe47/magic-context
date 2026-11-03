@@ -13,7 +13,9 @@
  * (`<dbPath>.dsh-open.lock`, created with O_EXCL) for the duration of the open.
  * A second DSH process waits until the first has migrated and then opens an
  * already-migrated DB (nothing pending, no worker). A lock whose holder pid is
- * confirmed dead (ESRCH) or that is older than STALE_MS is taken over; after
+ * confirmed dead (ESRCH), whose pid now belongs to a process started after
+ * the lock was written (round 25: reused pid / same pid after a restart), or
+ * that is older than STALE_MS is taken over; after
  * MAX_WAIT_MS of a live holder we log and open anyway (core still fails closed
  * on a real error). Only DSH processes honour this lock: a concurrent first
  * open by an OpenCode/Pi process is still core's race (documented).
@@ -21,6 +23,7 @@
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { isPidAlive } from "@magic-context/core/shared/rpc-utils";
+import { isPidNewerThan } from "../agent/lease-liveness";
 import { ensureStorageDirectorySync } from "@magic-context/core/shared/storage-permissions";
 
 const POLL_MS = 50;
@@ -46,6 +49,11 @@ function staleReason(record: LockRecord, now: number): string | null {
   const pid = typeof record.pid === "number" ? record.pid : null;
   const at = typeof record.acquiredAt === "number" ? record.acquiredAt : null;
   if (pid !== null && pid !== process.pid && isPidAlive(pid) === "dead") return `holder pid ${pid} is dead`;
+  // Round 25 (B1): the pid is alive but its process started after the lock was
+  // written — a reused pid, or our own pid inherited from a DSH process killed
+  // during its open (containers restart the CLI under the same pid). It cannot
+  // be the holder. Without this every start waited MAX_WAIT_MS for 10 minutes.
+  if (pid !== null && isPidNewerThan(pid, at)) return `holder pid ${pid} started after the lock was taken (pid reused)`;
   if (at !== null && now - at > STALE_MS) return `held for ${Math.round((now - at) / 1000)} s`;
   if (pid === null && at === null) return "unreadable record";
   return null;
