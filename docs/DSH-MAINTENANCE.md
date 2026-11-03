@@ -42,7 +42,62 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 16, 2026-11-03, DSH 0.2.1-rc.5, core **v0.49.35** merged at
+Baseline (round 18, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; push run
+41554474179 and dispatch run 41554794748 (`e2e=true`) @ `f8c663fee`):
+`typecheck:dsh` **0 errors**, core typecheck **0 errors**, `dsh-plugin`
+**468 pass** (65 files; round 17 +13, round 18 +5), `adapter-api` **15 pass**,
+`contracts:dsh` **98 pass**, 0 fail; real-model `e2e` **57/57 PASS**
+(N*/T*/M*/P1 + round 17/18 real-use scenarios C1–C9, U1–U6, S0–S7). Evidence:
+`docs/dsh/e2e/evidence-round18/`.
+
+Round 17 fixes (real rc.5 e2e run 41537851210 found them; each test red before):
+- `f27757b6b` one `[dropped §N§]` per tag per folded copy even when the parts
+  are not adjacent (parallel-call steps rendered `[dropped §6§] [dropped §7§]`
+  twice). Real rc.5 re-check: e2e C9 (round 18 runs: 6–8 placeholders, 0 dups).
+- `929dbafc9` `/ctx-status` no longer prints core's "OpenCode DB: MISSING …
+  historian disabled" line on DSH, and the context plane persists
+  `last_input_tokens`. Real rc.5 re-check: U5.
+- `17bd7279c` strip copied `§N§` from assistant text at the `llm/stream`
+  boundary (12 of 12 replies leaked it). Real rc.5 re-check: C5 clean in all
+  three round 18 runs.
+
+Round 18 fixes:
+- `a1b94d6b5` **(severe) headless sessions never saw their compartments.** The
+  historian's post-publish "materialize on the next pre-step" signal lived only
+  in process memory (`historian.ts` `deferredSignalsBySession`); `dsh headless`
+  runs each turn in a new process, so the next process found a cache-valid m0,
+  replayed the old EMPTY `<session-history>` under the same watermark while the
+  compartmentalized raw messages were dropped → history lost (round 17 the
+  model needed `ctx_search` for the codeword). The knowledge gate now also
+  forces the fold when the durable publish is newer than the cached baseline
+  (`dsh_context_compaction_marker.published_at` or `MAX(compartments.created_at)`
+  > `session_meta.cached_m0_materialized_at`; self-consuming like core's
+  `ttl_idle` / `host_compaction`; skipped in compaction-off mode). Adapter only,
+  no core change. Test: `cross-process-materialize.test.ts` runs process A
+  (first gate pass + real historian publish) in a child `bun` process and
+  process B on the same DB. Real rc.5: C7 (compartment written in turn N,
+  in the injected m0 from turn N+1), C8 (codeword answered from
+  `<session-history>` with no retrieval tool).
+- `43dc2a27e` persist `last_response_time` from the latest completed
+  `assistant/message` (`/ctx-status` said "Last response: never"; core's
+  `ttl_idle` HARD fold could not arm). Real rc.5: U5 ("Last response: 0s ago").
+- `f8c663fee` one historian **repair retry** on invalid XML (upstream
+  `runHistorianPrompt` re-prompts once with `buildHistorianRepairPrompt`; the
+  DSH pass failed outright — e2e run 41552779443: "output left uncovered
+  messages 11-13 without `<unprocessed_from>`" → failure backoff, C6). Unit
+  tests only so far: the historian produced valid XML first time in run
+  41554794748, so the repair path has not yet been exercised on the real host.
+- e2e harness (`3b73594bc`, `7917d6bc4`, `e9e10eca2`, `ea6cbd2dc`, `0e624bfd0`):
+  C1 accepts core's proactive trigger (threshold−2 = 63 %) but requires the
+  context to have exceeded 65 % (trigger pct or prompt tokens / 40k); C3 compares
+  the peak with the lowest later step; scenario C reads two files per turn (one
+  file per turn let the proactive fold land before 65 %); the child scenario
+  reads eight generated <8 KB files so compaction-basic must run its
+  **summarizer** (round 17's big files were only pruned: 4 prune / 0 summary;
+  round 18: 3 summary / 0 prune, child 0 Magic rows, 8/8 checksums returned);
+  new checks C7/C8/C9.
+
+Previous baseline (round 16, 2026-11-03, DSH 0.2.1-rc.5, core **v0.49.35** merged at
 `3d9511f23`; push run 41531086184 and dispatch run 41531489091 (`e2e=true`)
 @ `3d9511f23`): `typecheck:dsh` **0 errors**, core typecheck **0 errors**,
 `dsh-plugin` **451 pass** (62 files; +4 = `child-session-compaction.test.ts`),
@@ -207,6 +262,16 @@ apicall github workflow_run_artifacts_list owner=ceyirelehe47 repo=magic-context
 注意：`typecheck:dsh` 不覆盖 `*.test.ts`。测试文件里的语法错误只会在 `dsh-plugin tests`
 一步表现为 `# Unhandled error between tests`（整个文件不运行，Summary 里多 1 fail），
 round 15 的 run 41490193904 就是这样失败的。
+
+Round 17/18 新增检查：
+
+| id | 内容 |
+|---|---|
+| C0–C9 | 主会话（40k 路由，阈值 65 %，每轮新进程）：C1 historian 在 ≥63 %（阈值−2）触发且上下文确实超过 65 %；C2 写出 compartments；C3 峰值之后的最低 prompt tokens 低于峰值；C4 暗号仍可答出；C5 可见输出无 `§N§`；C6 compartments 连续不重叠、无存活 lease、historian 非 running/failed；C7 缓存 m0 的 `<session-history>` 含 compartments（及暗号那段）；C8 cmp-q 不调用 ctx_search/ctx_expand/ctx_memory 即答出暗号；C9 解码后的会话事件中同一 tag 的 `[dropped §N§]` 不重复 |
+| U1–U6 | ctx_search / ctx_memory / ctx_expand 各调用一次且有结果；设置页 / popover 读数与 DB 一致；`/ctx-status` 与 DB 一致（无 OpenCode DB 横幅、Last input tokens ≠ 0、Last response ≠ never）；doctor 干净 |
+| S0–S7 | 子会话（24k 路由）读 8 个生成的 <8 KB 文件：委派成功；compaction-basic 走到 **summary**（不只是 prune）；摘要不是 MC 输出；子会话在 Magic 表 0 行；父会话增长只属于自己；子会话 completed；≥6/8 个 CHECKSUM 回到父会话或子会话最终回复 |
+
+Round 18：dispatch run 41550425336 @ `e9e10eca2`（1 FAIL：C1，主动触发在 61.7 % 就压缩，未超过 65 %）→ 41552779443 @ `0e624bfd0`（1 FAIL：C6，historian XML 无效且没有 repair 重试）→ 41554794748 @ `f8c663fee`（**57/57 PASS**）。注意 41554794748 的 C1 是靠触发点的投影值 66 % 通过的，实际发出的 prompt 峰值 52.5 %（同一 pre-step 的 drop 已落地）；实测 prompt 超过 65 % 的是 41552779443（74.2 %）。
 
 Round 15：push run 41495367987 @ `5f8fe562b`（`checks` 全绿：dsh-plugin 447 / adapter-api 15 /
 contracts 98，两个 typecheck 0 错误）；dispatch run 41497195497（`e2e=true`，`checks` + `e2e`
@@ -912,6 +977,32 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     `stripMcOwnedPiCompactionSummary`) and bust the prompt cache. If DSH-native
     trimming is ever wanted, wire the consumer and drop Magic's own trim for
     that range in the same change.
+    Round 18: the row's `published_at` is now read by the knowledge gate as
+    the durable "a publish happened after the cached m0" signal
+    (`hasUnmaterializedHistorianPublish`); `status` is still never consumed.
+
+13. **Small issues recorded in rounds 17/18.**
+    - `/ctx-status` "Last response: never" — **fixed** in `43dc2a27e` (see
+      round 18 fixes).
+    - **compaction-basic defaults vs MC's 65 % (evaluated, not changed).**
+      compaction-basic's threshold is `min(window × thresholdRatio(0.8),
+      window − request maxTokens − headroomTokens(65 536))`
+      (`resolveCompactSpec`). On a window ≤ 65 536 + maxTokens there is no
+      pressure budget at all: the target throws `TargetPressureConfigError`
+      and pressure compaction never fires (why the round 17/18 child route
+      needs `headroomTokens: 0, thresholdRatio: 0.7` in
+      `patch-r17-child.yml`). On a 128k window it fires at ≈ 44–46 %
+      (131 072 − 8 192 − 65 536 = 57 344 → 43.8 %; 128 000 − 4 096 − 65 536
+      → 45.6 %), i.e. before MC's 65 % historian threshold. In MC sessions the
+      main path goes through `MagicCompactionEngine` (MC historian) so this
+      only matters for child sessions and Magic-disabled presets. Left as
+      DSH's default; a deployment that wants native compaction to stay behind
+      MC should set a `modelPolicies` entry with a smaller `headroomTokens`.
+    - `ttl_idle` HARD folds can now arm on DSH (they need
+      `last_response_time`); a session idle longer than the cache TTL re-folds
+      m0 on its next turn, as upstream does.
+    - The historian repair retry (`f8c663fee`) is verified by unit tests only.
+
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

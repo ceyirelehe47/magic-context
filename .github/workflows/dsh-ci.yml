@@ -10,7 +10,9 @@
 #           (secret OPENCODE_API_KEY): worker self-test (normal + 1500 ms
 #           timeout), one session over three processes (§N§ identity across
 #           restarts), round 17 real-use scenarios (main session past the 65 %
-#           threshold on a 40k route; delegated child hitting its 24k limit;
+#           threshold on a 40k route, compartments re-injected across
+#           processes; delegated child reading eight <8 KB files until
+#           compaction-basic summarizes on its 24k route;
 #           ctx_search/ctx_memory/ctx_expand + status readouts); redacted logs
 #           uploaded as an artifact (7 days)
 #
