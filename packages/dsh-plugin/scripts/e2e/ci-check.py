@@ -31,7 +31,8 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       R5 no "leaving no pressure budget" config error in any run, R6 the
       engine's per-step pressure checks show an effective main threshold >= 65 %,
       R7 (round 20) the main-session native compaction completed (no
-      compaction/end error, no "summarize range unresolvable")
+      compaction/end error, no "summarize range unresolvable"), R8 (round 21)
+      no native compaction failed on a busy historian lease
   P1  no dsh process left after the runs
 """
 import json
@@ -497,6 +498,27 @@ def check_r19(c, out: Path, runs):
           "main-session native compaction completed through the MC summarize hook (no compaction/end error)",
           {"compactionEnds": len(ends), "errors": errs[:3], "unresolvableInLogs": unresolvable})
     c.add("R5", not nobudget, "no TargetPressureConfigError ('leaving no pressure budget') in any run log", nobudget or "clean")
+    # R8 (round 21) a historian pass holding the compartment lease must never
+    # turn a native compaction into an error: the 90 % backstop defers while the
+    # lease is held and /compact waits for it. No compaction/end error and no
+    # log line may say "lease busy" for a summarize; deferrals / waits are
+    # reported (counts) as evidence of the new paths when they occur.
+    all_ends = [(e.get("data") or {}) for p_ in sorted(out.glob("*-session.jsonl"))
+                for e in session_events(p_) if e.get("type") == "compaction/end"]
+    busy_errs = [str(d.get("error"))[:160] for d in all_ends if d.get("error") and "lease busy" in str(d.get("error"))]
+    busy_logs, deferred, waited, pct_unknown = {}, 0, 0, 0
+    for p_ in sorted(out.glob("*.log")):
+        t = p_.read_text(errors="replace")
+        n = len(re.findall(r"summarize mini-historian lease busy", t))
+        if n:
+            busy_logs[p_.name] = n
+        deferred += t.count("native pressure backstop deferred")
+        waited += t.count("summarize: lease wait ended")
+        pct_unknown += len(re.findall(r"native pressure check: child=false pct=\?", t))
+    c.add("R8", not busy_errs and not busy_logs,
+          "no native compaction failed on a busy historian lease (backstop defers, /compact waits)",
+          {"compactionEnds": len(all_ends), "leaseBusyErrors": busy_errs[:3], "leaseBusyLogLines": busy_logs or "none",
+           "backstopDeferrals": deferred, "compactLeaseWaits": waited, "mainChecksWithPctUnknown": pct_unknown})
 
 
 def check(out: Path) -> int:
