@@ -22,7 +22,8 @@ import { escalationBands } from "@magic-context/core/shared/escalation-bands";
 import { nativeBackstopPercentage } from "../compat/dsh-0.1/pressure-policy";
 import { setDshHarness } from "dsh-magic-context-adapter";
 import { fireAndForget } from "./fire-and-forget";
-import { loadPluginConfig, type MagicContextPluginConfig } from "@magic-context/core/config";
+import type { MagicContextPluginConfig } from "@magic-context/core/config";
+import { createConfigReloadNotices, loadPluginConfigQuiet, type LoadedMagicConfig } from "../settings/config-load";
 import { getProtectedTokensTierOverrides } from "@magic-context/core/config/project-security";
 import { isCompactionEnabled, isDreamerRunnable, isHistorianRunnable } from "@magic-context/core/config/agent-disable";
 import type { MagicContextHostService } from "../index";
@@ -154,7 +155,7 @@ export function bridgeMagicConfig(
 ): MagicAgentConfig {
   let magic: MagicContextPluginConfig | undefined;
   try {
-    magic = loadPluginConfig(directory);
+    magic = loadPluginConfigQuiet(directory);
   } catch {
     magic = undefined;
   }
@@ -298,10 +299,23 @@ export const LIVE_JSONC_TTL_MS = 3_000;
 export function createLiveSettings(
   host: Pick<MagicContextHostService, "overrides">,
   directory: string,
-  opts: { now?: () => number; ttlMs?: number } = {},
+  opts: {
+    now?: () => number;
+    ttlMs?: number;
+    /** jsonc loader (tests); default: the process-wide quiet core loader. */
+    load?: (directory: string) => LoadedMagicConfig;
+    /**
+     * Round 20: receives each config warning once and a notice when a
+     * restart-only section (memory / dreamer / compaction / …) changed since
+     * startup. When set, the startup config is read eagerly as the baseline.
+     */
+    warn?: (message: string) => void;
+  } = {},
 ): MagicLiveSettings {
   const now = opts.now ?? Date.now;
   const ttlMs = opts.ttlMs ?? LIVE_JSONC_TTL_MS;
+  const load = opts.load ?? loadPluginConfigQuiet;
+  const notices = opts.warn !== undefined ? createConfigReloadNotices(opts.warn) : undefined;
   // Re-read the shared jsonc with a short TTL (round 15): it used to be read
   // once at apply time, so a jsonc edit showed up as the effective value on the
   // settings page while the agent kept the old enabled/threshold until restart.
@@ -311,13 +325,15 @@ export function createLiveSettings(
     if (cache !== undefined && t - cache.at < ttlMs) return cache.value;
     let value: MagicContextPluginConfig | undefined;
     try {
-      value = loadPluginConfig(directory);
+      value = load(directory);
     } catch {
       value = undefined;
     }
     cache = { at: t, value };
+    notices?.observe(value as LoadedMagicConfig | undefined);
     return value;
   };
+  if (notices !== undefined) jsonc();
   const overrides = () => {
     try {
       return host.overrides?.() ?? {};
@@ -366,7 +382,9 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
   const directory = config.directory ?? process.cwd();
 
   // DSH settings overlay (live). Explicit row `enabled: false` stays final.
-  const live = createLiveSettings(host, directory);
+  const live = createLiveSettings(host, directory, {
+    warn: (message) => (ctx.logger?.warn ?? ctx.logger?.info)?.call(ctx.logger, message),
+  });
   const rowContext = config.context;
   const rowHistorian = config.historian;
   const rowKnowledge = config.knowledge;

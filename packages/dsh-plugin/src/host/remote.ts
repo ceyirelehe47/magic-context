@@ -28,7 +28,8 @@ import type { TypertContribution } from "@deepseek-ai/dsh-typert-registry/types"
 import { MAGIC_CONTEXT_REMOTE_NAMESPACE } from "../compat/dsh-0.1/typert";
 import type { MagicContextHostService } from "../index";
 import { MAGIC_CONTEXT_PACKAGE } from "../doctor/env";
-import { loadPluginConfig, type MagicContextPluginConfig } from "@magic-context/core/config";
+import type { MagicContextPluginConfig } from "@magic-context/core/config";
+import { loadPluginConfigQuiet } from "../settings/config-load";
 import {
   MAGIC_OVERRIDE_BOUNDS,
   MAGIC_OVERRIDE_FIELDS,
@@ -468,7 +469,7 @@ export function loadJsoncForHost(directory = process.cwd(), now = Date.now()): P
   if (jsoncCache !== undefined && jsoncCache.dir === directory && now - jsoncCache.at < 3_000) return jsoncCache.value;
   let value: Partial<MagicContextPluginConfig> | undefined;
   try {
-    value = loadPluginConfig(directory);
+    value = loadPluginConfigQuiet(directory);
   } catch {
     value = undefined;
   }
