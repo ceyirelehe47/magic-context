@@ -106,7 +106,7 @@ import { unwrapImitatedReducedArgs } from "@magic-context/core/tools/unwrap-imit
 import { registerTool } from "../compat/dsh-0.1/tools";
 import { createWorkerSelftestTool, workerSelftestEnabled } from "./worker-selftest";
 import { sessionEvents, textBlock } from "../compat/dsh-0.1/session";
-import { convertDshEventsToRawMessages } from "./transcript";
+import { convertDshEventsToRawMessages, readDshHistory } from "./transcript";
 import { observedProtectionWindow } from "./protection";
 import { scanSessionMetrics } from "./nudge";
 import type { ProtectedTokensTierOverrides } from "@magic-context/core/config/project-security";
@@ -1237,8 +1237,31 @@ interface CtxExpandArgs {
  * (Phase 3 slice) — OpenCode-shaped parts with tool-result folding, walking
  * the WHOLE log so ctx_expand can recover shadowed/compacted content.
  */
+/**
+ * The messages ctx_expand numbers: the session HISTORY view — the same
+ * numbering compartments, ctx_search hits and the historian use (round 23).
+ * It used to walk the whole event log, which also counts Magic op copies and
+ * re-injected knowledge messages, so a compartment's start=/end= expanded
+ * different messages (real rc.5 log, round 23). Op copies are expanded back
+ * into their source events, so a dropped tool output stays recoverable.
+ */
 export function readRawMessagesFromAgent(agent: Agent): RawMessage[] {
-  return convertDshEventsToRawMessages(sessionEvents(agent.session));
+  const session = agent.session as unknown as {
+    surface?: { nodes?: readonly number[]; replaceGeneration?: number };
+    header?: { cwd?: string };
+  };
+  // No surface (DSH 0.1-shaped test doubles): the whole-log walk, as before.
+  if (!Array.isArray(session.surface?.nodes)) return convertDshEventsToRawMessages(sessionEvents(agent.session));
+  return [
+    ...readDshHistory({
+      session: {
+        events: sessionEvents(agent.session),
+        surface: session.surface,
+        header: { cwd: session.header?.cwd },
+      } as never,
+      canonicalSessionId: "",
+    }).messages,
+  ];
 }
 
 export function createCtxExpandTool(ctx: Context, opts: CtxToolsOptions): ToolDefinition {
