@@ -21,6 +21,7 @@ import { createUserMessage, promptTokensOf, sessionEvents } from "../compat/dsh-
 import type { SummarizeHook } from "../compat/dsh-0.1/compaction";
 import type { MagicContextHostService, MagicSummarizeHook } from "../index";
 import type { RawMessageProvider } from "@magic-context/core/hooks/magic-context/read-session-chunk";
+import type { RawMessage } from "@magic-context/core/hooks/magic-context/read-session-raw";
 import {
   COMPARTMENT_AGENT_SYSTEM_PROMPT,
   buildCompartmentAgentPrompt,
@@ -281,6 +282,9 @@ function surfaceEventMessageId(event: unknown): string | undefined {
  * that range's first ordinal, not its last.
  */
 export interface DshRawMessageProvider extends RawMessageProvider {
+  readMessageById(messageId: string): RawMessage | null;
+  readMessageOrdinalById(messageId: string): number | null;
+  getMessageCount(): number;
   readMessageOrdinalRangeById(messageId: string): { first: number; last: number } | null;
 }
 
