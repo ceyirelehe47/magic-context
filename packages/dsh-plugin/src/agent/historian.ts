@@ -989,9 +989,10 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
         const waitMs = Math.max(0, deps.leaseWaitMs ?? DEFAULT_SUMMARIZE_LEASE_WAIT_MS);
         const pollMs = Math.max(1, deps.leasePollMs ?? 500);
         const started = Date.now();
-        log(
-          `[magic-context] summarize: waiting for the compartment lease of ${sessionId} (a historian pass is running; up to ${Math.round(waitMs / 1000)}s)`,
-        );
+        const waitLine = `[magic-context] summarize: waiting for the compartment lease of ${sessionId} (a historian pass is running; up to ${Math.round(waitMs / 1000)}s)`;
+        log(waitLine);
+        // Round 22: headless prints stderr only (ctx.logger is not shown).
+        debugConsole(waitLine);
         while (Date.now() - started < waitMs) {
           await sleepUnlessAborted(Math.min(pollMs, Math.max(1, waitMs - (Date.now() - started))), signal);
           if (getLastCompartmentEndMessage(deps.db, sessionId) >= lastOrdinal) {
@@ -1002,13 +1003,13 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
           if (lease !== null) break;
         }
         if (!covered && lease === null) {
-          throw new Error(
-            `magic-context: summarize mini-historian lease busy for ${sessionId} after waiting ${Math.round((Date.now() - started) / 1000)}s (a historian pass is still running; retry once it finishes)`,
-          );
+          const message = `magic-context: summarize mini-historian lease busy for ${sessionId} after waiting ${Math.round((Date.now() - started) / 1000)}s (a historian pass is still running; retry once it finishes)`;
+          debugConsole(`[magic-context] ${message}`);
+          throw new Error(message);
         }
-        log(
-          `[magic-context] summarize: lease wait ended after ${Date.now() - started}ms (${covered ? "range covered by the background pass" : "lease acquired"})`,
-        );
+        const endLine = `[magic-context] summarize: lease wait ended after ${Date.now() - started}ms (${covered ? "range covered by the background pass" : "lease acquired"})`;
+        log(endLine);
+        debugConsole(endLine);
       }
       if (!covered && lease !== null) {
         // Mini-historian: one synchronous pass over [lastCompartmentEnd+1, lastOrdinal].

@@ -1030,6 +1030,56 @@ describe("createMagicSummarizeHook: waits for a busy lease (round 21)", () => {
     }
   });
 
+  // Round 22: headless prints console.error only (ctx.logger is not shown),
+  // so the wait start / end / timeout lines must also reach stderr under
+  // MAGIC_CONTEXT_DEBUG_HISTORIAN=1 — R8 counted "lease wait ended" in the
+  // run logs and could never see one.
+  it("wait lines reach stderr under MAGIC_CONTEXT_DEBUG_HISTORIAN=1 (headless evidence)", async () => {
+    const env = makeEnv();
+    const prev = process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN;
+    const original = console.error;
+    const lines: string[] = [];
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN = "1";
+    try {
+      const db = await createTestDb(env.dbPath);
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      expect(acquireCompartmentLease(db, SESSION_ID, "bg-pass")).not.toBeNull();
+      setTimeout(() => releaseCompartmentLease(db, SESSION_ID, "bg-pass"), 80);
+      const hook = createMagicSummarizeHook(
+        deps(db, session, async () => threeCompartments(), { leaseWaitMs: 3_000, leasePollMs: 20 }),
+      );
+      await hook({ messages: inputMessages(session) as never }, fakeAgent);
+      expect(lines.some((l) => /summarize: waiting for the compartment lease/.test(l))).toBe(true);
+      expect(lines.some((l) => /summarize: lease wait ended after \d+ms \(lease acquired\)/.test(l))).toBe(true);
+      db.close();
+      // timeout branch (fresh DB: nothing covered, lease held throughout)
+      const env2 = makeEnv();
+      try {
+        const db2 = await createTestDb(env2.dbPath);
+        initializeDshAdapterTables(db2);
+        const session2 = buildSession();
+        expect(acquireCompartmentLease(db2, SESSION_ID, "bg-pass-2")).not.toBeNull();
+        const busy = createMagicSummarizeHook(
+          deps(db2, session2, async () => threeCompartments(), { leaseWaitMs: 60, leasePollMs: 20 }),
+        );
+        await expect(busy({ messages: inputMessages(session2) as never }, fakeAgent)).rejects.toThrow(/lease busy/);
+        expect(lines.some((l) => /summarize mini-historian lease busy .*after waiting/.test(l))).toBe(true);
+        db2.close();
+      } finally {
+        await env2.cleanup();
+      }
+    } finally {
+      console.error = original;
+      if (prev === undefined) delete process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN;
+      else process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN = prev;
+      await env.cleanup();
+    }
+  });
+
   it("an abort while waiting stops the wait", async () => {
     const env = makeEnv();
     try {
