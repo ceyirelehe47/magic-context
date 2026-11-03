@@ -51,7 +51,7 @@ real-model `e2e` **117 judged** (round 24's 107 + U26 + scenario W W1–W4 +
 scenario S ST1–ST5): **117/117 PASS on 41699491685 @ `40c5013a5`**
 (checks green in the same run); 41699579212 @ the same head 116/117 (U20,
 model: answered the four facts' contents instead of their codewords; the injected
-`<project-memory>` carried all four, U15 PASS). H consecutive passes: in progress (41705543125, 41705587583).
+`<project-memory>` carried all four, U15 PASS). H consecutive passes: PASS ×2 consecutive (41705543125 117/117, 41705587583 117/117 @ 40c5013a5).
 Evidence: `docs/dsh/e2e/evidence-round25/`.
 
 Round 25 fixes (adapter only, no core change; red test first):
@@ -1607,7 +1607,7 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     - **P1-1 verified by scenario H** (U13–U25, real model, mock embeddings):
       U13–U25 (+U26) all PASS on 41693402758 @ `955a12d08`; the U16 checker
       change `9e9b828a7` restarted the count: 41699491685 PASS (1), 41699579212 U20 FAIL (model answer
-      format, not Magic) → reset; in progress (41705543125, 41705587583).
+      format, not Magic) → reset; PASS ×2 consecutive (41705543125 117/117, 41705587583 117/117 @ 40c5013a5).
     - **Behaviour change (parity, intended):** injected messages no longer count
       as meaningful user turns for core's 5-user-turn protected tail
       (`PROTECTED_TAIL_USER_TURNS`), so on DSH the historian now starts after
