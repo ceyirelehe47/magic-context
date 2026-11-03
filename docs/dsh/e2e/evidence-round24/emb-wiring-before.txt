@@ -1,0 +1,9 @@
+Expected: true
+Received: false
+(fail) DSH embedding registration + automatic compartment embedding (item 2) > registers the provider, auto-embeds the compartments, and ctx_search's compartment lane answers a paraphrase [6355.40ms]
+Expected substring or pattern: /semantic search (is )?unavailable/i
+Received: "Found 1 result for \"FILE-WREN-2049\":\n\n[1] [message] score=1.00 ordinal=5 range=2-8 role=user\nPlease remember this. File relation: meter.ts reads its numbers from context-details.ts, codeword FILE-WREN-2049.\n\nUse ctx_expand(start, end) with the range from any message result above to read the full conversation context."
+(fail) DSH embedding registration + automatic compartment embedding (item 2) > with no reachable model it degrades to full-text search with a visible diagnostic (never throws) [6387.99ms]
+ 0 pass
+ 2 fail
+Ran 2 tests across 1 file. [13.57s]
