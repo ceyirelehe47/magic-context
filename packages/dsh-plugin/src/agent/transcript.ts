@@ -1025,6 +1025,163 @@ export function readDshTranscript(input: DshTranscriptInput): DshTranscriptView 
   };
 }
 
+/* ─────────────────────────── history (native compaction) ─────────────────── */
+
+/** `source.kind` of the checkpoint message DSH compaction-basic writes. */
+export const DSH_COMPACT_CHECKPOINT_KIND = "compact-checkpoint";
+
+/** Surface (model-history) event types; log-only events never become nodes. */
+const SURFACE_EVENT_TYPES = new Set([
+  "system/message",
+  "developer/message",
+  "user/message",
+  "assistant/message",
+  "tool/result",
+]);
+
+function isCompactCheckpointEvent(event: EventLike): boolean {
+  if (event.type !== "user/message") return false;
+  const data = dataOf(event);
+  const source = data !== null && isRecord(data.source) ? data.source : null;
+  const shadowed = (event as { sourceEventSeqs?: unknown }).sourceEventSeqs;
+  return source !== null && source.kind === DSH_COMPACT_CHECKPOINT_KIND && Array.isArray(shadowed) && shadowed.length > 0;
+}
+
+function isMagicOpCopyEvent(event: EventLike): boolean {
+  if (event.type !== "user/message") return false;
+  const data = dataOf(event);
+  const source = data !== null && isRecord(data.source) ? data.source : null;
+  if (source === null || !isMagicSource(source)) return false;
+  const messageId = source.messageId;
+  const shadowed = (event as { sourceEventSeqs?: unknown }).sourceEventSeqs;
+  return (
+    typeof messageId === "string" &&
+    messageId.startsWith("mc-op:") &&
+    !messageId.endsWith(":temporal") &&
+    Array.isArray(shadowed) &&
+    shadowed.length > 0
+  );
+}
+
+/**
+ * A surface node that stands for history it replaced: a native compaction
+ * checkpoint, or a Magic op copy (transitively) re-rendering one.
+ * `[nodeStart, nodeEnd)` indexes the expanded history node list.
+ */
+export interface DshHistoryStandIn {
+  readonly seq: number;
+  readonly nodeStart: number;
+  readonly nodeEnd: number;
+}
+
+/**
+ * Round 23: the history node list behind a DSH surface. A native compaction
+ * (compaction-basic: `/compact` or the pressure backstop) REPLACES surface
+ * nodes with one checkpoint message; the surface view then restarts its
+ * ordinals while published compartments keep the old numbering (real rc.5,
+ * run 41619627652: `/compact` #2 judged compartments 1–17 "covered" and
+ * shadowed the new turn). Core's raw-message contract is the session's
+ * HISTORY (OpenCode/Pi keep compacted messages in their store), so every
+ * checkpoint is expanded back into the surface nodes it shadowed — recursively,
+ * through Magic op copies that re-rendered a checkpoint (tag prefixes) and
+ * through earlier checkpoints. Other nodes (op copies included) are kept as-is,
+ * so pre-compaction ordinals are reproduced exactly. Unknown seqs are kept.
+ */
+export function expandCompactionCheckpoints(
+  events: readonly unknown[],
+  surfaceNodes: readonly number[],
+): { readonly nodes: number[]; readonly standIns: DshHistoryStandIn[] } {
+  const eventBySeq = new Map<number, EventLike>();
+  for (const raw of events) {
+    const event = asEvent(raw);
+    if (!event) continue;
+    const seq = seqOf(event);
+    if (seq >= 0 && !eventBySeq.has(seq)) eventBySeq.set(seq, event);
+  }
+  const containsCheckpoint = new Map<number, boolean>();
+  const hasCheckpoint = (seq: number, depth: number): boolean => {
+    const cached = containsCheckpoint.get(seq);
+    if (cached !== undefined) return cached;
+    const event = eventBySeq.get(seq);
+    let result = false;
+    if (event !== undefined && depth < MAX_OP_COPY_DEPTH) {
+      if (isCompactCheckpointEvent(event)) result = true;
+      else if (isMagicOpCopyEvent(event)) {
+        const sources = (event as { sourceEventSeqs?: unknown[] }).sourceEventSeqs ?? [];
+        result = sources.some((s) => typeof s === "number" && hasCheckpoint(s, depth + 1));
+      }
+    }
+    containsCheckpoint.set(seq, result);
+    return result;
+  };
+
+  const nodes: number[] = [];
+  const standIns: DshHistoryStandIn[] = [];
+  const visit = (seq: number, depth: number): void => {
+    const event = eventBySeq.get(seq);
+    if (event === undefined || depth >= MAX_OP_COPY_DEPTH || !hasCheckpoint(seq, depth)) {
+      nodes.push(seq);
+      return;
+    }
+    const start = nodes.length;
+    const raw = ((event as { sourceEventSeqs?: unknown[] }).sourceEventSeqs ?? []).filter(
+      (s): s is number => typeof s === "number",
+    );
+    // A checkpoint lists its log-only compaction events first, then the
+    // shadowed nodes in SURFACE order (keep it: a replaced node sits where the
+    // original was). An op copy's sources are ordered by seq (expandOpCopy).
+    const sources = isCompactCheckpointEvent(event)
+      ? raw.filter((s) => SURFACE_EVENT_TYPES.has(String(eventBySeq.get(s)?.type ?? "")))
+      : [...raw].sort((a, b) => a - b);
+    for (const source of sources) visit(source, depth + 1);
+    standIns.push({ seq, nodeStart: start, nodeEnd: nodes.length });
+  };
+  for (const seq of surfaceNodes) visit(seq, 0);
+  return { nodes, standIns };
+}
+
+/** History view: {@link readDshTranscript} over the checkpoint-expanded nodes. */
+export interface DshHistoryView extends DshTranscriptView {
+  /** Surface stand-ins (checkpoints / their op copies) → the history ordinals they cover. */
+  readonly standInOrdinals: ReadonlyMap<number, { readonly first: number; readonly last: number }>;
+}
+
+/**
+ * Read the session HISTORY (round 23): the transcript view of
+ * {@link expandCompactionCheckpoints}' node list. Its ordinals are stable
+ * across native compactions and are what compartments, the historian, the
+ * summarize hook and the compartment drop queue number against. The context
+ * plane keeps using {@link readDshTranscript} (the model-visible surface).
+ */
+export function readDshHistory(input: DshTranscriptInput): DshHistoryView {
+  const events = sessionEvents(input.session);
+  const surface = Array.isArray(input.session.surface?.nodes) ? [...input.session.surface.nodes] : [];
+  const { nodes, standIns } = expandCompactionCheckpoints(events, surface);
+  const view = readDshTranscript({
+    ...input,
+    // Plain object: a real DSH Session keeps its events behind a prototype
+    // method (snapshotEvents) that a spread would drop.
+    session: {
+      events,
+      surface: { nodes, replaceGeneration: input.session.surface?.replaceGeneration ?? 0 },
+      header: input.session.header,
+    } as unknown as DshTranscriptInput["session"],
+  });
+  const standInOrdinals = new Map<number, { first: number; last: number }>();
+  for (const standIn of standIns) {
+    let first = Number.POSITIVE_INFINITY;
+    let last = Number.NEGATIVE_INFINITY;
+    for (const message of view.messages) {
+      const span = messageNodeSpan(message);
+      if (span === null || span.nodeStart < standIn.nodeStart || span.nodeStart >= standIn.nodeEnd) continue;
+      first = Math.min(first, message.ordinal);
+      last = Math.max(last, message.ordinal);
+    }
+    if (Number.isFinite(first)) standInOrdinals.set(standIn.seq, { first, last });
+  }
+  return { ...view, surfaceNodes: surface, standInOrdinals };
+}
+
 function maxEventSeq(events: readonly unknown[]): number {
   let max = 0;
   for (const raw of events) {

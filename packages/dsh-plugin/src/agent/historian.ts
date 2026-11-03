@@ -970,14 +970,23 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
       // surface message the view does not carry by id (a Magic op copy, a
       // folded tool result). Resolve the range over every message the view
       // knows (system prompts skipped) instead of the literal first/last ids.
+      // Round 23: a native-compaction checkpoint in the region stands for the
+      // history range it shadowed (provider range lookup), so the region
+      // starts at that range's first ordinal.
+      const rangeOf = (deps.provider as Partial<{ readMessageOrdinalRangeById(id: string): { first: number; last: number } | null }>)
+        .readMessageOrdinalRangeById;
       let firstOrdinal: number | null = null;
       let lastOrdinal: number | null = null;
       for (const message of messages) {
         if ((message as { role?: unknown }).role === "system") continue;
-        const ordinal = readRawSessionMessageOrdinalById(sessionId, String(message.id));
-        if (ordinal === null) continue;
-        if (firstOrdinal === null || ordinal < firstOrdinal) firstOrdinal = ordinal;
-        if (lastOrdinal === null || ordinal > lastOrdinal) lastOrdinal = ordinal;
+        const id = String(message.id);
+        const range = typeof rangeOf === "function" ? rangeOf(id) : null;
+        const ordinal = readRawSessionMessageOrdinalById(sessionId, id);
+        const first = range?.first ?? ordinal;
+        const last = range?.last ?? ordinal;
+        if (first === null || last === null) continue;
+        if (firstOrdinal === null || first < firstOrdinal) firstOrdinal = first;
+        if (lastOrdinal === null || last > lastOrdinal) lastOrdinal = last;
       }
       if (firstOrdinal === null || lastOrdinal === null || lastOrdinal < firstOrdinal) {
         throw new Error(

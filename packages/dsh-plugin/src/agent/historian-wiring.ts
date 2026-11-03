@@ -26,7 +26,7 @@ import {
   buildCompartmentAgentPrompt,
 } from "@magic-context/core/hooks/magic-context/compartment-prompt";
 import { buildHistorianRepairPrompt } from "@magic-context/core/hooks/magic-context/compartment-runner-validation";
-import { messageNodeSpan, readDshTranscript } from "./transcript";
+import { messageNodeSpan, readDshHistory } from "./transcript";
 import { isMagicChildSession } from "./worker";
 import {
   createMagicSummarizeHook,
@@ -274,13 +274,33 @@ function surfaceEventMessageId(event: unknown): string | undefined {
   return typeof nested === "string" ? nested : undefined;
 }
 
-/** Transcript-backed RawMessageProvider for one live session (read-only). */
+/**
+ * RawMessageProvider plus the history-ordinal RANGE a surface message stands
+ * for (round 23): a native-compaction checkpoint (or its op copy) covers every
+ * history message it shadowed, so a compaction region starting on it begins at
+ * that range's first ordinal, not its last.
+ */
+export interface DshRawMessageProvider extends RawMessageProvider {
+  readMessageOrdinalRangeById(messageId: string): { first: number; last: number } | null;
+}
+
+/**
+ * Transcript-backed RawMessageProvider for one live session (read-only).
+ *
+ * Round 23: it serves the session HISTORY (`readDshHistory`: native
+ * compaction checkpoints expanded back into the messages they shadowed), so
+ * ordinals stay stable across DSH native compactions and keep matching the
+ * published compartments. Before, it served the surface view, whose ordinals
+ * restart at the checkpoint (real rc.5 run 41619627652: the second `/compact`
+ * judged compartments 1–17 "covered", the background historian found nothing
+ * after ordinal 17 and the post-compaction turn became a drop candidate).
+ */
 export function transcriptRawMessageProvider(
   agent: Agent,
   canonicalSessionId: string,
-): RawMessageProvider {
+): DshRawMessageProvider {
   const events = sessionEvents(agent.session);
-  const view = readDshTranscript({
+  const view = readDshHistory({
     session: {
       events,
       surface: agent.session.surface,
@@ -289,28 +309,39 @@ export function transcriptRawMessageProvider(
     canonicalSessionId,
   });
   const byId = new Map(view.messages.map((message) => [message.id, message]));
-  const ordinalById = new Map(view.messages.map((message, index) => [message.id, index + 1]));
+  const ordinalById = new Map(view.messages.map((message) => [message.id, message.ordinal]));
   // Round 20: compaction-basic hands the summarize hook SURFACE messages. A
   // Magic op copy (or a folded tool result) has a surface id the view does not
   // carry — the view expands copies back into their source events. Map every
   // surface event id a view message covers (its span seqs) to that message's
   // ordinal (the last covering message wins), so a region ending on a copy
   // resolves to the message it re-renders.
-  const surfaceOrdinalById = new Map<string, number>();
+  const surfaceRangeById = new Map<string, { first: number; last: number }>();
   const eventBySeq = new Map(events.map((event) => [Number((event as { seq?: unknown }).seq), event]));
-  view.messages.forEach((message, index) => {
+  for (const message of view.messages) {
     const span = messageNodeSpan(message);
-    if (span === null) return;
+    if (span === null) continue;
     for (const seq of span.seqs) {
       const id = surfaceEventMessageId(eventBySeq.get(seq));
-      if (id !== undefined && !ordinalById.has(id)) surfaceOrdinalById.set(id, index + 1);
+      if (id !== undefined && !ordinalById.has(id)) surfaceRangeById.set(id, { first: message.ordinal, last: message.ordinal });
     }
-  });
+  }
+  // Round 23: a checkpoint / checkpoint copy on the surface stands for the
+  // whole history range it shadowed.
+  for (const [seq, range] of view.standInOrdinals) {
+    const id = surfaceEventMessageId(eventBySeq.get(seq));
+    if (id !== undefined && !ordinalById.has(id)) surfaceRangeById.set(id, range);
+  }
   return {
     readMessages: () => [...view.messages],
     readMessageById: (messageId: string) => byId.get(messageId) ?? null,
     readMessageOrdinalById: (messageId: string) =>
-      ordinalById.get(messageId) ?? surfaceOrdinalById.get(messageId) ?? null,
+      ordinalById.get(messageId) ?? surfaceRangeById.get(messageId)?.last ?? null,
+    readMessageOrdinalRangeById: (messageId: string) => {
+      const own = ordinalById.get(messageId);
+      if (own !== undefined) return { first: own, last: own };
+      return surfaceRangeById.get(messageId) ?? null;
+    },
     getMessageCount: () => view.messages.length,
   };
 }

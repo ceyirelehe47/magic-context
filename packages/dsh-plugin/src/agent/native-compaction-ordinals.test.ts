@@ -186,18 +186,18 @@ describe("history ordinals across DSH native compactions (real rc.5 log, run 416
     });
   });
 
-  it("case 2 — the background historian (production boundary) reads the post-compaction turn after compartment 17", async () => {
+  it("case 2 — the background historian (production boundary) resumes at ordinal 18 instead of finding nothing after compartment 17", async () => {
     await withDb(async (db) => {
       const before = transcriptRawMessageProvider(agentOf(sessionUpTo(102)), SID).readMessages();
       stageRealCompartments(db, before);
       const agent = agentOf(sessionUpTo(144));
-      const chunks: Array<{ start: number; text: string }> = [];
+      const chunks: Array<{ start: number; end: number; text: string }> = [];
       const ok = await runDshHistorian({
         db,
         sessionId: SID,
         provider: transcriptRawMessageProvider(agent, SID),
         summarize: async (chunk) => {
-          chunks.push({ start: chunk.startIndex, text: chunk.text });
+          chunks.push({ start: chunk.startIndex, end: chunk.endIndex, text: chunk.text });
           return "";
         },
         leaseHolderId: "r23-case2",
@@ -207,7 +207,13 @@ describe("history ordinals across DSH native compactions (real rc.5 log, run 416
       expect(chunks.length).toBe(1);
       expect(chunks[0]!.start).toBe(18);
       expect(chunks[0]!.text).toContain("Reply with the single word: ok."); // shadowed by #1 but never summarized
-      expect(chunks[0]!.text).toContain("read each of these five files");
+      expect(chunks[0]!.text).toContain("[21] A: ok");
+      // The live turn (prompt at its history ordinal onwards) is the protected
+      // tail — core's boundary, unchanged; it is summarized once it ages out.
+      const provider = transcriptRawMessageProvider(agent, SID);
+      const promptOrdinal = provider.readMessageOrdinalById(fullId(provider.readMessages(), ID_TURN4_PROMPT))!;
+      expect(chunks[0]!.end).toBeLessThan(promptOrdinal);
+      expect(chunks[0]!.text).not.toContain("read each of these five files");
     });
   });
 
@@ -222,5 +228,55 @@ describe("history ordinals across DSH native compactions (real rc.5 log, run 416
         expect(owners.has(fullId(messages, prefix))).toBe(false);
       }
     });
+  });
+  it("case 1 end-to-end — /compact #2 publishes a compartment over the new turn and renders it (old 1..17 kept)", async () => {
+    await withDb(async (db) => {
+      const before = transcriptRawMessageProvider(agentOf(sessionUpTo(102)), SID).readMessages();
+      stageRealCompartments(db, before);
+      const agent = agentOf(sessionUpTo(144));
+      const provider = transcriptRawMessageProvider(agent, SID);
+      // The region ends on the p29 tool result (seq 139); the "p29 read." reply stays live.
+      const last = provider.readMessageOrdinalById(fullId(provider.readMessages(), ID_P29_REPLY))! - 1;
+      const hook = createMagicSummarizeHook({
+        db,
+        sessionId: SID,
+        ctx: {},
+        provider,
+        summarize: async (chunk) => `<output>
+<compartments>
+<compartment start="${chunk.startIndex}" end="${chunk.endIndex}" title="Turn 4 read p27-p29" episode_type="design" importance="50">
+<p1>Read p27, p28 and p29 for the five-file prompt.</p1>
+<p2>Read p27-p29.</p2>
+<p3>p27-p29 read.</p3>
+<p4>p27-p29</p4>
+</compartment>
+</compartments>
+<facts>
+</facts>
+<meta>
+<messages_processed>${chunk.startIndex}-${chunk.endIndex}</messages_processed>
+<unprocessed_from>${chunk.endIndex + 1}</unprocessed_from>
+</meta>
+</output>`,
+        leaseHolderId: "r23-case1-e2e",
+      });
+      const result = await hook({ messages: secondCompactionRegion() as never }, agent);
+      const text = (result.summary[0] as { text: string }).text;
+      expect(text).toContain("Read p27, p28 and p29");
+      expect(text).toContain("Narrative 1-1."); // the region starts at the #1 checkpoint → history from 1
+      const compartments = getCompartments(db, SID);
+      expect(compartments.at(-1)!.startMessage).toBe(18);
+      expect(compartments.at(-1)!.endMessage).toBe(last);
+    });
+  });
+
+  it("after /compact #2 the numbering still holds: the #2 checkpoint stands for history 1..p29", () => {
+    const at144 = transcriptRawMessageProvider(agentOf(sessionUpTo(144)), SID);
+    const at150 = transcriptRawMessageProvider(agentOf(sessionUpTo(150)), SID);
+    for (const m of at144.readMessages()) expect(at150.readMessageOrdinalById(m.id)).toBe(m.ordinal);
+    const { events } = loadEvents();
+    const checkpoint2 = surfaceMessageId(events.find((e) => e.seq === 148)!);
+    const p29 = at144.readMessageOrdinalById(fullId(at144.readMessages(), ID_P29_REPLY))!;
+    expect(at150.readMessageOrdinalRangeById(checkpoint2)).toEqual({ first: 1, last: p29 - 1 });
   });
 });
