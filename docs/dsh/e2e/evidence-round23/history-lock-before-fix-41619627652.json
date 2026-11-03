@@ -1,0 +1,112 @@
+{
+ "historyCount": 29,
+ "surfaceCount": 2,
+ "lastCompartmentEnd": 17,
+ "prompt": {
+  "found": true,
+  "historyOrdinal": 24,
+  "coveredBy": null,
+  "onSurface": false
+ },
+ "files": [
+  {
+   "file": "p27.txt",
+   "checksum": "P19-27-AA15A2",
+   "resultSeq": 123,
+   "historyOrdinal": 26,
+   "coveredBy": null,
+   "onSurface": false
+  },
+  {
+   "file": "p28.txt",
+   "checksum": "P19-28-6B2FF9",
+   "resultSeq": 130,
+   "historyOrdinal": 27,
+   "coveredBy": null,
+   "onSurface": false
+  },
+  {
+   "file": "p29.txt",
+   "checksum": "P19-29-1B8737",
+   "resultSeq": 137,
+   "historyOrdinal": 28,
+   "coveredBy": null,
+   "onSurface": false
+  }
+ ],
+ "compactions": [
+  {
+   "seq": 105,
+   "shadowedSeqs": [
+    8,
+    9,
+    94,
+    11,
+    24,
+    26,
+    32,
+    39,
+    46,
+    53,
+    60,
+    67,
+    74,
+    76,
+    77,
+    83,
+    93,
+    96,
+    97,
+    98
+   ],
+   "summaryCompartmentRanges": [
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     5
+    ],
+    [
+     6,
+     11
+    ],
+    [
+     12,
+     17
+    ]
+   ],
+   "summaryMaxEnd": 17
+  },
+  {
+   "seq": 147,
+   "shadowedSeqs": [
+    114,
+    113,
+    116,
+    117,
+    118,
+    119,
+    125,
+    132,
+    139
+   ],
+   "summaryCompartmentRanges": [
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     5
+    ],
+    [
+     6,
+     11
+    ]
+   ],
+   "summaryMaxEnd": 11
+  }
+ ]
+}
