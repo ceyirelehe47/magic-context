@@ -42,12 +42,57 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
+Baseline (round 25, 2026-11-04, DSH 0.2.1-rc.5, core v0.49.35; release tags
+unchanged; push run 41692123988 @ `34819c87a`, 41693389965 @ `955a12d08`):
+`typecheck:dsh` **0 errors**, `dsh-plugin` **576 pass** (+9 over round 24's
+567: historian-memory-identity 3, open-lock-stale 3, lease-pid-reuse 2,
+e2e-hooks +1), `adapter-api` **15 pass**, `contracts:dsh` **104 pass**, 0 fail;
+real-model `e2e` **117 judged** (round 24's 107 + U26 + scenario W W1–W4 +
+scenario S ST1–ST5): **117/117 PASS on 41699491685 @ `40c5013a5`**
+(checks green in the same run); 41699579212 @ the same head 116/117 (U20,
+model: answered the four facts' contents instead of their codewords; the injected
+`<project-memory>` carried all four, U15 PASS). H consecutive passes: in progress (41705543125, 41705587583).
+Evidence: `docs/dsh/e2e/evidence-round25/`.
+
+Round 25 fixes (adapter only, no core change; red test first):
+- U21 `8a7864594` (red `505d03fbe`; e2e check U26 `b1cc19ce6`): historian memory
+  promotion writes under the project identity (`resolveProjectIdentityForSession`,
+  the `ctx_memory` resolver; core's runner uses `resolveProjectIdentity`), not the
+  raw directory, so core's exact-hash dedup (archived rows included) sees the
+  agent's row and a corrected fact is not re-activated; the historian prompt gets
+  core's `<project-memory>` block (active/permanent memories, ≤ 10 % of the
+  historian window) as dedup context. e2e 41682984222: memory 20 byte-identical
+  to archived 16 under a different `project_path`. Verified on real e2e
+  41688260239 / 41693402758 / 41699491685 (U21, U22, U26 PASS).
+- B1 `658ea8f19` (red `509aec6a1`): the dsh open lock (`<db>.dsh-open.lock`) is
+  taken over when its pid now belongs to a process started after the lock was
+  written (pid reused, or our own pid after a crash + container restart) — before,
+  every start waited MAX_WAIT 120 s. open-lock-stale 1/3 → 3/3.
+- B2 `d1c19c6c8` (red `e75c0c286`; evidence corrected `addd75041`): a compartment
+  lease whose owner pid was reused / is our own pid after a restart counts as gone
+  (`isPidNewerThan(pid, acquiredAt)`, core's `isPidIdentityPlausible` rule);
+  `reclaimDshLeaseOfGoneOwner` (core's exact-row DELETE) runs before every DSH
+  acquire, since core's acquire reclaims only a DEAD pid. Before: busy for the
+  rest of the 5-min TTL, acquire = null. lease-pid-reuse 0/1 → 2/2.
+- e2e scenarios (P1-2 / P1-3): W (`34819c87a`, worker child forced to call
+  bash/write) and S (`34819c87a`, 5 sessions × 4 parallel restarted rounds on one
+  DB; `79615e408` adds 5 warm-up rounds so the historian has eligible history).
+- e2e checker fixes, no assertion relaxed: `955a12d08` (U14 own codes from the
+  full history view incl. tool calls/results; plus required history view,
+  numbering agreement and no injected-block markup), `79615e408` (ST1 also
+  requires the 25 warm-up runs), `9e9b828a7` (U16: a folded hit is judged on
+  its Snippet; its title may name only codes of its own range), `40c5013a5`
+  (warm-up plans per session, X8).
+
 Baseline (round 24, 2026-11-04, DSH 0.2.1-rc.5, core v0.49.35; release tags
 unchanged; push run 41679319893 @ `e5ce3b756`): `typecheck:dsh` **0 errors**,
 `dsh-plugin` **567 pass** (+15 over round 23c's 552; 566 after 24a/24b,
 24c adds `injected-history` 1), `adapter-api` **15 pass**,
 `contracts:dsh` **104 pass**, 0 fail; real-model `e2e` **107 judged**
-(round 23c's 93 + R15 + scenario H U13–U25): __E2E_FINAL__.
+(round 23c's 93 + R15 + scenario H U13–U25): not all green within round 24 — 41679402115 105/107 (R14 checker, Y3
+scenario precondition), 41682984222 106/107 (U21, product; fixed in round 25
+`8a7864594`); all 107 round-24 checks first PASS together on 41693402758 @
+`955a12d08` (round 25; see the round 25 baseline above).
 Evidence: `docs/dsh/e2e/evidence-round24/`.
 
 Round 24 fixes (adapter only, no core change; red test first):
@@ -1560,7 +1605,9 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       history (`a529b7846`). **Mitigated:** 18 (g) by the adapter open lock
       (`41e74f26d`); the core migration race itself is unchanged upstream.
     - **P1-1 verified by scenario H** (U13–U25, real model, mock embeddings):
-      __H_RUNS__.
+      U13–U25 (+U26) all PASS on 41693402758 @ `955a12d08`; the U16 checker
+      change `9e9b828a7` restarted the count: 41699491685 PASS (1), 41699579212 U20 FAIL (model answer
+      format, not Magic) → reset; in progress (41705543125, 41705587583).
     - **Behaviour change (parity, intended):** injected messages no longer count
       as meaningful user turns for core's 5-user-turn protected tail
       (`PROTECTED_TAIL_USER_TURNS`), so on DSH the historian now starts after
@@ -1590,6 +1637,55 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     - **Known, not changed — e2e replay tools** must decode DSH's storage-form
       `sourceEventSeqs` ranges (`decodeSeqRanges`); production code reads
       sessions through DSH's own API and is not affected.
+
+20. **Round 25 (2026-11-04) — status.**
+    - **Fixed (product, adapter):** U21 historian memory identity + dedup context
+      (`8a7864594`); B1 stale open lock on a reused / own pid (`658ea8f19`); B2
+      lease of a reused / own pid (`d1c19c6c8`). Unit before/after files in
+      `evidence-round25/` (`u21-*`, `b1-*`, `b2-*`).
+    - **Checker, not product — U14 in e2e 41688260239:** compartment [11, 15]
+      carried FILE-HERON-2261 from the agent's own `ctx_memory` write call at
+      ordinal 11 (the FTS rows U14 used hold text only). Ruled out: historian
+      restating `<project-memory>` — all four memories were active for both
+      passes and no compartment carried a code its range did not. Analysis:
+      `evidence-round25/u14-41688260239-analysis.md`.
+    - **P1-3 (child-agent permission boundary) — verified, scenario W:** a worker
+      child forced (mock) to call bash and write gets "unknown tool" for both,
+      nothing on disk, is offered only glob/grep/read, and the parent keeps
+      bash/write after the worker. W1–W4 PASS on 41693402758 and 41699491685.
+    - **P1-2 (long-run / multi-session) — scenario S:** 5 sessions × 4 rounds,
+      each round in parallel, every run a restart, one shared DB. ST1–ST4 PASS on
+      41693402758 (no duplicate/overlapping compartments or tag numbers,
+      integrity ok, no live lease / in-progress flag / open outbox op / leftover
+      process, DB+WAL 1 732 608 → 1 826 816 bytes over 4 rounds). **RSS is
+      measured on CI** (GNU `/usr/bin/time -f %M` per run): max 271 868 KB in
+      round 1, 273 468 KB in round 4; median wall time 3.24 s → 3.21 s. ST5
+      FAILED there (no S session ever had eligible history: 4 real user turns sit
+      inside core's 5-user-turn protected tail, every pass 'nothing to compact');
+      `79615e408` adds 5 warm-up rounds: ST5 PASS on 41696491092,
+      41699491685 and 41699579212 (41699491685: 5 compartments in each of the 5
+      sessions; RSS 301 132 / 299 144 KB, median 5.51 s / 5.70 s, DB+WAL
+      1 888 256 → 2 011 136 bytes).
+      Scope: a short stress (minutes, mock model), not a soak test — hours-long
+      growth is **pending verification**.
+    - **Scan candidates (round 25) and status:** U21 historian identity — fixed;
+      U26 memory identity / no exact duplicate — new check, PASS; B1 stale open
+      lock — fixed; B2 lease pid reuse — fixed; U14 codeword in compartment —
+      checker gap, fixed in the checker (`955a12d08`); ST5 — scenario precondition,
+      fixed in the scenario (`79615e408`); U16 folded hit whose historian title
+      names its own range's facts (41696491092) — checker, fixed `9e9b828a7`; X8 —
+      warm-up plans shared across sessions (introduced by `79615e408`), fixed
+      `40c5013a5`; P1-2 / P1-3 — covered by S / W as above.
+    - **Known, not changed — orphan memories under the raw directory path.**
+      Memories the historian promoted before `8a7864594` keep their raw directory
+      `project_path`: they are not injected, not seen by dedup, and are **not
+      migrated automatically** (a later correction cannot archive them). Cleanup
+      is manual (re-pin under the project, then delete the raw-path rows).
+    - **Known limits of B1/B2:** the start-time comparison needs
+      `readProcessStartTime` (procfs; `ps` on macOS); when it is unreadable the
+      old behaviour holds (wait / TTL). Same-machine pid namespaces only, as
+      before (limitation 18 (a)).
+    - **Not done this round:** P2 (release); no tag moved or created.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
