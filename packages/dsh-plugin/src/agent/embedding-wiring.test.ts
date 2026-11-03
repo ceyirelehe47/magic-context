@@ -16,6 +16,8 @@
  *   2. every compartment of the session is embedded by the automatic backfill,
  *   3. ctx_search's compartment lane returns the RIGHT compartment (range +
  *      title) for a paraphrased question.
+ * (The core test preload refuses network providers without a factory; the
+ * factory below builds the real openai-compatible provider from the config.)
  * And the degrade path (no model reachable — the CI case):
  *   4. the pre-step never throws, ctx_search still answers from the message
  *      FTS lane (the codeword hit, right ordinal) and says VISIBLY that
@@ -30,7 +32,8 @@ import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { ToolDefinition, ToolRunContext } from "@deepseek-ai/dsh-tools";
 import { Session, SessionId } from "@deepseek-ai/dsh-session";
 import { appendCompartments } from "@magic-context/core/features/magic-context/compartment-storage";
-import { getProjectEmbeddingSnapshot } from "@magic-context/core/features/magic-context/memory/embedding";
+import { _setTestProviderFactoryForProject, getProjectEmbeddingSnapshot } from "@magic-context/core/features/magic-context/memory/embedding";
+import { OpenAICompatibleEmbeddingProvider } from "@magic-context/core/features/magic-context/memory/embedding-openai";
 import { resolveProjectIdentityForSession } from "@magic-context/core/features/magic-context/memory/project-identity";
 import { getEmbeddingCoverageStatus } from "@magic-context/core/features/magic-context/project-embedding-registry";
 import type { Database } from "@magic-context/core/shared/sqlite";
@@ -38,6 +41,7 @@ import { createAssistantMessage, createUserMessage } from "../compat/dsh-0.1/ses
 import { createTestDb } from "../test-utils";
 import { createContextPlaneState, runContextPlaneStep, type ContextPlaneDeps } from "./context-plane";
 import { transcriptRawMessageProvider } from "./historian-wiring";
+import { resolveSessionProjectIdentity, trackSessionProjectOnce } from "./session-track";
 import { registerCtxTools } from "./tools";
 
 const KEY = (id: string) => `dsh:a1b2c3d4:${id}`;
@@ -65,7 +69,21 @@ let server: ReturnType<typeof Bun.serve> | undefined;
 let requests = 0;
 const savedXdg = process.env.XDG_CONFIG_HOME;
 
+const savedNoProxy = [process.env.NO_PROXY, process.env.no_proxy] as const;
+
 beforeAll(() => {
+  // The fake server is loopback: never route it through an ambient HTTP proxy.
+  for (const key of ["NO_PROXY", "no_proxy"] as const) {
+    process.env[key] = [process.env[key], "127.0.0.1", "localhost"].filter(Boolean).join(",");
+  }
+  // The core test preload refuses network-capable providers without an
+  // explicit factory; this one builds the REAL openai-compatible provider from
+  // the registered config (so requests really go to `config.endpoint`).
+  _setTestProviderFactoryForProject((config) =>
+    config.provider === "openai-compatible"
+      ? new OpenAICompatibleEmbeddingProvider({ endpoint: config.endpoint as string, model: config.model as string })
+      : null,
+  );
   server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -77,6 +95,11 @@ beforeAll(() => {
   });
 });
 afterAll(() => {
+  _setTestProviderFactoryForProject(null);
+  for (const [i, key] of (["NO_PROXY", "no_proxy"] as const).entries()) {
+    if (savedNoProxy[i] === undefined) delete process.env[key];
+    else process.env[key] = savedNoProxy[i];
+  }
   server?.stop(true);
   if (savedXdg === undefined) delete process.env.XDG_CONFIG_HOME;
   else process.env.XDG_CONFIG_HOME = savedXdg;
@@ -148,6 +171,8 @@ async function setup(sid: string, root: string) {
       p1: "Meter reads numbers from context details; todo prune stale leases.", p2: "Meter source; lease pruning todo.", p3: "Meter source.", p4: "Meter", importance: 50, episodeType: "design",
     },
   ] as never);
+  // production session tracking (agent/created) binds the session to its project
+  trackSessionProjectOnce(new Set(), db, KEY(sid), resolveSessionProjectIdentity(projectDir));
   const deps: ContextPlaneDeps = {
     host: { ready: Promise.resolve({ kind: "ok", db, storageDir: root, livenessPath: "" }), canonicalKey: KEY },
     config: { enabled: false },
@@ -174,7 +199,12 @@ describe("DSH embedding registration + automatic compartment embedding (item 2)"
       // 1. registered
       const registered = await waitFor(() => getProjectEmbeddingSnapshot(identity)?.provider === "openai-compatible");
       expect(registered).toBe(true);
-      // 2. automatic backfill embedded every compartment (no /ctx-embed)
+      // 2. automatic backfill embedded every compartment (no /ctx-embed). The
+      // chunk text comes from the message index the same pre-step feeds
+      // asynchronously, so the backfill starts on the next pre-step (next turn).
+      const view = transcriptRawMessageProvider(agent, KEY("session-emb-a")).readMessages();
+      await waitFor(() => ((db.prepare("SELECT last_indexed_ordinal AS n FROM message_history_index WHERE session_id = ?").get(KEY("session-emb-a")) as { n: number } | null)?.n ?? 0) >= view.length);
+      await runContextPlaneStep(createContextPlaneState(), deps, { agent: agent as never, messages: [] as never }, async () => ({ reject: false, messages: [] }) as never);
       const embedded = await waitFor(() => {
         const cov = getEmbeddingCoverageStatus(db, identity, KEY("session-emb-a"));
         return cov.session.total === 2 && cov.session.embedded === 2;
