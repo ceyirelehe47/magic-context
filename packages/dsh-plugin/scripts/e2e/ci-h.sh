@@ -170,6 +170,14 @@ if [[ -n "$CSID_H" ]]; then
   run h-c3 "What codeword did I record for this project's deployment region? Only answer with a codeword that was actually recorded for the deployment region; if none was recorded, reply exactly: NOT RECORDED" "$CSID_H"
 fi
 hdump "$ASID,$BSID,$CSID_H" final
+# Round 25b (U14): session A's history view, every part (tool calls / results
+# included) with the codewords each ordinal carries — the FTS rows in
+# factMessages hold user/assistant text only.
+if [[ -n "$ASID" ]]; then
+  f="$(ls "$DSH_HOME"/sessions/*/"$ASID"/session.v4.jsonl.zstd 2>/dev/null | head -n 1)"
+  [[ -n "$f" ]] && zstd -qdc "$f" > "$OUT/h-a-session.jsonl" 2>/dev/null
+  [[ -f "$OUT/h-a-session.jsonl" ]] && bun "$HERE/ci-h-history.ts" "$OUT/h-a-session.jsonl" "$CODES" > "$OUT/h-a-history.json" 2>"$OUT/h-a-history.err"
+fi
 
 kill "$EMBED_PID" 2>/dev/null; wait "$EMBED_PID" 2>/dev/null
 cp "$OUT/h-jsonc.orig" "$CFG"

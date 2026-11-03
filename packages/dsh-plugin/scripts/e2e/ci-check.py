@@ -1055,19 +1055,36 @@ def check_h(c, out: Path, runs):
     arows = ((sess.get(asid) or {}).get("factMessages")) if asid else None
     arows = [r for r in arows if not r.get("injected")] if isinstance(arows, list) else []
     search_turn = min([r["ordinal"] for r in arows if r.get("role") == "user" and "Call the ctx_search tool" in r.get("head", "")] or [10 ** 9])
+    # Round 25b: a compartment's OWN codewords are those of every non-injected
+    # message of the history view in its range — text, tool-call inputs and
+    # tool results (h-a-history.json from ci-h-history.ts). The FTS rows above
+    # hold user/assistant text only: in 41688260239 compartment [11, 15]
+    # carried FILE-HERON-2261 from the agent's own ctx_memory write call
+    # (ordinal 11, right after the fact-3 user message at 10) and was flagged.
+    # Stricter on the injected side: no compartment may carry Magic's injected
+    # block markup at all, the history view must exist, and its numbering must
+    # agree with the FTS rows (each fact row's codes on the same ordinal).
+    hist = load_json(out / "h-a-history.json") or {}
+    hrows = hist.get("rows") if isinstance(hist.get("rows"), list) else []
+    hreal = [r for r in hrows if not r.get("injected")]
+    hby = {r["ordinal"]: set(r.get("codes", [])) for r in hreal}
+    numbering_mismatch = [r["ordinal"] for r in arows if not set(r.get("codes", [])) <= hby.get(r["ordinal"], set())]
+    markup = [x["range"] for x in acomps if x.get("injectedMarkup") is not False]
     foreign = []
     for x in acomps:
         lo, hi = x["range"]
         if hi >= search_turn:
             continue
-        own_codes = {cd for r in arows if lo <= r["ordinal"] <= hi for cd in r.get("codes", [])}
+        own_codes = {cd for r in hreal if lo <= r["ordinal"] <= hi for cd in r.get("codes", [])}
         extra = sorted(set(x.get("codes", [])) - own_codes)
         if extra:
             foreign.append((x["range"], extra))
-    c.add("U14", int(reads[1]) >= 2 and len(acomps) >= 2 and bool(arows) and not foreign,
-          "session A: historian published compartments in >= 2 passes, covering the four fact turns; no compartment carries a codeword its own messages do not",
+    c.add("U14", int(reads[1]) >= 2 and len(acomps) >= 2 and bool(arows) and bool(hreal) and not numbering_mismatch
+          and not markup and not foreign,
+          "session A: historian published compartments in >= 2 passes, covering the four fact turns; no compartment carries a codeword no message (text, tool call or result) in its range carries, nor injected-block markup",
           {"readTurns": reads[0], "passesWithNewCompartments": reads[1], "compartments": [(x["range"], x["codes"]) for x in acomps],
-           "codesInCompartmentText": fact_codes_in_comps, "foreignCodes": foreign, "searchTurnOrdinal": search_turn if search_turn < 10 ** 9 else None})
+           "foreignCodes": foreign, "injectedMarkup": markup, "historyRows": len(hrows), "numberingMismatch": numbering_mismatch,
+           "codesInCompartmentText": fact_codes_in_comps, "searchTurnOrdinal": search_turn if search_turn < 10 ** 9 else None})
 
     # U15 automatic injection: the NEW session's injected m0 <project-memory> carries the four codes
     bm0 = ((load_json(out / "h-db-b1.json") or {}).get("sessions") or {}).get(bsid, {}).get("m0") if bsid else None

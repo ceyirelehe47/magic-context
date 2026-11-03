@@ -42,7 +42,7 @@ for (const sid of sidsArg.split(",").filter(Boolean)) {
   const comps = safe(() =>
     (db.query("select id, sequence, start_message, end_message, title, content from compartments where session_id = ? order by sequence").all(key) as {
       id: number; sequence: number; start_message: number; end_message: number; title: string; content: string;
-    }[]).map((c) => ({ id: c.id, sequence: c.sequence, range: [c.start_message, c.end_message], title: c.title, codes: mentions(`${c.title}\n${c.content}`) })),
+    }[]).map((c) => ({ id: c.id, sequence: c.sequence, range: [c.start_message, c.end_message], title: c.title, codes: mentions(`${c.title}\n${c.content}`), injectedMarkup: /<\/?(project-memory|session-history|ctx-search-hint)\b/.test(`${c.title}\n${c.content}`) })),
   );
   const chunks = tables.has("compartment_chunk_embeddings")
     ? safe(() => db.query("select count(*) n, count(distinct compartment_id) compartments from compartment_chunk_embeddings where session_id = ?").get(key))
