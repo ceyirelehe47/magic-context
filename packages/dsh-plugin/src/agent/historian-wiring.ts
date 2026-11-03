@@ -41,6 +41,8 @@ export interface MagicHistorianWiringDeps {
   readonly directory?: string;
   /** historian.model override ("provider/model") for the compaction hook too (getter = live). */
   readonly model?: string | (() => string | undefined);
+  /** Summarize-hook lease wait (default 45 s; round 22 e2e override only). */
+  readonly leaseWaitMs?: number;
   readonly log?: (message: string) => void;
 }
 
@@ -353,6 +355,7 @@ export function registerMagicHistorianPlane(
       provider: transcriptRawMessageProvider(a, sessionId),
       summarize,
       directory: deps.directory,
+      ...(deps.leaseWaitMs !== undefined ? { leaseWaitMs: deps.leaseWaitMs } : {}),
       log,
     } satisfies MagicSummarizeDeps);
     return hook(input as Parameters<SummarizeHook>[0], a, signal);

@@ -173,6 +173,12 @@ export interface HistorianDeps {
   readonly notifyIssue?: (message: string) => void;
   /** Called once after COMMIT (may only signal deferred work). */
   readonly onPublished?: () => void;
+  /**
+   * Round 22, E2E ONLY (`agent/e2e-hooks.ts` `e2eHistorianHold`): awaited
+   * after a successful pass, before publication, while the lease is held.
+   * Production passes none.
+   */
+  readonly beforePublish?: (info: { sessionId: string; acquiredAt: number }) => Promise<void>;
   readonly log?: (message: string) => void;
   /** Optional cancellation signal forwarded to the SummarizeCall. */
   readonly signal?: AbortSignal;
@@ -682,6 +688,7 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
     log(`[magic-context] historian: compartment lease busy for ${sessionId}`);
     return false;
   }
+  const acquiredAt = Date.now();
 
   const telemetry: Partial<HistorianRunInput> = { runKind: "incremental", status: "failed" };
   let completedSuccessfully = false;
@@ -733,6 +740,7 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
         return;
       }
 
+      if (deps.beforePublish !== undefined) await deps.beforePublish({ sessionId, acquiredAt });
       const publish = publishHistorianResult({
         db,
         sessionId,

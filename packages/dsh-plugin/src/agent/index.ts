@@ -42,6 +42,8 @@ import type { SessionTrackOptions } from "./session-track";
 import type { AutoSearchConfig } from "./auto-search";
 import { registerCtxTools, type CtxToolsOptions } from "./tools";
 import { registerCtxCommands, type CtxCommandsOptions } from "./commands";
+import { e2eHistorianHold, e2eSummarizeLeaseWaitMs } from "./e2e-hooks";
+import { registerE2eWiring } from "./e2e-wiring";
 import { registerContextPlane, type ContextPlaneConfig, type ContextPlaneHistorianConfig } from "./context-plane";
 import {
   registerMagicHistorianPlane,
@@ -536,6 +538,10 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
     return isDshHistorianBusy(busyDb, host.canonicalKey(id));
   });
 
+  // Round 22: E2E-ONLY switches (inert unless MAGIC_CONTEXT_DSH_E2E=1 and the
+  // switch's own variable are set; see e2e-hooks.ts). Production: undefined.
+  const e2eHold = e2eHistorianHold();
+
   // Context plane FIRST, so the knowledge gate below stays the outermost
   // pre-step listener (Phase 2 contract). The plane runs after it (inner):
   // outbox reconciliation + plan derivation + serialized surface application
@@ -566,6 +572,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
             signalDshDeferredHistoryRefresh(sessionId);
             signalDshDeferredMaterialization(sessionId);
           },
+          ...(e2eHold !== undefined ? { beforePublish: e2eHold } : {}),
           log,
         }).catch((error: unknown) => {
           log(`[magic-context] historian pass failed (background): ${error instanceof Error ? error.message : String(error)}`);
@@ -584,6 +591,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
     host,
     directory,
     model: historianModel,
+    ...(e2eSummarizeLeaseWaitMs() !== undefined ? { leaseWaitMs: e2eSummarizeLeaseWaitMs() } : {}),
     log,
   });
 
@@ -669,6 +677,15 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
     // The embed seam receives the DB at call time (no host dependency).
     runEmbedDrain: createEmbedSeam({ log }),
     pendingRestart: () => live.pendingRestart(),
+  });
+
+  registerE2eWiring(ctx, {
+    host,
+    live,
+    hotProtectedTokens: hotContext.protectedTokens,
+    hotHistorianModel: hotContext.historianModel,
+    busy: (agent) => host.historianBusy?.(agent) === true,
+    db: () => busyDb,
   });
 
   log(
