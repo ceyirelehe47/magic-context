@@ -1,0 +1,35 @@
+bun test v1.4.4 (38afee6c8)
+
+src/host/open-lock-stale.test.ts:
+35 |       const start = readProcessStartTime(process.pid);
+36 |       expect(start).not.toBeNull();
+37 |       writeFileSync(dshOpenLockPath(e.db), JSON.stringify({ pid: process.pid, acquiredAt: (start as number) - 60_000 }));
+38 |       const logs: string[] = [];
+39 |       const release = await within(3_000, acquireDshOpenLock(e.db, (m) => logs.push(m)));
+40 |       expect(release).not.toBe("timeout");
+                               ^
+error: expect(received).not.toBe(expected)
+
+Expected: not "timeout"
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/host/open-lock-stale.test.ts:40:27)
+(fail) dsh open lock: holder pid alive but not the lock's writer (round 25 B1) > a lock left by an earlier process with OUR pid is taken over at once [3006.25ms]
+52 |     const reused = Bun.spawn({ cmd: ["sleep", "30"] });
+53 |     try {
+54 |       await Bun.sleep(100);
+55 |       writeFileSync(dshOpenLockPath(e.db), JSON.stringify({ pid: reused.pid, acquiredAt: Date.now() - 5 * 60_000 }));
+56 |       const release = await within(3_000, acquireDshOpenLock(e.db, () => {}));
+57 |       expect(release).not.toBe("timeout");
+                               ^
+error: expect(received).not.toBe(expected)
+
+Expected: not "timeout"
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/host/open-lock-stale.test.ts:57:27)
+(fail) dsh open lock: holder pid alive but not the lock's writer (round 25 B1) > a lock whose pid was reused by a process started later is taken over at once [3117.00ms]
+(pass) dsh open lock: holder pid alive but not the lock's writer (round 25 B1) > control: a live holder that took the lock after it started is still waited for [1699.43ms]
+
+ 1 pass
+ 2 fail
+ 5 expect() calls
+Ran 3 tests across 1 file. [8.15s]
