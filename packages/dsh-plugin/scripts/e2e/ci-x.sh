@@ -91,6 +91,11 @@ for si in range(1, 6):
             write(f"{key}-{k}.txt", f"MOCKSTEP:{key}:{k}", zh_lines(4000, f"s{si}{rj}{k}", ZH2 if (si + k) % 2 else ZH))
             plans[key].append(read(f"{key}-{k}.txt"))
         plans[key].append({"text": f"DONE {key}"})
+# round 25b: five one-line warm-up turns per S session before the stress rounds
+# (real user turns, so core's 5-user-turn protected tail is passed and the
+# historian has eligible history while the stress rounds run in parallel)
+for wk in range(1, 6):
+    plans[f"sw{wk}"] = [{"text": f"DONE sw{wk}"}]
 json.dump(plans, open(plans_out, "w"), ensure_ascii=False)
 PY
 TOKROOT="$(ls -d "$REPO"/node_modules/.bun/ai-tokenizer@*/node_modules | head -n 1)"
@@ -232,6 +237,26 @@ srun() { # srun <name> <plan> <session-env> [sid]
     RUN_LOG="$E2E_ROOT/logs/run-$name.log" OPENCODE_SESSION="$sess" MC_HISTORIAN_THRESHOLD=35 xrun "$name" "Read the files as planned. [[MOCK:$plan]] $SMARK" "$sid"
   fi
 }
+# Round 25b: e2e 41693402758 ST5 FAIL — every historian pass of the five S
+# sessions was 'nothing to compact (eligibleEnd=1 <= offset=1)': four runs are
+# four real user turns, all inside core's 5-user-turn protected tail
+# (PROTECTED_TAIL_USER_TURNS; injected messages stopped counting in a529b7846,
+# cf. scenario Y d8daa0264). Five warm-up rounds (one-line turns, each a
+# restart, the five sessions in parallel) come first, so from stress round 1 on
+# the historian has real eligible history while the sessions run concurrently.
+# ST5's assertion is unchanged; ST1 also requires the warm-up runs.
+for wk in 1 2 3 4 5; do
+  SPIDS=()
+  for si in 1 2 3 4 5; do
+    RUN_LOG="$E2E_ROOT/logs/run-sw-$si-$wk.log" OPENCODE_SESSION="mc-ci-s$si-$$" MC_HISTORIAN_THRESHOLD=35 \
+      xrun "sw-$si-$wk" "Reply when done. [[MOCK:sw$wk]] $SMARK" "${SSID[$si]:-}" &
+    SPIDS+=($!)
+  done
+  wait "${SPIDS[@]}"
+  for si in 1 2 3 4 5; do
+    [[ -z "${SSID[$si]:-}" ]] && SSID[$si]="$(session_of "$OUT/sw-$si-$wk.log")"
+  done
+done
 for rj in 1 2 3 4; do
   SPIDS=()
   for si in 1 2 3 4 5; do

@@ -62,6 +62,10 @@ for (const sid of sidList.split(",").filter(Boolean)) {
     historianRuns: has("historian_runs")
       ? q("select status, count(*) n from historian_runs where session_id like ? group by status", like)
       : [],
+    // round 25b: why passes did not publish (e.g. 'nothing to compact …')
+    historianReasons: has("historian_runs")
+      ? q("select status, failure_reason reason, count(*) n from historian_runs where session_id like ? and status != 'success' group by status, failure_reason", like)
+      : [],
     outboxOpen: has("dsh_context_outbox")
       ? q("select status, count(*) n from dsh_context_outbox where session_id like ? and status in ('pending','applied') group by status", like)
       : [],

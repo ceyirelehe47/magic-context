@@ -1300,7 +1300,16 @@ def check_s(c, out: Path, runs):
     rc = {n: runs.get(n, ("", "missing"))[1] for n in names}
     fin = {n: final_text(out / f"{n}.log") or "" for n in names}
     bad = [n for n in names if not rc[n].startswith("rc=0") or f"DONE s{n.split('-')[1]}r{n.split('-')[2]}" not in fin[n]]
-    c.add("ST1", not bad, "all 20 runs (5 sessions x 4 parallel rounds, each a restart) exit 0 and finish their plan",
+    # Round 25b: the 25 warm-up runs (5 one-line turns per session, ci-x.sh)
+    # must also exit 0, finish their plan and stay in their session.
+    wnames = [f"sw-{i}-{k}" for k in (1, 2, 3, 4, 5) for i in (1, 2, 3, 4, 5)]
+    for n in wnames:
+        wrc = runs.get(n, ("", "missing"))
+        rc[n], fin[n] = wrc[1], final_text(out / f"{n}.log") or ""
+        same = wrc[0] and wrc[0] == runs.get(f"s-{n.split('-')[1]}-1", ("", ""))[0]
+        if not wrc[1].startswith("rc=0") or f"DONE sw{n.split('-')[2]}" not in fin[n] or not same:
+            bad.append(n)
+    c.add("ST1", not bad, "all 20 runs (5 sessions x 4 parallel rounds, each a restart) and the 25 warm-up turns before them exit 0 and finish their plan",
           {"bad": {n: (rc[n], fin[n][:60]) for n in bad}})
     dumps = {j: load_json(out / f"s-db-r{j}.json") or {} for j in (1, 2, 3, 4)}
     last = dumps[4].get("sessions") or {}
