@@ -45,7 +45,7 @@ and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 Baseline (round 18, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; push run
 41554474179 and dispatch run 41554794748 (`e2e=true`) @ `f8c663fee`):
 `typecheck:dsh` **0 errors**, core typecheck **0 errors**, `dsh-plugin`
-**468 pass** (65 files; round 17 +13, round 18 +5), `adapter-api` **15 pass**,
+**468 pass** (64 files; round 17 +13, round 18 +4), `adapter-api` **15 pass**,
 `contracts:dsh` **98 pass**, 0 fail; real-model `e2e` **57/57 PASS**
 (N*/T*/M*/P1 + round 17/18 real-use scenarios C1–C9, U1–U6, S0–S7). Evidence:
 `docs/dsh/e2e/evidence-round18/`.
