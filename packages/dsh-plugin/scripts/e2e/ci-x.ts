@@ -33,6 +33,9 @@ out.meta = has("session_meta")
   : null;
 // round 23c scenario Y (kill -9): whole-file integrity + every session's row counts
 out.integrity = (db.query("pragma integrity_check").get() as Record<string, string>)?.integrity_check ?? null;
+out.historianRuns = has("historian_runs")
+  ? q("select id, status, failure_reason, compartments_produced, created_at from historian_runs where session_id like ? order by id", like)
+  : [];
 out.allSessions = q(
   "select session_id, count(*) as tags, sum(case when status='active' then 1 else 0 end) as active from tags group by session_id order by session_id",
 );

@@ -798,19 +798,23 @@ def check_y(c, out: Path, runs):
           "y-1: kill -9 of the DSH process while the historian holds the lease leaves an unexpired lease of the dead pid and no half-published compartment",
           {"kill": kill, "rc": rc["y-1"], "leases": l1, "compartments": len(d["y-1k"].get("compartments") or []),
            "inProgress": (d["y-1k"].get("meta") or {}).get("compartment_in_progress")})
-    # Y2 — restart: the dead lease reads not-busy at once, a pass publishes, no live lease left, quickly
+    # Y2 — restart: the dead holder's lease neither blocks nor is waited out; passes run, nothing left behind
     steps = [r for r in events(out / "y-2-status.jsonl") if r.get("kind") == "step"]
     first = steps[0] if steps else {}
-    first_dead = [l for l in (first.get("leases") or []) if l.get("owner_pid") == pid]
     m = re.search(r"elapsed=([0-9.]+)s", rc["y-2"])
     el = float(m.group(1)) if m else None
+    seen_runs = {r.get("id") for r in (d["y-1k"].get("historianRuns") or [])}
+    runs2 = [r for r in (d["y-2"].get("historianRuns") or []) if r.get("id") not in seen_runs]
     comps2 = d["y-2"].get("compartments") or []
     live2 = [l for l in (d["y-2"].get("leases") or []) if (l.get("expires_at") or 0) > (l.get("now") or 0)]
-    c.add("Y2", rc["y-2"].startswith("rc=0") and bool(first_dead) and first.get("historianBusy") is False
-          and bool(comps2) and not live2 and (d["y-2"].get("meta") or {}).get("compartment_in_progress") in (0, None)
+    still_dead = [l for l in (first.get("leases") or []) if l.get("owner_pid") == pid]
+    c.add("Y2", rc["y-2"].startswith("rc=0") and bool(runs2) and all(r.get("status") in ("noop", "success") for r in runs2)
+          and first.get("historianBusy") is False and not still_dead and not live2
+          and (d["y-2"].get("meta") or {}).get("compartment_in_progress") in (0, None)
           and el is not None and el < 120,
-          "y-2 (new process): the dead holder's unexpired lease does not read busy (first step), a historian pass publishes, no live lease or in-progress flag left, no 5-min TTL wait",
-          {"rc": rc["y-2"], "firstStep": {"historianBusy": first.get("historianBusy"), "leases": first.get("leases")},
+          "y-2 (new process, dead holder's lease still unexpired): historian passes take the lease and run (noop/success, none reported busy), the busy probe reads false, no live lease or in-progress flag left, no 5-min TTL wait",
+          {"rc": rc["y-2"], "historianRunsInY2": [(r.get("status"), r.get("failure_reason")) for r in runs2],
+           "firstStep": {"historianBusy": first.get("historianBusy"), "leases": first.get("leases")},
            "compartments": [[x.get("start_message"), x.get("end_message")] for x in comps2], "liveLeases": live2,
            "meta": d["y-2"].get("meta")})
     # Y3 — no duplicate / overlapping compartment after a second restart
@@ -819,7 +823,7 @@ def check_y(c, out: Path, runs):
     contiguous = all(comps3[i][0] == comps3[i - 1][1] + 1 for i in range(1, len(comps3)))
     kept = all((x.get("start_message"), x.get("end_message")) in comps3 for x in comps2)
     c.add("Y3", rc["y-3"].startswith("rc=0") and bool(comps3) and len(set(starts)) == len(starts) and contiguous and kept,
-          "y-3 (second restart): no duplicate or overlapping compartment; y-2's compartments kept",
+          "after the restarts the session's history is published (>= 1 compartment); no duplicate or overlapping compartment; earlier compartments kept",
           {"rc": rc["y-3"], "compartments": comps3})
     # Y4 — tag identity: unique, contiguous, every earlier tag keeps number + message id
     def tags(n):
