@@ -250,6 +250,12 @@ def check_r17(c, out: Path, runs):
     import collections as _co
     dup, placeholders = [], 0
     for e in session_events(out / "cmp-session.jsonl"):
+        # Round 19 run 41591017319: the model's own reasoning quoted
+        # "[dropped §4§]" (stored twice: text + raw output) — model-authored
+        # assistant messages are not Magic placeholders.
+        src = ((e.get("data") or {}).get("message") or {}).get("source") or {}
+        if e.get("type") == "assistant/message" and src.get("kind") == "model":
+            continue
         tags = re.findall(r"\[dropped §(\d+)§\]", json.dumps(e.get("data"), ensure_ascii=False))
         placeholders += len(tags)
         rep = {k: v for k, v in _co.Counter(tags).items() if v > 1}
