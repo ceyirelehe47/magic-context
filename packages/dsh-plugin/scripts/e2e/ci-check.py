@@ -1044,10 +1044,27 @@ def check_h(c, out: Path, runs):
     acomps = acomps if isinstance(acomps, list) else []
     fact_codes_in_comps = sorted({x for cpt in acomps for x in cpt.get("codes", [])})
     last_end = max([cpt["range"][1] for cpt in acomps] or [0])
-    c.add("U14", int(reads[1]) >= 2 and len(acomps) >= 2,
-          "session A: historian published compartments in >= 2 passes, covering the four fact turns",
+    # Round 24c: a compartment before the first search turn (h-aq) carries only
+    # codewords its own messages carry (message-history rows in its range):
+    # Magic's injected m0 / <ctx-search-hint> is not history (41672370986:
+    # compartments 23-28, 29-33, 34-37 carried all four codes from the injected
+    # <project-memory>).
+    arows = ((sess.get(asid) or {}).get("factMessages")) if asid else None
+    arows = [r for r in arows if not r.get("injected")] if isinstance(arows, list) else []
+    search_turn = min([r["ordinal"] for r in arows if r.get("role") == "user" and "Call the ctx_search tool" in r.get("head", "")] or [10 ** 9])
+    foreign = []
+    for x in acomps:
+        lo, hi = x["range"]
+        if hi >= search_turn:
+            continue
+        own_codes = {cd for r in arows if lo <= r["ordinal"] <= hi for cd in r.get("codes", [])}
+        extra = sorted(set(x.get("codes", [])) - own_codes)
+        if extra:
+            foreign.append((x["range"], extra))
+    c.add("U14", int(reads[1]) >= 2 and len(acomps) >= 2 and bool(arows) and not foreign,
+          "session A: historian published compartments in >= 2 passes, covering the four fact turns; no compartment carries a codeword its own messages do not",
           {"readTurns": reads[0], "passesWithNewCompartments": reads[1], "compartments": [(x["range"], x["codes"]) for x in acomps],
-           "codesInCompartmentText": fact_codes_in_comps})
+           "codesInCompartmentText": fact_codes_in_comps, "foreignCodes": foreign, "searchTurnOrdinal": search_turn if search_turn < 10 ** 9 else None})
 
     # U15 automatic injection: the NEW session's injected m0 <project-memory> carries the four codes
     bm0 = ((load_json(out / "h-db-b1.json") or {}).get("sessions") or {}).get(bsid, {}).get("m0") if bsid else None
@@ -1056,39 +1073,71 @@ def check_h(c, out: Path, runs):
           "session B (new): injected <project-memory> carries all four codewords",
           {"m0": bm0, "class": "product" if bm0 else "missing"})
 
-    # U16 ctx_search message lane: the FILE fact's own user message (right content, one code, ordinal)
+    # The FILE fact's OWN user message ordinal, from session A's message-history
+    # FTS rows (h-db-final.json), independent of what ctx_search printed
+    # (round 24c: 41672370986 U16 took the ordinal from the search output only).
+    fmsgs = ((sess.get(asid) or {}).get("factMessages")) if asid else None
+    fmsgs = fmsgs if isinstance(fmsgs, list) else []
+    own = [m for m in fmsgs if m.get("role") == "user" and H_FILE in m.get("codes", []) and "Fact 3 of 4" in m.get("head", "")]
+    fact_ord = own[0]["ordinal"] if own else None
+    injected_rows = [m["ordinal"] for m in fmsgs if m.get("injected")]
+    INJ = ("<project-memory>", "<session-history>", "<ctx-search-hint>", "related fragments")
+
+    # U16 ctx_search message lane: the FILE fact's own user message. Core folds a
+    # message hit into the compartment that covers it when the compartment
+    # (semantic) lane returns that compartment (search.ts
+    # mergeMessageAndCompartmentResults: match=hybrid, Snippet = the message), so
+    # the hit is EITHER `ordinal=<fact> role=user` with the codeword OR
+    # `compartment_id=… range=a-b match=hybrid` with a <= fact <= b and the
+    # codeword in its Snippet. No other fact's codeword in it, no injected block
+    # in any message result, none indexed.
     ok_call, res, err = h_results(out / "h-aq.log", "ctx_search")
     text = res[0] if res else ""
-    msg = [b for b in h_blocks(text) if b.split("\n", 1)[0].find("[message]") >= 0 and "compartment_id=" not in b.split("\n", 1)[0]]
-    hit = next((b for b in msg if H_FILE in b), None)
-    ordinal = None
-    if hit:
-        m = re.search(r"ordinal=(\d+)", hit)
-        ordinal = int(m.group(1)) if m else None
-    others = [x for x in H_A_CODES if x != H_FILE and hit and x in hit]
-    c.add("U16", hit is not None and "role=user" in hit and ordinal is not None and not others,
-          "ctx_search message lane returns the fact's own user message (ordinal, no other fact mixed in)",
-          {"called": ok_call, "hit": (hit or "")[:240], "ordinal": ordinal, "otherCodesInHit": others, "errors": err[:1],
-           "class": None if hit else ("model" if not ok_call else "product")})
+    msg = [b for b in h_blocks(text) if "[message]" in b.split("\n", 1)[0]]
 
-    # U17 ctx_expand returns the ORIGINAL text
+    def h_covers(block, ordinal):
+        head = block.split("\n", 1)[0]
+        if ordinal is None or H_FILE not in block:
+            return False
+        m = re.search(r"ordinal=(\d+) range=\d+-\d+ role=user", head)
+        if m:
+            return int(m.group(1)) == ordinal
+        m = re.search(r"compartment_id=\d+ range=(\d+)-(\d+) match=hybrid", head)
+        return bool(m) and int(m.group(1)) <= ordinal <= int(m.group(2)) and H_FILE in block.split("Snippet:", 1)[-1]
+
+    hit = next((b for b in msg if h_covers(b, fact_ord)), None)
+    others = [x for x in H_A_CODES if x != H_FILE and hit and x in hit]
+    inj_hits = [b[:120] for b in msg if any(k in b for k in INJ)]
+    c.add("U16", hit is not None and not others and not inj_hits and not injected_rows,
+          "ctx_search message lane returns the fact's own user message (its ordinal, or folded into the compartment covering it), no other fact mixed in, no injected block",
+          {"called": ok_call, "factOrdinal": fact_ord, "hit": (hit or "")[:240], "otherCodesInHit": others,
+           "injectedInResults": inj_hits[:2], "injectedRowsIndexed": injected_rows, "errors": err[:1],
+           "class": None if (hit and not inj_hits and not injected_rows) else ("model" if not ok_call else ("missing" if fact_ord is None else "product"))})
+
+    # U17 ctx_expand returns the ORIGINAL text, over a range that covers the fact
     ok_x, xres, xerr = h_results(out / "h-aq.log", "ctx_expand")
     f_file = next((f for f in facts if H_FILE in f), "")
-    exp_ok = any(h_flat(f_file) in h_flat(r) for r in xres)
-    c.add("U17", exp_ok, "ctx_expand of the hit's range contains the original fact sentence verbatim",
-          {"called": ok_x, "expanded": [r[:240] for r in xres], "errors": xerr[:1], "answer": (final_text(out / "h-aq.log") or "")[:200],
+
+    def h_expand_covers(r):
+        m = re.match(r"Messages (\d+)-(\d+)", r)
+        return fact_ord is not None and bool(m) and int(m.group(1)) <= fact_ord <= int(m.group(2))
+
+    exp_ok = any(h_flat(f_file) in h_flat(r) and h_expand_covers(r) for r in xres)
+    c.add("U17", exp_ok, "ctx_expand of the hit's range covers the fact's ordinal and contains the original fact sentence verbatim",
+          {"called": ok_x, "factOrdinal": fact_ord, "expanded": [r[:240] for r in xres], "errors": xerr[:1], "answer": (final_text(out / "h-aq.log") or "")[:200],
            "class": None if exp_ok else ("model" if not ok_x else "product")})
 
     # U18 compartment (semantic) lane: a paraphrase finds the compartment covering the FILE fact
     ok_s, sres, serr = h_results(out / "h-as.log", "ctx_search")
     stext = sres[0] if sres else ""
     cmp_lines = re.findall(r"compartment_id=(\d+) range=(\d+)-(\d+)", stext)
-    covers = ordinal is not None and any(int(a) <= ordinal <= int(b) for _, a, b in cmp_lines)
+    covers = fact_ord is not None and any(int(a) <= fact_ord <= int(b) for _, a, b in cmp_lines)
     chunks = ((sess.get(asid) or {}).get("chunks")) if asid else None
-    c.add("U18", covers and "semantic search unavailable" not in stext,
-          "ctx_search compartment lane: a codeword-free paraphrase returns the compartment covering the fact",
-          {"called": ok_s, "compartmentHits": cmp_lines, "factOrdinal": ordinal, "chunkEmbeddings": chunks,
-           "head": stext[:240], "class": None if covers else ("model" if not ok_s else "product")})
+    s_inj = [b[:120] for b in h_blocks(stext) if any(k in b for k in INJ)]
+    c.add("U18", covers and not s_inj and "semantic search unavailable" not in stext,
+          "ctx_search compartment lane: a codeword-free paraphrase returns the compartment covering the fact (no injected block in the results)",
+          {"called": ok_s, "compartmentHits": cmp_lines, "factOrdinal": fact_ord, "chunkEmbeddings": chunks, "injectedInResults": s_inj[:2],
+           "head": stext[:240], "class": None if (covers and not s_inj) else ("model" if not ok_s else "product")})
 
     # U19 degrade: no reachable embedding model -> full-text answer + visible note, never an error
     ok_d, dres, derr = h_results(out / "h-ad.log", "ctx_search")

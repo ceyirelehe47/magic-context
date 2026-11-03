@@ -10,7 +10,8 @@
 #   h-a2…    file-read turns on the 40k route until the historian has published
 #            compartments in at least two separate passes (shipped 65 % threshold)
 #   h-aq     restart; ctx_search for one codeword (message lane: right message +
-#            ordinal) and ctx_expand of the hit's range (the ORIGINAL sentence)
+#            ordinal, possibly folded into its compartment) and ctx_expand of
+#            that hit's range (the ORIGINAL sentence)
 #   h-as     ctx_search with a paraphrase that shares no codeword (compartment /
 #            semantic lane: the compartment covering the fact)
 #   h-ad     embedding endpoint unreachable for one run: ctx_search still answers
@@ -133,7 +134,11 @@ if [[ -n "$ASID" ]]; then
   run h-aw "Reply with the single word: ok." "$ASID"
   hdump "$ASID" aw
   # --- restart: message lane + ctx_expand original text
-  run h-aq "Call the ctx_search tool exactly once with the query \"$FILE\". Then call the ctx_expand tool exactly once, with start and end taken from the range of the FIRST [message] result. Then reply with the exact original sentence of that fact as it appears in the expanded text, nothing else." "$ASID"
+  # (round 24c) expand the result that CONTAINS the codeword, not the first one:
+  # with the compartment lane on, core folds a message hit into its covering
+  # compartment and ranks by RRF, so rank 1 is not the assertion here (U16 checks
+  # the hit + ordinal, U17 the expanded original text + range)
+  run h-aq "Call the ctx_search tool exactly once with the query \"$FILE\". Then call the ctx_expand tool exactly once, with start and end taken from the range of the [message] result whose text contains $FILE. Then reply with the exact original sentence of that fact as it appears in the expanded text, nothing else." "$ASID"
   # --- compartment (semantic) lane with a paraphrase (no codeword)
   run h-as "Call the ctx_search tool exactly once with the query \"where does the quota gauge take its figures from\" and sources [\"message\"]. Then reply with the first result line exactly as the tool printed it." "$ASID"
   hdump "$ASID" as

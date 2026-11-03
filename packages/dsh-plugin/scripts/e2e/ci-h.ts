@@ -7,7 +7,8 @@
 // (range + which scenario codewords each one's text mentions), compartment
 // chunk-embedding rows, historian runs, and what its cached m0 injection
 // carries: whether a <project-memory> block exists and which codewords it /
-// <session-history> mention. Plus every memory row that mentions a codeword
+// <session-history> mention, and its message-history FTS rows that mention a
+// codeword (round 24c: the fact's own ordinal for U16–U18). Plus every memory row that mentions a codeword
 // (id, status, category, superseded_by, content — scenario test data only).
 // The DB holds no secrets.
 import { Database } from "bun:sqlite";
@@ -62,7 +63,19 @@ for (const sid of sidsArg.split(",").filter(Boolean)) {
       anyCodes: mentions(text),
     };
   });
-  sessions[sid] = { key, compartments: comps, chunks, historianRuns, m0 };
+  // Round 24c: the session's message-history FTS rows that mention a scenario
+  // codeword (ordinal, role, id, head) — the fact's OWN ordinal, independent
+  // of what ctx_search printed (U16–U18), and proof no injected block is indexed.
+  const factMessages = tables.has("message_history_fts")
+    ? safe(() =>
+        (db.query("select message_ordinal o, role, message_id id, content from message_history_fts where session_id = ? order by message_ordinal").all(key) as {
+          o: number; role: string; id: string; content: string;
+        }[])
+          .filter((r) => mentions(r.content).length > 0 || /<(project-memory|session-history|ctx-search-hint)>/.test(r.content))
+          .map((r) => ({ ordinal: Number(r.o), role: r.role, id: r.id, codes: mentions(r.content), injected: /<(project-memory|session-history|ctx-search-hint)>/.test(r.content), head: r.content.slice(0, 160) })),
+      )
+    : null;
+  sessions[sid] = { key, compartments: comps, chunks, historianRuns, m0, factMessages };
 }
 
 const memories = tables.has("memories")
