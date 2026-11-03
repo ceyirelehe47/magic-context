@@ -97,7 +97,7 @@ describe("stripTagNotationStream", () => {
       { type: "block-end", index: 1, block: { type: "text", text: "§23§ AMBER-FALCON §" } },
       { type: "tool-call-delta", index: 2, argumentsDelta: "{\"q\":\"§4§\"}" },
       { type: "finish" },
-    ]);
+    ] as never);
     const text = out.filter((c) => c.type === "text-delta").map((c) => c.text).join("");
     expect(text).toBe("AMBER-FALCON §");
     const ends = out.filter((c) => c.type === "block-end");

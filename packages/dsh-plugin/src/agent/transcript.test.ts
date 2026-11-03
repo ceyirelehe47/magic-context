@@ -36,20 +36,20 @@ function buildSession() {
   const assistant1 = createAssistantMessage({
     content: [
       { type: "text", text: "let me check" },
-      { type: "tool-call", id: "call-1", name: "read_file", arguments: '{"path":"a.ts"}' },
+      { type: "tool-call", id: "call-1" as never, name: "read_file", arguments: '{"path":"a.ts"}' },
     ],
     provider: "deepseek",
     model: "deepseek-chat",
-    source: { kind: "model" },
+    source: { kind: "model" } as never,
   });
-  session.append("assistant/message", { turn: 1, step: 1, message: assistant1 }, { surfaceOp: "append" });
+  session.append("assistant/message", { turn: 1, step: 1, message: assistant1 } as never, { surfaceOp: "append" });
   const tool1 = createToolResultMessage({
-    callId: "call-1",
+    callId: "call-1" as never,
     content: [{ type: "text", text: "file contents" }],
     isError: false,
   });
   session.append("tool/result", { turn: 1, step: 1, message: tool1 }, { surfaceOp: "append" });
-  session.append("tool/call", { turn: 1, step: 1, callId: "call-1", name: "read_file", arguments: "{}" });
+  session.append("tool/call", { turn: 1, step: 1, callId: "call-1" as never, name: "read_file", arguments: "{}" });
   const user2 = createUserMessage({
     content: [{ type: "text", text: "thanks" }],
     source: { kind: "user" },
@@ -59,12 +59,12 @@ function buildSession() {
     content: [{ type: "text", text: "done" }],
     provider: "deepseek",
     model: "deepseek-chat",
-    source: { kind: "model" },
+    source: { kind: "model" } as never,
   });
-  session.append("assistant/message", { turn: 2, step: 1, message: assistant2 }, { surfaceOp: "append" });
+  session.append("assistant/message", { turn: 2, step: 1, message: assistant2 } as never, { surfaceOp: "append" });
   // Dangling tool result at the tail (no following user).
   const tool2 = createToolResultMessage({
-    callId: "call-2",
+    callId: "call-2" as never,
     content: [{ type: "text", text: "tail output" }],
     isError: false,
   });
@@ -165,7 +165,7 @@ describe("transcript mapping (DSH events → RawMessage[])", () => {
     session.append(
       "user/message",
       magicUserMessage("knowledge baseline", {
-        kind: "plugin",
+        kind: "plugin" as never,
         plugin: "magic-context",
         messageId: "mc-kb:1:digest",
       }),

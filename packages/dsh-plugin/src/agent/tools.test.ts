@@ -408,7 +408,7 @@ describe("todowrite (Pi parity tool surface)", () => {
         { content: "second task", status: "pending", priority: "high" },
         { content: "done task", status: "completed" },
       ];
-      const result = await tool!.execute({ todos }, toolExec(agent));
+      const result = (await tool!.execute({ todos }, toolExec(agent))) as { text: string };
       expect(JSON.parse(result.text)).toEqual(todos);
       const meta = db
         .prepare("SELECT last_todo_state FROM session_meta WHERE session_id = ?")

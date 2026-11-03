@@ -26,7 +26,7 @@ function surface(session: Session): string[] {
     .map((seq) => sessionEventAt(session, seq))
     .map((event) => (event ? deriveEventMessage(event) : undefined))
     .filter((m) => m !== undefined)
-    .map((m) => ((m as { content: Array<{ type: string; text?: string }> }).content.map((p) => p.text ?? `[${p.type}]`).join("|")));
+    .map((m) => ((m as unknown as { content: Array<{ type: string; text?: string }> }).content.map((p) => p.text ?? `[${p.type}]`).join("|")));
 }
 
 async function scenario(fn: (ctx: {
@@ -50,7 +50,7 @@ async function scenario(fn: (ctx: {
     };
     const state = createContextPlaneState();
     const step = async () => {
-      await runContextPlaneStep(state, deps, { agent: { id: session.id, session } as never, messages: [] as never }, async () => ({ reject: false, messages: [] }));
+      await runContextPlaneStep(state, deps, { agent: { id: session.id, session } as never, messages: [] as never }, async () => ({ reject: false, messages: [] } as never));
     };
     const tags = () =>
       db.prepare("SELECT tag_number, type, status, message_id FROM tags WHERE session_id = ? ORDER BY tag_number").all(KEY) as Array<{
@@ -70,15 +70,15 @@ function addToolTurn(session: Session, i: number, size: number) {
   const u = createUserMessage({ content: [{ type: "text", text: `question ${i}` }], source: { kind: "user" } });
   session.append("user/message", u as never, { surfaceOp: "append" });
   const call = createAssistantMessage({
-    content: [{ type: "text", text: `reading ${i}` }, { type: "tool-call", id: `call-${i}`, name: "read_file", arguments: "{}" }],
+    content: [{ type: "text", text: `reading ${i}` }, { type: "tool-call", id: `call-${i}` as never, name: "read_file", arguments: "{}" }],
     provider: "d",
     model: "m",
-    source: { kind: "model" },
+    source: { kind: "model" } as never,
   });
   session.append("assistant/message", { turn: i, step: 1, message: call } as never, { surfaceOp: "append" });
-  const result = createToolResultMessage({ callId: `call-${i}`, content: [{ type: "text", text: `BODY${i} `.repeat(size) }], isError: false });
+  const result = createToolResultMessage({ callId: `call-${i}` as never, content: [{ type: "text", text: `BODY${i} `.repeat(size) }], isError: false });
   session.append("tool/result", { turn: i, step: 1, message: result } as never, { surfaceOp: "append" });
-  const reply = createAssistantMessage({ content: [{ type: "text", text: `answer ${i}` }], provider: "d", model: "m", source: { kind: "model" } });
+  const reply = createAssistantMessage({ content: [{ type: "text", text: `answer ${i}` }], provider: "d", model: "m", source: { kind: "model" } as never });
   session.append("assistant/message", { turn: i, step: 2, message: reply } as never, { surfaceOp: "append" });
 }
 
@@ -124,19 +124,19 @@ describe("drops land on messages that were already tagged (op copies are expande
       const calls = createAssistantMessage({
         content: [
           { type: "text", text: "two calls" },
-          { type: "tool-call", id: "call-a", name: "read_file", arguments: "{}" },
-          { type: "tool-call", id: "call-b", name: "read_file", arguments: "{}" },
+          { type: "tool-call", id: "call-a" as never, name: "read_file", arguments: "{}" },
+          { type: "tool-call", id: "call-b" as never, name: "read_file", arguments: "{}" },
         ],
         provider: "d",
         model: "m",
-        source: { kind: "model" },
+        source: { kind: "model" } as never,
       });
       session.append("assistant/message", { turn: 0, step: 1, message: calls } as never, { surfaceOp: "append" });
       for (const id of ["call-a", "call-b"]) {
-        const result = createToolResultMessage({ callId: id, content: [{ type: "text", text: `${id} `.repeat(400) }], isError: false });
+        const result = createToolResultMessage({ callId: id as never, content: [{ type: "text", text: `${id} `.repeat(400) }], isError: false });
         session.append("tool/result", { turn: 0, step: 1, message: result } as never, { surfaceOp: "append" });
       }
-      const reply = createAssistantMessage({ content: [{ type: "text", text: "answer 0" }], provider: "d", model: "m", source: { kind: "model" } });
+      const reply = createAssistantMessage({ content: [{ type: "text", text: "answer 0" }], provider: "d", model: "m", source: { kind: "model" } as never });
       session.append("assistant/message", { turn: 0, step: 2, message: reply } as never, { surfaceOp: "append" });
       await step();
       for (let i = 1; i <= 4; i += 1) {

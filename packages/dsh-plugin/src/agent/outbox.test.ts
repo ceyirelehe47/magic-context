@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import type { Database as BunDatabase } from "bun:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTestDb } from "../test-utils";
@@ -60,10 +61,10 @@ describe("dsh outbox (saga records + recovery)", () => {
       const db = await createTestDb(env.dbPath);
       initializeDshAdapterTables(db);
       initializeDshAdapterTables(db); // idempotent
-      const tables = db
+      const tables = (db as unknown as BunDatabase)
         .query("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'dsh_%' ORDER BY name")
         .all()
-        .map((r) => r.name as string);
+        .map((r) => (r as { name: string }).name);
       expect(tables).toEqual([
         "dsh_adapter_meta",
         "dsh_context_compaction_marker",
@@ -71,7 +72,7 @@ describe("dsh outbox (saga records + recovery)", () => {
         "dsh_feedback_signals",
         "dsh_pressure_truncations",
       ]);
-      const meta = db.query("SELECT value FROM dsh_adapter_meta WHERE key = ?").get(ADAPTER_META_KEY) as
+      const meta = (db as unknown as BunDatabase).query("SELECT value FROM dsh_adapter_meta WHERE key = ?").get(ADAPTER_META_KEY) as
         | { value: string }
         | undefined;
       expect(meta?.value).toBe(ADAPTER_SCHEMA_VERSION);

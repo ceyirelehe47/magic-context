@@ -30,9 +30,9 @@ function appendTurn(session: Session, turn: number): void {
         content: [{ type: "text", text: `answer ${turn}` }],
         provider: "p",
         model: "m",
-        source: { kind: "model" },
+        source: { kind: "model" } as never,
       }),
-    },
+    } as never,
     { surfaceOp: "append" },
   );
 }

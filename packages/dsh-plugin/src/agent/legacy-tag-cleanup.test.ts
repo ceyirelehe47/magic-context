@@ -45,14 +45,14 @@ function buildConversation() {
   const assistant1 = createAssistantMessage({
     content: [
       { type: "text", text: "let me check" },
-      { type: "tool-call", id: "call-1", name: "read_file", arguments: '{"path":"a.ts"}' },
+      { type: "tool-call", id: "call-1" as never, name: "read_file", arguments: '{"path":"a.ts"}' },
     ],
     provider: "deepseek",
     model: "deepseek-chat",
-    source: { kind: "model" },
+    source: { kind: "model" } as never,
   });
   push("assistant/message", assistant1);
-  const tool1 = createToolResultMessage({ callId: "call-1", content: [{ type: "text", text: "file contents" }], isError: false });
+  const tool1 = createToolResultMessage({ callId: "call-1" as never, content: [{ type: "text", text: "file contents" }], isError: false });
   push("tool/result", tool1);
   const user2 = createUserMessage({ content: [{ type: "text", text: "thanks" }], source: { kind: "user" } });
   push("user/message", user2);
@@ -91,7 +91,7 @@ const step = (state: ReturnType<typeof createContextPlaneState>, deps: ContextPl
     state,
     deps,
     { agent: { id: session.id, session } as never, messages: messages as never },
-    async () => ({ reject: false, messages: [] }),
+    async () => ({ reject: false, messages: [] } as never),
   );
 
 function tagRows(db: Database): Map<string, number> {

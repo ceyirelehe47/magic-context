@@ -69,7 +69,7 @@ function insertSessionProject(
 /** Stub LLM runtime: a single-turn text stream, with optional terminal
  *  finish and per-call options capture. */
 function stubLlm(
-  opts: { text?: string; finish?: StreamChunk["reason"]; calls?: GenerateOptions[] } = {},
+  opts: { text?: string; finish?: Extract<StreamChunk, { type: "finish" }> extends { reason?: infer R } ? R : never; calls?: GenerateOptions[] } = {},
 ): LlmRuntime {
   const text = opts.text ?? "stub dreamer answer";
   const calls = opts.calls ?? [];

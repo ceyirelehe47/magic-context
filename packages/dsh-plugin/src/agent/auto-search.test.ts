@@ -91,7 +91,7 @@ afterEach(() => {
 function mockUnifiedSearch(results: UnifiedSearchResult[] | (() => UnifiedSearchResult[])): ReturnType<typeof spyOn> {
   const implementation =
     typeof results === "function" ? results : () => results;
-  activeSearchSpy = spyOn(searchModule, "unifiedSearch").mockImplementation(implementation);
+  activeSearchSpy = spyOn(searchModule, "unifiedSearch").mockImplementation(implementation as never);
   activeSearchSpy.mockClear();
   return activeSearchSpy;
 }
@@ -279,7 +279,7 @@ describe("agent auto-search (<ctx-search-hint> delivered into the current batch)
     } as unknown as UserMessage;
     const prompt = userMessage("the real user question", "real-1");
     const found = extractLatestUserPrompt([injected, prompt]);
-    expect(found?.message.id).toBe("real-1");
+    expect(found?.message.id as string | undefined).toBe("real-1");
     expect(found?.text).toBe("the real user question");
     expect(collectUserText(prompt)).toBe("the real user question");
   });

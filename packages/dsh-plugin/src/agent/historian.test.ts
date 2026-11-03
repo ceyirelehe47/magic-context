@@ -7,6 +7,7 @@
  * stubs — no network.
  */
 import { describe, expect, it } from "bun:test";
+import type { Database as BunDatabase } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -81,9 +82,9 @@ function buildSession(): Session {
           content: [{ type: "text", text: `answer ${turn}` }],
           provider: "deepseek",
           model: "deepseek-chat",
-          source: { kind: "model" },
+          source: { kind: "model" } as never,
         }),
-      },
+      } as never,
       { surfaceOp: "append" },
     );
   }
@@ -100,7 +101,7 @@ function providerOf(session: Session): RawMessageProvider {
     },
     canonicalSessionId: SESSION_ID,
   });
-  return { readMessages: () => view.messages };
+  return { readMessages: () => view.messages as never };
 }
 
 /** A fingerprint-less boundary (skips staleness validation) that makes the
@@ -280,7 +281,7 @@ describe("runDshHistorian repair retry (upstream runHistorianPrompt parity)", ()
       expect(calls[1]?.validationError ?? "").not.toBe("");
       expect(calls[1]?.previousOutput).toBe(invalid);
       expect(getCompartments(db, SESSION_ID).map((c) => [c.startMessage, c.endMessage])).toEqual([[1, 3], [4, 7]]);
-      const meta = db
+      const meta = (db as unknown as BunDatabase)
         .query("SELECT historian_failure_count AS n FROM session_meta WHERE session_id = ?")
         .get(SESSION_ID) as { n: number | null } | null;
       expect(meta?.n ?? 0).toBe(0);
@@ -351,7 +352,7 @@ describe("concurrent historian passes on one session (round 20)", () => {
       expect(results).toEqual([true, false]);
       expect(calls).toBe(1);
       expect(getCompartments(db, SESSION_ID).map((c) => [c.startMessage, c.endMessage])).toEqual([[1, 3], [4, 7]]);
-      const meta = db
+      const meta = (db as unknown as BunDatabase)
         .query("SELECT historian_failure_count AS n FROM session_meta WHERE session_id = ?")
         .get(SESSION_ID) as { n: number | null } | null;
       expect(meta?.n ?? 0).toBe(0);
@@ -458,7 +459,7 @@ describe("runDshHistorian", () => {
       expect(marker?.status).toBe("pending");
 
       // Facts promoted to project memory (directory provided).
-      const memoryRows = db
+      const memoryRows = (db as unknown as BunDatabase)
         .query("SELECT COUNT(*) AS n FROM memories WHERE source_session_id = ?")
         .get(SESSION_ID) as { n: number };
       expect(memoryRows.n).toBe(1);
@@ -467,7 +468,7 @@ describe("runDshHistorian", () => {
       expect(acquireCompartmentLease(db, SESSION_ID, "lease-probe")).not.toBeNull();
 
       // Telemetry row recorded with success.
-      const run = db
+      const run = (db as unknown as BunDatabase)
         .query(
           "SELECT status, compartments_produced, discarded_last FROM historian_runs WHERE session_id = ? ORDER BY id DESC LIMIT 1",
         )
@@ -499,7 +500,7 @@ describe("runDshHistorian", () => {
       expect(getDshCompactionMarker(db, SESSION_ID)).toBeNull();
       expect(notified.length).toBe(1); // transient failure notice
       expect(acquireCompartmentLease(db, SESSION_ID, "lease-probe")).not.toBeNull();
-      const run = db
+      const run = (db as unknown as BunDatabase)
         .query(
           "SELECT status, failure_reason FROM historian_runs WHERE session_id = ? ORDER BY id DESC LIMIT 1",
         )
@@ -577,7 +578,7 @@ describe("runDshHistorian", () => {
         readMessages: () => {
           reads += 1;
           if (reads === 2) throw new Error("inject: provider read failed mid-publish");
-          return view.messages;
+          return view.messages as never;
         },
       };
       const ok = await runDshHistorian(
@@ -627,7 +628,7 @@ describe("runDshHistorian", () => {
       const compartments = getCompartments(db, SESSION_ID);
       expect(compartments.map((c) => [c.startMessage, c.endMessage])).toEqual([[1, 5]]);
       expect(getDshCompactionMarker(db, SESSION_ID)?.ordinal).toBe(5);
-      const run = db
+      const run = (db as unknown as BunDatabase)
         .query("SELECT discarded_last FROM historian_runs WHERE session_id = ? ORDER BY id DESC LIMIT 1")
         .get(SESSION_ID) as { discarded_last: number };
       expect(run.discarded_last).toBe(1);
@@ -814,7 +815,7 @@ describe("createMagicSummarizeHook (Magic 压缩策略)", () => {
       expect(summarizeCalls).toBe(0);
       expect(result.provider).toBe("test-provider");
       expect(result.model).toBe("test-model");
-      const text = result.summary[0]!.text;
+      const text = (result.summary[0] as { text: string }).text;
       expect(text).toContain("Narrative summary of 1-5.");
       expect(text).toContain("Narrative summary of 6-10.");
       expect(text).toContain('start="1" end="5"');
@@ -854,11 +855,11 @@ describe("createMagicSummarizeHook (Magic 压缩策略)", () => {
       // Marker staged with the mini-publish.
       expect(getDshCompactionMarker(db, SESSION_ID)?.ordinal).toBe(10);
       // Summary now covers the full range.
-      const text = result.summary[0]!.text;
+      const text = (result.summary[0] as { text: string }).text;
       expect(text).toContain("Narrative summary of 1-3.");
       expect(text).toContain("Narrative summary of 8-10.");
       expect(result.rawOutput).toBeDefined();
-      expect(result.rawOutput?.[0]?.text).toContain("<compartment");
+      expect((result.rawOutput?.[0] as { text?: string } | undefined)?.text).toContain("<compartment");
       // Mini-historian released its lease.
       expect(acquireCompartmentLease(db, SESSION_ID, "lease-probe")).not.toBeNull();
       db.close();
@@ -940,7 +941,7 @@ describe("createMagicSummarizeHook: waits for a busy lease (round 21)", () => {
       );
       const result = await hook({ messages: inputMessages(session) as never }, fakeAgent);
       expect(calls).toBe(1);
-      expect(result.summary[0]!.text).toContain("Narrative summary of 8-10.");
+      expect((result.summary[0] as { text: string }).text).toContain("Narrative summary of 8-10.");
       expect(logs.some((l) => /waiting for the compartment lease/.test(l))).toBe(true);
       db.close();
     } finally {
@@ -985,7 +986,7 @@ describe("createMagicSummarizeHook: waits for a busy lease (round 21)", () => {
       );
       const result = await hook({ messages: inputMessages(session) as never }, fakeAgent);
       expect(calls).toBe(0);
-      expect(result.summary[0]!.text).toContain("Background summary of 1-10.");
+      expect((result.summary[0] as { text: string }).text).toContain("Background summary of 1-10.");
       db.close();
     } finally {
       await env.cleanup();

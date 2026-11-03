@@ -57,10 +57,10 @@ function viewOf(session: Session) {
 
 function toolCall(text: string, callId: string) {
   return createAssistantMessage({
-    content: [{ type: "text", text }, { type: "tool-call", id: callId, name: "read_file", arguments: "{}" }],
+    content: [{ type: "text", text }, { type: "tool-call", id: callId as never, name: "read_file", arguments: "{}" }],
     provider: "deepseek",
     model: "deepseek-chat",
-    source: { kind: "model" },
+    source: { kind: "model" } as never,
   });
 }
 
@@ -77,10 +77,10 @@ describe("new input after a pending fold is pre-tagged under core's exact :pN ke
       };
       const state = createContextPlaneState();
       const call = toolCall("checking", "call-9");
-      const result = createToolResultMessage({ callId: "call-9", content: [{ type: "text", text: "ok" }], isError: false });
+      const result = createToolResultMessage({ callId: "call-9" as never, content: [{ type: "text", text: "ok" }], isError: false });
       const steer = createUserMessage({ content: [{ type: "text", text: "steer" }], source: { kind: "user" } });
       const payload = [call, result, steer];
-      await runContextPlaneStep(state, deps, { agent: { id: session.id, session } as never, messages: payload as never }, async () => ({ reject: false, messages: [] }));
+      await runContextPlaneStep(state, deps, { agent: { id: session.id, session } as never, messages: payload as never }, async () => ({ reject: false, messages: [] } as never));
       const preview = tagRows(db).get(`${steer.id}:p1`);
       expect(preview).toBeDefined();
       expect(tagRows(db).has(`${steer.id}:p0`)).toBe(false);
@@ -105,7 +105,7 @@ describe("new input after a pending fold is pre-tagged under core's exact :pN ke
       session.append("user/message", first as never, { surfaceOp: "append" });
       const call = toolCall("checking", "call-7");
       session.append("assistant/message", { turn: 1, step: 1, message: call } as never, { surfaceOp: "append" });
-      const result = createToolResultMessage({ callId: "call-7", content: [{ type: "text", text: "body" }], isError: false });
+      const result = createToolResultMessage({ callId: "call-7" as never, content: [{ type: "text", text: "body" }], isError: false });
       session.append("tool/result", { turn: 1, step: 1, message: result } as never, { surfaceOp: "append" });
       const v = viewOf(session);
       expect(endsInPendingFold(v)).toBe(true);
@@ -137,7 +137,7 @@ describe("new input after a pending fold is pre-tagged under core's exact :pN ke
       session.append("user/message", first as never, { surfaceOp: "append" });
       const call = toolCall("checking", "call-8");
       session.append("assistant/message", { turn: 1, step: 1, message: call } as never, { surfaceOp: "append" });
-      const result = createToolResultMessage({ callId: "call-8", content: [{ type: "text", text: "body" }], isError: false });
+      const result = createToolResultMessage({ callId: "call-8" as never, content: [{ type: "text", text: "body" }], isError: false });
       session.append("tool/result", { turn: 1, step: 1, message: result } as never, { surfaceOp: "append" });
       const deps: ContextPlaneDeps = {
         host: { ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }), canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}` },
@@ -146,7 +146,7 @@ describe("new input after a pending fold is pre-tagged under core's exact :pN ke
       };
       const prompt = createUserMessage({ content: [{ type: "text", text: "steer now" }], source: { kind: "user" } });
       const payload = [prompt];
-      await runContextPlaneStep(createContextPlaneState(), deps, { agent: { id: session.id, session } as never, messages: payload as never }, async () => ({ reject: false, messages: [] }));
+      await runContextPlaneStep(createContextPlaneState(), deps, { agent: { id: session.id, session } as never, messages: payload as never }, async () => ({ reject: false, messages: [] } as never));
       expect(endsInPendingFold(viewOf(session))).toBe(false);
       const preview = tagRows(db).get(`${prompt.id}:p0`);
       expect(preview).toBeDefined();

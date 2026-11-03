@@ -33,9 +33,9 @@ function buildSession(): Session {
         content: [{ type: "text", text: "hi" }],
         provider: "deepseek",
         model: "deepseek-chat",
-        source: { kind: "model" },
+        source: { kind: "model" } as never,
       }),
-    },
+    } as never,
     { surfaceOp: "append" },
   );
   return session;
@@ -78,11 +78,11 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
 
       const state = createContextPlaneState();
       let downstream = 0;
-      const decision: PreStepDecision = { reject: false, messages: [] };
+      const decision = { reject: false, messages: [] } as unknown as PreStepDecision;
       const result = await runContextPlaneStep(
         state,
         deps,
-        { agent: agent as never },
+        { agent: agent as never } as never,
         async () => {
           downstream += 1;
           return decision;
@@ -123,13 +123,13 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
       const result = await runContextPlaneStep(
         state,
         deps,
-        { agent: { id: session.id, session } as never },
+        { agent: { id: session.id, session } as never } as never,
         async () => {
           downstream += 1;
           return { reject: false, messages: [] };
         },
       );
-      expect(result).toEqual({ reject: false, messages: [] });
+      expect(result).toEqual({ reject: false, messages: [] } as never);
       expect(downstream).toBe(1);
       expect(session.surface.replaceGeneration).toBe(0);
     } finally {
@@ -153,7 +153,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
       await runContextPlaneStep(
         createContextPlaneState(),
         deps,
-        { agent: { id: session.id, session } as never },
+        { agent: { id: session.id, session } as never } as never,
         async () => ({ reject: false, messages: [] }),
       );
       expect(session.surface.replaceGeneration).toBe(0);
@@ -188,7 +188,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
       await runContextPlaneStep(
         createContextPlaneState(),
         deps,
-        { agent: { id: session.id, session } as never },
+        { agent: { id: session.id, session } as never } as never,
         async () => ({ reject: false, messages: [] }),
       );
       expect(fired).toHaveLength(1);
@@ -208,7 +208,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
     try {
       const db = await createTestDb(join(dir, "context.db"));
       const session = buildSession();
-      const times = (session.snapshotEvents() as Array<{ type: string; time?: number }>)
+      const times = (session.snapshotEvents() as unknown as Array<{ type: string; time?: number }>)
         .filter((e) => e.type === "assistant/message")
         .map((e) => e.time ?? 0);
       expect(times.length).toBeGreaterThan(0);
@@ -228,7 +228,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
       await runContextPlaneStep(
         createContextPlaneState(),
         deps,
-        { agent: { id: session.id, session } as never },
+        { agent: { id: session.id, session } as never } as never,
         async () => ({ reject: false, messages: [] }),
       );
       const row = db
@@ -265,7 +265,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
       await runContextPlaneStep(
         createContextPlaneState(),
         deps,
-        { agent: { id: session.id, session } as never },
+        { agent: { id: session.id, session } as never } as never,
         async () => ({ reject: false, messages: [] }),
       );
       const row = db
@@ -303,7 +303,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
       await runContextPlaneStep(
         createContextPlaneState(),
         deps,
-        { agent: { id: session.id, session } as never },
+        { agent: { id: session.id, session } as never } as never,
         async () => ({ reject: false, messages: [] }),
       );
       expect(fired).toBe(0);

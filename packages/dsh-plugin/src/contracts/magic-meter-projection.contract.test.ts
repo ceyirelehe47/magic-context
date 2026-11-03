@@ -51,7 +51,7 @@ async function settle(predicate: () => boolean) {
 
 async function mount(config: meterEntry.MagicMeterConfig = {}, overrides: Record<string, unknown> = {}) {
   const root = new Context();
-  root.plugin(SessionProjectionRegistry as never);
+  (root as unknown as { plugin(p: unknown): unknown }).plugin(SessionProjectionRegistry);
   root.provide("magicContextHost", { overrides: () => overrides } as never);
   await settle(() => root.get("sessionProjections") !== undefined);
   root.plugin(meterEntry as never, config as never);
@@ -75,7 +75,7 @@ describe("contract: magic-meter projections on a real cordis Context", () => {
   it("folds window + usage + model route into the MC view with per-model thresholds", async () => {
     const { root, registry } = await mount({ flat: true }, { executeThresholdByModel: { "deepseek/deepseek-v4": 50 } });
     const session = fakeSession();
-    const emit = (event: Record<string, unknown>) => root.emit("session/event" as never, session as never, session.push(event) as never);
+    const emit = (event: Record<string, unknown>) => (root as unknown as { emit(...args: unknown[]): unknown }).emit("session/event", session as never, session.push(event) as never);
     emit({ type: "request/context", data: { provider: "deepseek", model: "deepseek-v4", contextWindow: 200_000 } });
     emit({
       type: "assistant/message",
@@ -115,7 +115,7 @@ describe("contract: magic-meter projections on a real cordis Context", () => {
   it("checkpointed state round-trips through the stateSchema (projection cache)", async () => {
     const { root, registry } = await mount({ flat: true });
     const session = fakeSession();
-    root.emit("session/event" as never, session as never, session.push({ type: "request/context", data: { provider: "p", model: "m", contextWindow: 1000 } }) as never);
+    (root as unknown as { emit(...args: unknown[]): unknown }).emit("session/event", session as never, session.push({ type: "request/context", data: { provider: "p", model: "m", contextWindow: 1000 } }) as never);
     const reg = registry() as unknown as {
       checkpoint(s: unknown): Record<string, { ver: number; seq: number; val: unknown }>;
       viewCheckpoint(rows: unknown, keys?: string[]): Record<string, unknown>;
@@ -129,10 +129,10 @@ describe("contract: magic-meter projections on a real cordis Context", () => {
 
   it("with the stock token-meter still mounted, adds only the MC key (no second tokenMeter)", async () => {
     const root = new Context();
-    root.plugin(SessionProjectionRegistry as never);
+    (root as unknown as { plugin(p: unknown): unknown }).plugin(SessionProjectionRegistry);
     await settle(() => root.get("sessionProjections") !== undefined);
     const TokenMeter = (await import("@deepseek-ai/dsh-token-meter")).default;
-    root.plugin(TokenMeter as never);
+    (root as unknown as { plugin(p: unknown): unknown }).plugin(TokenMeter);
     await settle(() => root.get("tokenMeter") !== undefined);
     const stock = root.get("tokenMeter");
     root.plugin(meterEntry as never, { flat: true } as never);
@@ -143,6 +143,6 @@ describe("contract: magic-meter projections on a real cordis Context", () => {
       ["contextBreakdown", "contextPressure", MAGIC_PRESSURE_KEY, "tokenUsage"].sort(),
     );
     // Same service instance (cordis hands out per-get proxies; compare its state map).
-    expect((root.get("tokenMeter") as { states: unknown }).states).toBe((stock as { states: unknown }).states);
+    expect((root.get("tokenMeter") as unknown as { states: unknown }).states).toBe((stock as unknown as { states: unknown }).states);
   });
 });

@@ -3,6 +3,7 @@
  * bounds (large-session transcript), and leak checks (fiber disposal).
  */
 import { describe, expect, it } from "bun:test";
+import type { Database as BunDatabase } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,9 +51,9 @@ function buildSession(turns = 3): Session {
           content: [{ type: "text", text: `turn ${i} assistant` }],
           provider: "deepseek",
           model: "deepseek-chat",
-          source: { kind: "model" },
+          source: { kind: "model" } as never,
         }),
-      },
+      } as never,
       { surfaceOp: "append" },
     );
   }
@@ -162,7 +163,7 @@ describe("Phase 5 hardening", () => {
       const outcome = await enqueuePlan(state, host, session, plan);
       expect(outcome.status).toBe("applied");
       // All saga records terminal (committed) — nothing pending/applied.
-      const pending = db
+      const pending = (db as unknown as BunDatabase)
         .query("SELECT COUNT(*) AS n FROM dsh_context_outbox WHERE status IN ('pending','applied')")
         .get() as { n: number };
       expect(pending.n).toBe(0);

@@ -38,7 +38,7 @@ async function captureDefinitions(): Promise<Map<string, CapturedDefinition>> {
     },
   };
   ctx.provide("sessionProjections", registry as never);
-  ctx.plugin(TokenMeter as never);
+  (ctx as unknown as { plugin(p: unknown): unknown }).plugin(TokenMeter);
   // Cordis applies plugins on the next tick once their inject is satisfied.
   for (let i = 0; i < 20 && !defs.has(CONTEXT_PRESSURE_PROJECTION_KEY); i++) {
     await new Promise((resolve) => setTimeout(resolve, 5));

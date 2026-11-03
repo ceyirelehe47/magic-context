@@ -93,7 +93,7 @@ function buildSession(): Session {
           content: [{ type: "text", text: `answer ${turn}` }],
           provider: "deepseek",
           model: "deepseek-chat",
-          source: { kind: "model" },
+          source: { kind: "model" } as never,
         },
       },
       { surfaceOp: "append" },
@@ -197,7 +197,7 @@ describe("createDshSessionClient", () => {
     expect(call.system).toBe("SYS");
     expect(call.purpose).toBe("compaction");
     expect(call.signal).toBeInstanceOf(AbortSignal);
-    const user = call.messages[0] as { content?: Array<{ type?: string; text?: string }> };
+    const user = call.messages[0] as unknown as { content?: Array<{ type?: string; text?: string }> };
     expect(user?.content?.[0]).toEqual({ type: "text", text: "chunk text" });
   });
 
@@ -354,7 +354,7 @@ describe("createRecompSeams", () => {
       const db = await createTestDb(env.dbPath);
       const session = buildSession();
       const agent = fakeAgent(session);
-      let captured: CapturedRecomp | null = null;
+      let captured = null as CapturedRecomp | null;
       let rawCountInsideRun = -1;
       const seams = createRecompSeams({
         ctx: {} as Context,
@@ -419,7 +419,7 @@ describe("createRecompSeams", () => {
     try {
       const db = await createTestDb(env.dbPath);
       const session = buildSession();
-      let captured: CapturedRecomp | null = null;
+      let captured = null as CapturedRecomp | null;
       const seams = createRecompSeams({
         ctx: {} as Context,
         host: okHost(db),
@@ -541,7 +541,7 @@ describe("createRecompSeams", () => {
     const env = makeEnv();
     try {
       const db = await createTestDb(env.dbPath);
-      let captured: { ctx: ManagedWrapupContext; sessionId: string; messagesToKeep: number } | null = null;
+      let captured = null as { ctx: ManagedWrapupContext; sessionId: string; messagesToKeep: number } | null;
       const seams = createRecompSeams({
         ctx: {} as Context,
         host: okHost(db),

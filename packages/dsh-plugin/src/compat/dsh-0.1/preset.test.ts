@@ -25,7 +25,7 @@ function stockLayout(overrides: Record<string, unknown> = {}): Record<string, un
       ],
     },
     { id: "tool-ask-user", name: "@deepseek-ai/dsh-tool-ask-user" },
-    ...(overrides.extra ?? []),
+    ...((overrides.extra as Record<string, unknown>[] | undefined) ?? []),
   ];
 }
 

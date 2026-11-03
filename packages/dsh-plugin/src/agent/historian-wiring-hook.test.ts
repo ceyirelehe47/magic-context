@@ -37,9 +37,9 @@ function appendTurn(session: Session, turn: number): void {
         content: [{ type: "text", text: `answer ${turn}` }],
         provider: "deepseek",
         model: "deepseek-chat",
-        source: { kind: "model" },
+        source: { kind: "model" } as never,
       }),
-    },
+    } as never,
     { surfaceOp: "append" },
   );
 }
@@ -205,8 +205,8 @@ describe("registerMagicHistorianPlane summarize hook", () => {
       expect(result.summary[0]!.text).toContain("Narrative summary of 1-5.");
       // The copy's own surface id resolves to the covered view message.
       const provider = transcriptRawMessageProvider(agent(session), KEY);
-      expect(provider.readMessageOrdinalById(copy.data.id)).toBe(5);
-      expect(provider.readMessageOrdinalById(ids[4]!.id)).toBe(5);
+      expect(provider.readMessageOrdinalById!(copy.data.id)).toBe(5);
+      expect(provider.readMessageOrdinalById!(ids[4]!.id)).toBe(5);
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });

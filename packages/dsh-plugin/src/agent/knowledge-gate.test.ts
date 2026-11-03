@@ -49,7 +49,7 @@ interface FakeAgentHarness {
   /** Messages queued via agent.inject (next-step inbox) — must stay empty. */
   inboxed: UserMessage[];
   /** Build a pre-step payload; flushes earlier batches onto the fake surface (DSH append). */
-  payload(messages: UserMessage[]): { agent: KnowledgeAgentView; messages: UserMessage[] };
+  payload(messages: UserMessage[]): { agent: never; messages: UserMessage[] };
   events: Array<Record<string, unknown>>;
   nodes: number[];
   replaceGeneration: number;
@@ -88,7 +88,7 @@ function makeFakeAgent(directory: string): FakeAgentHarness {
     payload(messages: UserMessage[]) {
       flush();
       batches.push(messages);
-      return { agent: harness.agent, messages };
+      return { agent: harness.agent as never, messages };
     },
     events,
     nodes,
@@ -555,7 +555,7 @@ describe("deferred materialization after historian publish (Pi parity)", () => {
           episodeType: "docs",
           firstKeptEntryId: "e1",
         },
-      ]);
+      ] as never);
       const { signalDshDeferredMaterialization } = await import("./historian");
       signalDshDeferredMaterialization(sid);
 

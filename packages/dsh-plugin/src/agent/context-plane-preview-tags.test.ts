@@ -41,15 +41,15 @@ function buildConversation() {
   const assistant1 = createAssistantMessage({
     content: [
       { type: "text", text: "let me check" },
-      { type: "tool-call", id: "call-1", name: "read_file", arguments: '{"path":"a.ts"}' },
+      { type: "tool-call", id: "call-1" as never, name: "read_file", arguments: '{"path":"a.ts"}' },
     ],
     provider: "deepseek",
     model: "deepseek-chat",
-    source: { kind: "model" },
+    source: { kind: "model" } as never,
   });
   push("assistant/message", assistant1);
   const tool1 = createToolResultMessage({
-    callId: "call-1",
+    callId: "call-1" as never,
     content: [{ type: "text", text: "file contents" }],
     isError: false,
   });
@@ -60,7 +60,7 @@ function buildConversation() {
     content: [{ type: "text", text: "done" }],
     provider: "deepseek",
     model: "deepseek-chat",
-    source: { kind: "model" },
+    source: { kind: "model" } as never,
   });
   push("assistant/message", assistant2);
   const user3 = createUserMessage({
@@ -129,7 +129,7 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
         state,
         deps,
         { agent: { id: session.id, session } as never, messages: payload as never },
-        async () => ({ reject: false, messages: [] }),
+        async () => ({ reject: false, messages: [] } as never),
       );
 
       const rows = db
@@ -176,7 +176,7 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
         state,
         deps,
         { agent: { id: session.id, session } as never, messages: payload2 as never },
-        async () => ({ reject: false, messages: [] }),
+        async () => ({ reject: false, messages: [] } as never),
       );
       const after = (
         db.prepare("SELECT COUNT(*) AS n FROM tags WHERE session_id = ? AND type = 'message'").get(KEY) as {
@@ -206,7 +206,7 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
           state,
           deps,
           { agent: { id: session.id, session } as never, messages: messages as never },
-          async () => ({ reject: false, messages: [] }),
+          async () => ({ reject: false, messages: [] } as never),
         );
       await run([...payload]);
 
@@ -255,7 +255,7 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
         content: [{ type: "text", text: `\u00a7${highest + 1}\u00a7 reply four` }],
         provider: "deepseek",
         model: "deepseek-chat",
-        source: { kind: "model" },
+        source: { kind: "model" } as never,
       });
       session.append("assistant/message", { turn: 4, step: 1, message: reply } as never, { surfaceOp: "append" });
       const payload3 = session.surface.nodes
@@ -287,20 +287,20 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
       const callAssistant = createAssistantMessage({
         content: [
           { type: "text", text: "checking" },
-          { type: "tool-call", id: "call-9", name: "read_file", arguments: "{}" },
+          { type: "tool-call", id: "call-9" as never, name: "read_file", arguments: "{}" },
         ],
         provider: "deepseek",
         model: "deepseek-chat",
-        source: { kind: "model" },
+        source: { kind: "model" } as never,
       });
-      const result = createToolResultMessage({ callId: "call-9", content: [{ type: "text", text: "ok" }], isError: false });
+      const result = createToolResultMessage({ callId: "call-9" as never, content: [{ type: "text", text: "ok" }], isError: false });
       const steer = createUserMessage({ content: [{ type: "text", text: "steer" }], source: { kind: "user" } });
       const messages = [...payload, callAssistant, result, steer];
       await runContextPlaneStep(
         state,
         deps,
         { agent: { id: session.id, session } as never, messages: messages as never },
-        async () => ({ reject: false, messages: [] }),
+        async () => ({ reject: false, messages: [] } as never),
       );
       const keys = (
         db.prepare("SELECT message_id FROM tags WHERE session_id = ? AND type = 'message'").all(KEY) as Array<{

@@ -113,19 +113,19 @@ async function runTurns(db: Database, dir: string, turns: number, withTool = fal
       state,
       deps,
       { agent: { id: session.id, session } as never, messages: payload as never },
-      async () => ({ reject: false, messages: [] }),
+      async () => ({ reject: false, messages: [] } as never),
     );
     const highest = Math.max(0, ...numbers(texts(payload)));
     session.append("user/message", prompt as never, { surfaceOp: "append" });
     if (withTool && turn === 2) {
       const call = createAssistantMessage({
-        content: [{ type: "text", text: "checking" }, { type: "tool-call", id: `call-${turn}`, name: "read_file", arguments: "{}" }],
+        content: [{ type: "text", text: "checking" }, { type: "tool-call", id: `call-${turn}` as never, name: "read_file", arguments: "{}" }],
         provider: "deepseek",
         model: "deepseek-chat",
-        source: { kind: "model" },
+        source: { kind: "model" } as never,
       });
       session.append("assistant/message", { turn, step: 1, message: call } as never, { surfaceOp: "append" });
-      const result = createToolResultMessage({ callId: `call-${turn}`, content: [{ type: "text", text: "file body" }], isError: false });
+      const result = createToolResultMessage({ callId: `call-${turn}` as never, content: [{ type: "text", text: "file body" }], isError: false });
       session.append("tool/result", { turn, step: 1, message: result } as never, { surfaceOp: "append" });
     }
     const runtime = createUserMessage({
@@ -138,7 +138,7 @@ async function runTurns(db: Database, dir: string, turns: number, withTool = fal
       content: [{ type: "text", text: `\u00a7${highest + 1}\u00a7 reply ${turn}` }],
       provider: "deepseek",
       model: "deepseek-chat",
-      source: { kind: "model" },
+      source: { kind: "model" } as never,
     });
     replies.push({ id: reply.id, prefix: highest + 1 });
     session.append("assistant/message", { turn, step: 1, message: reply } as never, { surfaceOp: "append" });
@@ -148,7 +148,7 @@ async function runTurns(db: Database, dir: string, turns: number, withTool = fal
     state,
     deps,
     { agent: { id: session.id, session } as never, messages: surfaceMessages(session) as never },
-    async () => ({ reject: false, messages: [] }),
+    async () => ({ reject: false, messages: [] } as never),
   );
   return { session, runtimeIds, replies };
 }

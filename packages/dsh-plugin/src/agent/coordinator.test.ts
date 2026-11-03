@@ -36,9 +36,9 @@ function buildSession(): Session {
         content: [{ type: "text", text: "hi there" }],
         provider: "deepseek",
         model: "deepseek-chat",
-        source: { kind: "model" },
+        source: { kind: "model" } as never,
       }),
-    },
+    } as never,
     { surfaceOp: "append" },
   );
   session.append(

@@ -48,7 +48,7 @@ function texts(session: Session): string[] {
     .map((event) => (event ? deriveEventMessage(event) : undefined))
     .filter((m) => m !== undefined)
     .map((m) => {
-      const msg = m as { role: string; content: Array<{ type: string; text?: string }> };
+      const msg = m as unknown as { role: string; content: Array<{ type: string; text?: string }> };
       return `${msg.role}:${msg.content.map((p) => p.text ?? `[${p.type}]`).join("|")}`;
     });
 }
@@ -67,7 +67,7 @@ function numberOwners(session: Session): Map<number, Set<string>> {
   const owners = new Map<number, Set<string>>();
   for (const seq of session.surface.nodes) {
     const event = sessionEventAt(session, seq);
-    const msg = event ? (deriveEventMessage(event) as { content: Array<{ type: string; text?: string }> } | undefined) : undefined;
+    const msg = event ? (deriveEventMessage(event) as unknown as { content: Array<{ type: string; text?: string }> } | undefined) : undefined;
     for (const part of msg?.content ?? []) {
       const text = part.text ?? "";
       for (const m of text.matchAll(/\u00a7(\d+)\u00a7 ?/g)) {
@@ -107,7 +107,7 @@ async function scenario(fn: (ctx: Ctx) => Promise<void>) {
     };
     let state = createContextPlaneState();
     const step = async () => {
-      await runContextPlaneStep(state, deps, { agent: { id: session.id, session } as never, messages: [] as never }, async () => ({ reject: false, messages: [] }));
+      await runContextPlaneStep(state, deps, { agent: { id: session.id, session } as never, messages: [] as never }, async () => ({ reject: false, messages: [] } as never));
     };
     const restart = () => {
       // Process restart: the persisted log (a deep copy, as JSONL would give)
@@ -135,7 +135,7 @@ function reply(session: Session, text: string) {
   turnNo += 1;
   session.append(
     "assistant/message",
-    { turn: turnNo, step: 2, stream: [], message: createAssistantMessage({ content: [{ type: "text", text }], provider: "d", model: "m", source: MODEL_SOURCE }) } as never,
+    { turn: turnNo, step: 2, stream: [], message: createAssistantMessage({ content: [{ type: "text", text }], provider: "d", model: "m", source: MODEL_SOURCE } as never) } as never,
     { surfaceOp: "append" },
   );
 }
@@ -146,11 +146,11 @@ function toolBurst(session: Session, prefix: string, calls: Array<{ name: string
   const content = calls.map((c, i) => ({ type: "tool-call", id: `${prefix}-${i}`, name: c.name, arguments: JSON.stringify({ i }) }));
   session.append(
     "assistant/message",
-    { turn: turnNo, step: 1, stream: [], message: createAssistantMessage({ content: content as never, provider: "d", model: "m", source: MODEL_SOURCE }) } as never,
+    { turn: turnNo, step: 1, stream: [], message: createAssistantMessage({ content: content as never, provider: "d", model: "m", source: MODEL_SOURCE } as never) } as never,
     { surfaceOp: "append" },
   );
   calls.forEach((c, i) => {
-    const result = createToolResultMessage({ callId: `${prefix}-${i}`, content: [{ type: "text", text: c.body }], isError: false });
+    const result = createToolResultMessage({ callId: `${prefix}-${i}` as never, content: [{ type: "text", text: c.body }], isError: false });
     session.append("tool/result", { turn: turnNo, step: 1, message: result } as never, { surfaceOp: "append" });
   });
 }

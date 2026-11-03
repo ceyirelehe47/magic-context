@@ -40,9 +40,9 @@ function appendTurn(session: Session, turn: number): void {
         content: [{ type: "text", text: `answer ${turn}` }],
         provider: "deepseek",
         model: "deepseek-chat",
-        source: { kind: "model" },
+        source: { kind: "model" } as never,
       }),
-    },
+    } as never,
     { surfaceOp: "append" },
   );
 }
