@@ -1,0 +1,14 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/lease-pid-reuse.test.ts:
+
+# Unhandled error between tests
+-------------------------------
+SyntaxError: Export named 'reclaimDshLeaseOfGoneOwner' not found in module '/workspace/work/magic-context/packages/dsh-plugin/src/agent/historian.ts'.
+-------------------------------
+
+
+ 0 pass
+ 1 fail
+ 1 error
+Ran 1 test across 1 file. [561.00ms]
