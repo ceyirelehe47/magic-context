@@ -1,0 +1,16 @@
+# Round 22 scenario L, run lock-c only (ci-e2e.sh): the /compact timeout
+# branch. Same 40k route policy as patch-r22-lock.yml (headroom 0, 4 000
+# retained tokens, so a manual /compact selects history beyond the newest
+# ~4k tokens) but the native backstop at 90 %, so the five reads of lock-c are
+# not compacted natively before the e2e-only /compact at idle — /compact must
+# need the (fake, stuck) compartment lease for the uncovered reads.
+- id: magic-compaction
+  config:
+    auto: true
+    modelPolicies:
+      - provider: opencode-go-40k
+        model: deepseek-v4.1-flash
+        headroomTokens: 0
+        thresholdRatio: 0.9
+        retainTokens: 4000
+        maxTokens: 4096

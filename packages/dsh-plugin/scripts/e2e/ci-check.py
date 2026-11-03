@@ -562,7 +562,7 @@ def check_r22_lock(c, out: Path, runs):
     ends = [(e.get("data") or {}) for e in evs if e.get("type") == "compaction/end"]
     errs = [str(d.get("error"))[:200] for d in ends if d.get("error")]
     c.add("R10", bool(deferrals) and not errs,
-          "backstop (90 % path; 48 % on this route) deferred silently while the historian held the lease: no compaction/end error",
+          "backstop (90 % path; 36 % on this route) deferred silently while the historian held the lease: no compaction/end error",
           {"deferrals": deferrals[:6], "compactionEnds": len(ends), "errors": errs[:3]})
     last_def = text_a.rfind("native pressure backstop deferred")
     after = [x for x in checks if x[0] > last_def] if last_def >= 0 else []

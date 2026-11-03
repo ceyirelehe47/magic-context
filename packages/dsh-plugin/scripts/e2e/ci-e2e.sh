@@ -294,18 +294,19 @@ unset MC_E2E_MAIN_PROVIDER
 # ============================ round 22 scenario L ============================
 # Lock collision in real DSH (checks R9–R13): a background historian pass
 # holds the compartment lease (e2e-only hold) while
-#   lock-a  the native pressure backstop needs it — 48 % on this route
+#   lock-a  the native pressure backstop needs it — 36 % on this route
 #           (patch-r22-lock.yml; the shipped default is 90 %) with MC's
-#           execute threshold at 40 %, so the historian fires first and the
-#           following reads cross 48 % during the hold: the backstop must
+#           execute threshold at 30 %, so the historian fires first and the
+#           following reads cross 36 % during the hold: the backstop must
 #           DEFER quietly (no compaction/end error) and a later pressure check
 #           must retry (compact successfully or find it covered);
 #   lock-b  `/compact` needs it — run at idle through the DSH command registry
 #           (headless has no slash-command step), turn-end await off so the
 #           pass is still holding the lease: the summarize hook must WAIT
 #           (≤ 45 s) and finish (covered by the pass, or lease acquired);
-#   lock-c  timeout branch, cheap: a fake stuck lease (20 s) and the summarize
-#           wait shortened to 3 s — `/compact` must fail closed with the
+#   lock-c  timeout branch, cheap: five uncovered reads (backstop back at
+#           90 %, patch-r22-lock-c.yml), a fake stuck lease (20 s) and the
+#           summarize wait shortened to 3 s — `/compact` must fail closed with the
 #           "retry once it finishes" message and leave no lease behind.
 # Every switch below is e2e-only (MAGIC_CONTEXT_DSH_E2E=1 gate).
 export MC_E2E_MAIN_PROVIDER=opencode-go-40k
@@ -313,21 +314,25 @@ L_MODEL_KEY="opencode-go-40k/deepseek-v4.1-flash"
 LP="$HERE/patch-r22-lock.yml"
 lfiles() { for j in "$@"; do printf '%s/p%02d.txt, ' "$P_FIX" "$j"; done | sed 's/, $//'; }
 export OPENCODE_SESSION="mc-ci-lock-$(date +%s)"
-MC_HISTORIAN_THRESHOLD=40 EXTRA_PATCH="$LP" run lock-01 "Reply with the single word: ready."
+MC_HISTORIAN_THRESHOLD=30 EXTRA_PATCH="$LP" run lock-01 "Reply with the single word: ready."
 LSID="$(session_of "$OUT/lock-01.log")"
 echo "$LSID" > "$OUT/lock.sid"
 if [[ -n "$LSID" ]]; then
-  MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_HISTORIAN_HOLD_MS=40000 MC_HISTORIAN_THRESHOLD=40 EXTRA_PATCH="$LP" \
-    run lock-a "Use the read tool to read each of these ten files, one read call per step, in this order (whole file each): $(lfiles 17 18 19 20 21 22 23 24 25 26). Do not call ctx_reduce or any tool other than read. Then reply with one line per file: <path>: <its CHECKSUM code>." "$LSID"
-  r17_db session "$DB" "$LSID" 40 "$L_MODEL_KEY" > "$OUT/db-lock-a.json"
+  # Run 41618120979: with a 40 s hold and ten reads the deferred session
+  # climbed to 78.5 % and the model's long final answer (ten checksums) ended
+  # in max-tokens — the replies are now one word, the hold 15 s (publication
+  # lands mid-turn, so a later pressure check of the same turn retries).
+  MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_HISTORIAN_HOLD_MS=15000 MC_HISTORIAN_THRESHOLD=30 EXTRA_PATCH="$LP" \
+    run lock-a "Use the read tool to read each of these eight files, one read call per step, in this order (whole file each): $(lfiles 17 18 19 20 21 22 23 24). Do not call ctx_reduce or any tool other than read. After the last file reply with the single word: DONE." "$LSID"
+  r17_db session "$DB" "$LSID" 30 "$L_MODEL_KEY" > "$OUT/db-lock-a.json"
   MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_HISTORIAN_HOLD_MS=25000 MAGIC_CONTEXT_DSH_E2E_COMPACT_AT_IDLE=1 \
     MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS=0 MC_HISTORIAN_THRESHOLD=20 EXTRA_PATCH="$LP" \
     run lock-b "Reply with the single word: ok." "$LSID"
   r17_db session "$DB" "$LSID" 20 "$L_MODEL_KEY" > "$OUT/db-lock-b.json"
   MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_COMPACT_AT_IDLE=1 MAGIC_CONTEXT_DSH_E2E_FAKE_LEASE_MS=20000 \
     MAGIC_CONTEXT_DSH_E2E_SUMMARIZE_LEASE_WAIT_MS=3000 MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS=0 \
-    MC_HISTORIAN_THRESHOLD=95 EXTRA_PATCH="$LP" \
-    run lock-c "Use the read tool to read each of these two files, one read call per step (whole file each): $(lfiles 27 28). Do not call ctx_reduce. Then reply with one line per file: <path>: <its CHECKSUM code>." "$LSID"
+    MC_HISTORIAN_THRESHOLD=95 EXTRA_PATCH="$HERE/patch-r22-lock-c.yml" \
+    run lock-c "Use the read tool to read each of these five files, one read call per step (whole file each): $(lfiles 27 28 29 30 31). Do not call ctx_reduce. After the last file reply with the single word: DONE." "$LSID"
   r17_db session "$DB" "$LSID" 95 "$L_MODEL_KEY" > "$OUT/db-lock-c.json"
   decode_session "$LSID" "$OUT/lock-session.jsonl"
 fi
