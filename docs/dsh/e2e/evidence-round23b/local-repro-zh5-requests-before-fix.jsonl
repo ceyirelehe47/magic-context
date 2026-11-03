@@ -1,0 +1,17 @@
+{"n":4,"at":1793707322318,"session":"mock-zh-2","window":24000,"promptTokens":9556,"chars":42511,"maxTokens":4096,"messages":5,"outcome":"tool","plan":"zh","step":1}
+{"n":5,"at":1793707322404,"session":"mock-zh-2","window":24000,"promptTokens":167,"chars":695,"maxTokens":4096,"messages":2,"outcome":"title"}
+{"n":6,"at":1793707324165,"session":"mock-zh-2","window":24000,"promptTokens":9760,"chars":43166,"maxTokens":4096,"messages":6,"outcome":"text","plan":"zh","step":2}
+{"n":7,"at":1793707355467,"session":"mock-zh-3","window":24000,"promptTokens":9556,"chars":42511,"maxTokens":4096,"messages":5,"outcome":"tool","plan":"zh","step":1}
+{"n":8,"at":1793707355473,"session":"mock-zh-3","window":24000,"promptTokens":167,"chars":695,"maxTokens":4096,"messages":2,"outcome":"title"}
+{"n":9,"at":1793707356523,"session":"mock-zh-3","window":24000,"promptTokens":9760,"chars":43166,"maxTokens":4096,"messages":6,"outcome":"text","plan":"zh","step":2}
+{"n":11,"at":1793707477232,"session":"mock-zh-4","window":24000,"promptTokens":9556,"chars":42511,"maxTokens":4096,"messages":5,"outcome":"tool","plan":"zh","step":1}
+{"n":12,"at":1793707477242,"session":"mock-zh-4","window":24000,"promptTokens":167,"chars":695,"maxTokens":4096,"messages":2,"outcome":"title"}
+{"n":13,"at":1793707478678,"session":"mock-zh-4","window":24000,"promptTokens":9760,"chars":43168,"maxTokens":4096,"messages":6,"outcome":"text","plan":"zh","step":2}
+{"n":15,"at":1793707577878,"session":"mock-zh-5","window":24000,"promptTokens":9556,"chars":42511,"maxTokens":4096,"messages":5,"outcome":"tool","plan":"zh","step":1}
+{"n":16,"at":1793707577888,"session":"mock-zh-5","window":24000,"promptTokens":167,"chars":695,"maxTokens":4096,"messages":2,"outcome":"title"}
+{"n":17,"at":1793707579836,"session":"mock-zh-5","window":24000,"promptTokens":27700,"chars":62044,"maxTokens":2533,"messages":6,"outcome":"context_length_exceeded"}
+{"n":18,"at":1793707580124,"session":"mock-zh-5","window":200000,"promptTokens":15764,"chars":65520,"maxTokens":16384,"messages":2,"outcome":"historian"}
+{"n":19,"at":1793707580206,"session":"mock-zh-5","window":200000,"promptTokens":15912,"chars":66207,"maxTokens":16384,"messages":2,"outcome":"historian"}
+{"n":21,"at":1793707684560,"session":"mock-zh-5","window":24000,"promptTokens":27713,"chars":62086,"maxTokens":2529,"messages":7,"outcome":"context_length_exceeded"}
+{"n":22,"at":1793707684769,"session":"mock-zh-5","window":200000,"promptTokens":15780,"chars":65555,"maxTokens":16384,"messages":2,"outcome":"historian"}
+{"n":23,"at":1793707684866,"session":"mock-zh-5","window":200000,"promptTokens":15928,"chars":66242,"maxTokens":16384,"messages":2,"outcome":"historian"}

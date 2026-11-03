@@ -1,0 +1,14 @@
+# Scenario X local run (before the P0-1 fix) — real DSH 0.2.1-rc.5 + mock-llm.mjs (24k enforced, real BPE count)
+
+Plugin source of c22f13669 (RED commit, pre-fix context-plane.ts / pressure-truncation.ts); ci-x.sh of 6c7364093.
+
+| check | result | what | detail |
+|---|---|---|---|
+| X1 | FAIL | x-1: a 50 KB Chinese read (> the whole 24k window, meter ≈ 12.5k) is truncated before the next request; no request over the window | {"rc": "rc=1 elapsed=13.7s log=~/work/e2e/logs/run-51.log", "truncated": [], "maxPrompt": 9559, "steps": [1], "requests": [[9559, 4096, "tool"]]} |
+| X2 | FAIL | x-2: four 5 000-char Chinese reads in a row — truncated as they accumulate, every request within the window, all steps ran | {"rc": "rc=0 elapsed=13.9s log=~/work/e2e/logs/run-52.log", "truncated": [], "maxPrompt": 23924, "steps": [1, 2, 3, 4, 5], "prompts": [9663, 14431, 19270, 23924, 9787, 14826]} |
+| X3 | PASS | x-3: a 49 KB English and a big Chinese read arrive while the historian holds the lease (e2e hold): truncated anyway, within the window | {"rc": "rc=0 elapsed=34.2s log=~/work/e2e/logs/run-54.log", "holds": 1, "truncated": [25, 26], "maxPrompt": 17163, "prompts": [14899, 15500, 17163]} |
+| X4 | PASS | x-4: fourteen sub-floor English reads at MC 95 %: the native backstop compacts (no error), at most one compaction per step, all steps ran, within the window | {"rc": "rc=0 elapsed=20.3s log=~/work/e2e/logs/run-55.log", "compacted": [["83.4", "82.9"], ["84.7", "82.9"], ["84.8", "82.9"], ["85", "82.9"]], "compactionErrors": [], "maxCompactionsPerStep": 1, "steps": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "maxPrompt": 18951, "piAiClamped… |
+| X5 | FAIL | x-2r / x-5 (new processes, same session): truncations of active tags replay unchanged; no truncation re-decided or duplicated (kept rows byte-identical), only rows of dropped tags pruned (latch kept), outbox settled, no live lease | {"rc": "rc=0 elapsed=10.4s log=~/work/e2e/logs/run-56.log", "restartAfterX2": {"rc": "rc=0 elapsed=10.4s log=~/work/e2e/logs/run-53.log", "rows": [], "identicalToX2": true, "activeTruncatedTags": []}, "rowsBefore": [25, 26], "rowsAfter": [26], "added": [], "changed": [], "prunedNot… |
+| X6 | PASS | every truncated tool result's untruncated original (sha256 in dsh_pressure_truncations) is still in the DSH session log (historian / ctx_expand / re-read source) | {"truncated": [25, 26], "originalMissing": [], "toolResults": 22} |
+| X7 | FAIL | scenario X: the mock (real BPE count, 24k enforced) never received a request over the window | {"requests": 41, "overWindow": [[3, 25396], [5, 25436], [6, 25550], [14, 24180]], "maxPrompt": 25550} |
+| X8 | PASS | no loop: no plan step was requested more than 3 times (a retry storm or a compaction loop would repeat it) | {"maxRepeats": 2, "repeated": {"x2:4": 2}} |
