@@ -291,6 +291,111 @@ if [[ -n "$POSID" ]]; then
 fi
 unset MC_E2E_MAIN_PROVIDER
 
+# ============================ round 22 scenario L ============================
+# Lock collision in real DSH (checks R9–R13): a background historian pass
+# holds the compartment lease (e2e-only hold) while
+#   lock-a  the native pressure backstop needs it — 48 % on this route
+#           (patch-r22-lock.yml; the shipped default is 90 %) with MC's
+#           execute threshold at 40 %, so the historian fires first and the
+#           following reads cross 48 % during the hold: the backstop must
+#           DEFER quietly (no compaction/end error) and a later pressure check
+#           must retry (compact successfully or find it covered);
+#   lock-b  `/compact` needs it — run at idle through the DSH command registry
+#           (headless has no slash-command step), turn-end await off so the
+#           pass is still holding the lease: the summarize hook must WAIT
+#           (≤ 45 s) and finish (covered by the pass, or lease acquired);
+#   lock-c  timeout branch, cheap: a fake stuck lease (20 s) and the summarize
+#           wait shortened to 3 s — `/compact` must fail closed with the
+#           "retry once it finishes" message and leave no lease behind.
+# Every switch below is e2e-only (MAGIC_CONTEXT_DSH_E2E=1 gate).
+export MC_E2E_MAIN_PROVIDER=opencode-go-40k
+L_MODEL_KEY="opencode-go-40k/deepseek-v4.1-flash"
+LP="$HERE/patch-r22-lock.yml"
+lfiles() { for j in "$@"; do printf '%s/p%02d.txt, ' "$P_FIX" "$j"; done | sed 's/, $//'; }
+export OPENCODE_SESSION="mc-ci-lock-$(date +%s)"
+MC_HISTORIAN_THRESHOLD=40 EXTRA_PATCH="$LP" run lock-01 "Reply with the single word: ready."
+LSID="$(session_of "$OUT/lock-01.log")"
+echo "$LSID" > "$OUT/lock.sid"
+if [[ -n "$LSID" ]]; then
+  MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_HISTORIAN_HOLD_MS=40000 MC_HISTORIAN_THRESHOLD=40 EXTRA_PATCH="$LP" \
+    run lock-a "Use the read tool to read each of these ten files, one read call per step, in this order (whole file each): $(lfiles 17 18 19 20 21 22 23 24 25 26). Do not call ctx_reduce or any tool other than read. Then reply with one line per file: <path>: <its CHECKSUM code>." "$LSID"
+  r17_db session "$DB" "$LSID" 40 "$L_MODEL_KEY" > "$OUT/db-lock-a.json"
+  MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_HISTORIAN_HOLD_MS=25000 MAGIC_CONTEXT_DSH_E2E_COMPACT_AT_IDLE=1 \
+    MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS=0 MC_HISTORIAN_THRESHOLD=20 EXTRA_PATCH="$LP" \
+    run lock-b "Reply with the single word: ok." "$LSID"
+  r17_db session "$DB" "$LSID" 20 "$L_MODEL_KEY" > "$OUT/db-lock-b.json"
+  MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_COMPACT_AT_IDLE=1 MAGIC_CONTEXT_DSH_E2E_FAKE_LEASE_MS=20000 \
+    MAGIC_CONTEXT_DSH_E2E_SUMMARIZE_LEASE_WAIT_MS=3000 MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS=0 \
+    MC_HISTORIAN_THRESHOLD=95 EXTRA_PATCH="$LP" \
+    run lock-c "Use the read tool to read each of these two files, one read call per step (whole file each): $(lfiles 27 28). Do not call ctx_reduce. Then reply with one line per file: <path>: <its CHECKSUM code>." "$LSID"
+  r17_db session "$DB" "$LSID" 95 "$L_MODEL_KEY" > "$OUT/db-lock-c.json"
+  decode_session "$LSID" "$OUT/lock-session.jsonl"
+fi
+unset MC_E2E_MAIN_PROVIDER
+
+# ============================ round 22 scenario K ============================
+# Pending restart vs hot keys in ONE long process (checks U7–U11). Headless is
+# one process per turn, so the edit happens DURING a turn: k-1 reads six files
+# one step at a time; as soon as the e2e status dump shows its second pre-step
+# the script edits magic-context.jsonc — a restart-only key
+# (memory.injection_budget_tokens 4000 → 6000) and a hot key (protected_tokens
+# unset → 9000). The dump (e2e-only) records every pre-step (hot value,
+# persisted protection floor, pending keys) and, at the turn end, the settings
+# page view, the composer popover and `/ctx-status` executed through the DSH
+# command registry. k-2 is the restart (new process, same session).
+export MC_E2E_MAIN_PROVIDER=opencode-go-40k
+CFG="$XDG_CONFIG_HOME/cortexkit/magic-context.jsonc"
+cp "$CFG" "$OUT/k-jsonc.orig"
+kcfg() { python3 - "$CFG" "$1" "$2" <<'PY'
+import json, re, sys
+path, budget, prot = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+lines = open(path).read().splitlines()
+head = [l for l in lines if l.lstrip().startswith("//")]
+body = "\n".join(l for l in lines if not l.lstrip().startswith("//"))
+cfg = json.loads(body)
+cfg.setdefault("memory", {})["injection_budget_tokens"] = budget
+if prot == "unset":
+    cfg.pop("protected_tokens", None)
+else:
+    cfg["protected_tokens"] = int(prot)
+open(path, "w").write("\n".join(head) + "\n" + json.dumps(cfg, indent=2) + "\n")
+PY
+}
+kcfg 4000 unset
+cp "$CFG" "$OUT/k-jsonc.before"
+KDUMP="$(cd "$OUT" && pwd)/k-dump.jsonl"
+: > "$KDUMP"
+export OPENCODE_SESSION="mc-ci-k-$(date +%s)"
+MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_STATUS_DUMP="$KDUMP" MC_HISTORIAN_THRESHOLD=65 \
+  run k-1 "Use the read tool to read each of these six files, one read call per step, in this order (whole file each): $(lfiles 31 32 33 34 35 36). Do not call ctx_reduce or any tool other than read. Then reply with one line per file: <path>: <its CHECKSUM code>." &
+KPID=$!
+edited=0
+for i in $(seq 1 240); do
+  nsteps="$(grep -c '"kind":"step"' "$KDUMP" 2>/dev/null)"; nsteps="${nsteps:-0}"
+  if [[ "$nsteps" -ge 2 ]]; then
+    kcfg 6000 9000
+    python3 -c 'import json,time,sys; json.dump({"editedAt": int(time.time()*1000)}, open(sys.argv[1],"w"))' "$OUT/k-edit.json"
+    cp "$CFG" "$OUT/k-jsonc.after"
+    edited=1
+    break
+  fi
+  kill -0 "$KPID" 2>/dev/null || break
+  sleep 0.5
+done
+wait "$KPID"
+echo "[ci-e2e] k-1: jsonc edited mid-turn: $edited"
+KSID="$(session_of "$OUT/k-1.log")"
+echo "$KSID" > "$OUT/k.sid"
+if [[ -n "$KSID" ]]; then
+  r17_db session "$DB" "$KSID" 65 "opencode-go-40k/deepseek-v4.1-flash" > "$OUT/db-k-1.json"
+  echo '{"kind":"restart"}' >> "$KDUMP"
+  MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_STATUS_DUMP="$KDUMP" MC_HISTORIAN_THRESHOLD=65 \
+    run k-2 "Reply with the single word: ok." "$KSID"
+  r17_db session "$DB" "$KSID" 65 "opencode-go-40k/deepseek-v4.1-flash" > "$OUT/db-k-2.json"
+fi
+cp "$OUT/k-jsonc.orig" "$CFG"
+unset MC_E2E_MAIN_PROVIDER
+
 # --- U: doctor after all runs (shared DB opens, no live liveness markers left)
 node "$HERE/../../dist/cli.js" doctor --profile test > "$OUT/doctor-after.txt" 2>&1
 echo "rc=$?" >> "$OUT/doctor-after.txt"

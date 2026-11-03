@@ -32,7 +32,12 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       engine's per-step pressure checks show an effective main threshold >= 65 %,
       R7 (round 20) the main-session native compaction completed (no
       compaction/end error, no "summarize range unresolvable"), R8 (round 21)
-      no native compaction failed on a busy historian lease
+      no native compaction failed on a busy historian lease; R9–R13
+      (round 22, scenario L) lock collision: the backstop defers and retries,
+      /compact waits for the background pass, the timeout branch fails closed
+  U7–U11 (round 22, scenario K) jsonc edited during one live turn: restart-only
+      key shown as "running · pending restart" (settings view, /ctx-status),
+      hot key shown and applied live (protection floor), cleared by a restart
   P1  no dsh process left after the runs
 """
 import json
@@ -503,11 +508,16 @@ def check_r19(c, out: Path, runs):
     # lease is held and /compact waits for it. No compaction/end error and no
     # log line may say "lease busy" for a summarize; deferrals / waits are
     # reported (counts) as evidence of the new paths when they occur.
+    # Round 22: lock-c is the deliberate /compact timeout branch (fake stuck
+    # lease); its one expected "lease busy" is judged by R13, not here.
     all_ends = [(e.get("data") or {}) for p_ in sorted(out.glob("*-session.jsonl"))
-                for e in session_events(p_) if e.get("type") == "compaction/end"]
+                for e in (session_events(p_) if p_.name != "lock-session.jsonl" else lock_events_before_c(out))
+                if e.get("type") == "compaction/end"]
     busy_errs = [str(d.get("error"))[:160] for d in all_ends if d.get("error") and "lease busy" in str(d.get("error"))]
     busy_logs, deferred, waited, pct_unknown = {}, 0, 0, 0
     for p_ in sorted(out.glob("*.log")):
+        if p_.name == "lock-c.log":
+            continue
         t = p_.read_text(errors="replace")
         n = len(re.findall(r"summarize mini-historian lease busy", t))
         if n:
@@ -520,6 +530,153 @@ def check_r19(c, out: Path, runs):
           {"compactionEnds": len(all_ends), "leaseBusyErrors": busy_errs[:3], "leaseBusyLogLines": busy_logs or "none",
            "backstopDeferrals": deferred, "compactLeaseWaits": waited, "mainChecksWithPctUnknown": pct_unknown})
 
+
+
+def lock_events_before_c(out: Path):
+    """lock-session events up to lock-c's /compact (the deliberate timeout branch)."""
+    evs = session_events(out / "lock-session.jsonl")
+    runs_ = [i for i, e in enumerate(evs) if e.get("type") == "command/run" and (e.get("data") or {}).get("name") == "compact"]
+    return evs[: runs_[1]] if len(runs_) >= 2 else evs
+
+
+def e2e_lines(path: Path, needle: str):
+    if not path.exists():
+        return []
+    return [l for l in path.read_text(errors="replace").splitlines() if "[magic-context] e2e:" in l and needle in l]
+
+
+def check_r22_lock(c, out: Path, runs):
+    names = ("lock-01", "lock-a", "lock-b", "lock-c")
+    bad = {n: runs.get(n, ("", "missing"))[1] for n in names if not runs.get(n, ("", "missing"))[1].startswith("rc=0")}
+    la, lb, lc = out / "lock-a.log", out / "lock-b.log", out / "lock-c.log"
+    holds = e2e_lines(la, "historian holding the compartment lease")
+    text_a = la.read_text(errors="replace") if la.exists() else ""
+    fires = list(TRIGGER.finditer(text_a))
+    c.add("R9", not bad and bool(holds),
+          "scenario L runs exit 0; the background historian held the lease (e2e hold) in lock-a",
+          bad or {"holds": len(holds), "historianTriggers": [(m.group(1), m.group(5)) for m in fires][:8]})
+    deferrals = re.findall(r"native pressure backstop deferred: .*?\(pressure ([0-9.?]+) % ≥ ([0-9.?]+) %\)", text_a)
+    checks = [(m.start(), m.group(2), m.group(3), m.group(5)) for m in CHECK.finditer(text_a) if m.group(1) == "false"]
+    evs = lock_events_before_c(out)
+    ends = [(e.get("data") or {}) for e in evs if e.get("type") == "compaction/end"]
+    errs = [str(d.get("error"))[:200] for d in ends if d.get("error")]
+    c.add("R10", bool(deferrals) and not errs,
+          "backstop (90 % path; 48 % on this route) deferred silently while the historian held the lease: no compaction/end error",
+          {"deferrals": deferrals[:6], "compactionEnds": len(ends), "errors": errs[:3]})
+    last_def = text_a.rfind("native pressure backstop deferred")
+    after = [x for x in checks if x[0] > last_def] if last_def >= 0 else []
+    db_a = load_json(out / "db-lock-a.json") or {}
+    comps = db_a.get("compartments") if isinstance(db_a.get("compartments"), list) else []
+    retried = [x for x in after if x[3] in ("none", "compacted")]
+    c.add("R11", last_def >= 0 and bool(retried) and len(comps) >= 1,
+          "a later pressure check retried after the deferral (compacted, or below the backstop once the historian covered it)",
+          {"checksAfterLastDeferral": [(p, t, o) for _, p, t, o in after][:6], "compartments": len(comps)})
+    text_b = lb.read_text(errors="replace") if lb.exists() else ""
+    start_b = e2e_lines(lb, "/compact at idle: start")
+    done_b = e2e_lines(lb, "/compact at idle: done")
+    waits = re.findall(r"summarize: lease wait ended after (\d+)ms \(([^)]*)\)", text_b)
+    busy_b = bool(start_b) and "historianBusy=true" in start_b[0]
+    cmd_done = [(e.get("data") or {}) for e in evs if e.get("type") == "command/done"]
+    ok_b = busy_b and bool(waits) and all(int(w[0]) <= 45000 for w in waits) and bool(done_b) and "kind=success" in done_b[0]
+    c.add("R12", ok_b,
+          "/compact (DSH command registry, at idle) met the busy lease, waited <= 45 s and completed",
+          {"start": [s_[-120:] for s_ in start_b[:1]], "waits": waits[:2], "done": [d[-200:] for d in done_b[:1]],
+           "commandDone": [{k: str(v)[:120] for k, v in d.items()} for d in cmd_done][:2]})
+    text_c = lc.read_text(errors="replace") if lc.exists() else ""
+    start_c = e2e_lines(lc, "/compact at idle: start")
+    done_c = e2e_lines(lc, "/compact at idle: done")
+    timeout = re.findall(r"summarize mini-historian lease busy .*?after waiting (\d+)s", text_c)
+    released = e2e_lines(lc, "fake lease released")
+    db_c = load_json(out / "db-lock-c.json") or {}
+    live = [l for l in (db_c.get("leases") or []) if isinstance(l, dict) and l.get("live")]
+    nothing = bool(done_c) and "No compactable history" in done_c[0]
+    ok_c = bool(start_c) and "fakeLease=20000ms" in start_c[0] and bool(timeout) and bool(done_c) \
+        and "kind=error" in done_c[0] and bool(released) and not live
+    c.add("R13", True if ok_c else ("warn" if nothing and not live else False),
+          "timeout branch: /compact behind a stuck lease fails closed after the (3 s) wait, lease released, nothing left behind",
+          {"start": [s_[-120:] for s_ in start_c[:1]], "timeoutAfterS": timeout[:1], "done": [d[-200:] for d in done_c[:1]],
+           "released": bool(released), "liveLeases": live})
+
+
+def k_rows(out: Path):
+    p1, p2 = [], []
+    path = out / "k-dump.jsonl"
+    if not path.exists():
+        return p1, p2
+    cur = p1
+    for line in path.read_text(errors="replace").splitlines():
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        if o.get("kind") == "restart":
+            cur = p2
+            continue
+        cur.append(o)
+    return p1, p2
+
+
+def render_pending(changes):
+    """The settings page line, as client.js renders it (zh labels; JSON values)."""
+    def pj(v):
+        return "unset" if v is None else json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+    return [f"{x.get('key')} — 运行中的值: {pj(x.get('running'))} · 待重启生效: {pj(x.get('next'))}" for x in changes or []]
+
+
+def check_r22_k(c, out: Path, runs):
+    bad = {n: runs.get(n, ("", "missing"))[1] for n in ("k-1", "k-2") if not runs.get(n, ("", "missing"))[1].startswith("rc=0")}
+    edit = load_json(out / "k-edit.json") or {}
+    at = edit.get("editedAt")
+    p1, p2 = k_rows(out)
+    steps1 = [r for r in p1 if r.get("kind") == "step"]
+    pre = [r for r in steps1 if at and r.get("at", 0) < at]
+    post = [r for r in steps1 if at and r.get("at", 0) > at + 3500]  # past the 3 s jsonc TTL
+    turn1 = next((r for r in p1 if r.get("kind") == "turn"), {})
+    turn2 = next((r for r in p2 if r.get("kind") == "turn"), {})
+    c.add("U7", not bad and bool(at) and bool(pre) and bool(post) and bool(turn1),
+          "scenario K: jsonc edited during the live k-1 turn (pre- and post-edit steps in one process)",
+          bad or {"stepsBefore": len(pre), "stepsAfterTTL": len(post), "turnRow": bool(turn1), "editedAt": at})
+    sv = turn1.get("settingsView") or {}
+    pend = sv.get("pendingRestart") or []
+    mem = next((x for x in pend if x.get("key") == "memory"), None)
+    lines = render_pending(pend)
+    ok8 = mem is not None and (mem.get("running") or {}).get("injection_budget_tokens") == 4000 \
+        and (mem.get("next") or {}).get("injection_budget_tokens") == 6000 \
+        and not [x for x in pend if x.get("key") == "protected_tokens"] \
+        and bool(pre) and all(not r.get("pendingRestartKeys") for r in pre) \
+        and bool(post) and all("memory" in (r.get("pendingRestartKeys") or []) for r in post)
+    c.add("U8", ok8,
+          "settings page: restart-only memory.injection_budget_tokens shows 运行中的值 4000 · 待重启生效 6000; the hot key is not listed",
+          {"rendered": [l[:220] for l in lines], "pendingKeysBefore": [r.get("pendingRestartKeys") for r in pre][:2],
+           "pendingKeysAfter": [r.get("pendingRestartKeys") for r in post][:2]})
+    st = turn1.get("ctxStatus") or {}
+    text = str(st.get("text") or "")
+    block = text.split("### Pending restart", 1)[1] if "### Pending restart" in text else ""
+    mem_line = next((l for l in block.splitlines() if l.startswith("- memory: running")), "")
+    c.add("U9", st.get("kind") == "success" and bool(mem_line) and '"injection_budget_tokens":4000' in mem_line.replace(" ", "")
+          and "6000" in mem_line.split("after restart", 1)[-1] and "protected_tokens" not in block,
+          "/ctx-status (DSH command registry, live process): Pending restart lists memory running 4000 -> after restart 6000, not protected_tokens",
+          {"kind": st.get("kind"), "pendingBlock": block.strip()[:300] or st.get("error")})
+    eff = (sv.get("effective") or {}).get("protectedTokens") or {}
+    pop = turn1.get("popover") or {}
+    floors_pre = [r.get("protectedFloor") for r in pre]
+    floors_post = [r.get("protectedFloor") for r in post]
+    hot_post = [r.get("hotProtectedTokens") for r in post]
+    meta = (load_json(out / "db-k-1.json") or {}).get("meta") or {}
+    ok10 = eff.get("value") == 9000 and eff.get("source") == "jsonc" and bool(hot_post) and all(h == 9000 for h in hot_post) \
+        and all(f != 9000 for f in floors_pre) and 9000 in floors_post and meta.get("protected_tokens_effective") == 9000
+    c.add("U10", ok10,
+          "hot protected_tokens: shown as 9000 at once (settings view) and applied by the next steps of the same process (protection floor -> 9000)",
+          {"effective": eff, "popoverProtectedTokens": pop.get("protectedTokens"), "floorBefore": floors_pre[:3],
+           "floorAfter": floors_post[:4], "hotAfter": hot_post[:3], "dbFloor": meta.get("protected_tokens_effective"),
+           "historianModel": {"page": (sv.get("effective") or {}).get("historianModel"),
+                              "agent": (steps1[-1].get("hotHistorianModel") if steps1 else None)}})
+    st2 = turn2.get("ctxStatus") or {}
+    sv2 = turn2.get("settingsView") or {}
+    c.add("U11", bool(turn2) and not (sv2.get("pendingRestart") or []) and "Pending restart" not in str(st2.get("text") or "")
+          and st2.get("kind") == "success",
+          "after the restart (k-2, new process) nothing is pending: the new memory value is the running value",
+          {"pending": sv2.get("pendingRestart"), "ctxStatusKind": st2.get("kind")})
 
 def check(out: Path) -> int:
     c = Checks()
@@ -611,6 +768,8 @@ def check(out: Path) -> int:
     check_r17(c, out, runs)
     check_r17_child(c, out, runs)
     check_r19(c, out, runs)
+    check_r22_lock(c, out, runs)
+    check_r22_k(c, out, runs)
 
     # --- P: process hygiene
     left = (out / "leftover-procs.txt").read_text().split() if (out / "leftover-procs.txt").exists() else []

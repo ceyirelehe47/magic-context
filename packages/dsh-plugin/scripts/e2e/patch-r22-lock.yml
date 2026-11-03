@@ -1,0 +1,21 @@
+# Round 22 scenario L (ci-e2e.sh): lock collision on the 40k main route.
+#
+# The shipped native pressure backstop is 90 % (MC force band 85 % + 5).
+# Reaching 90 % while a background historian pass holds the compartment lease
+# would need a long, model-dependent session, so for THIS route only the
+# backstop is an explicit per-route policy at 48 % (headroom 0, ratio 0.48):
+# with MC's execute threshold at 40 % for the scenario (MC_HISTORIAN_THRESHOLD)
+# the historian fires first (~38–40 %) and the reads that follow cross 48 %
+# while its pass still holds the lease (e2e-only hold,
+# MAGIC_CONTEXT_DSH_E2E_HISTORIAN_HOLD_MS). Explicit per-route values win over
+# the MC-led defaults (round 19), exactly as a user's own policy would; the
+# deferral code path is the same one the 90 % default takes.
+- id: magic-compaction
+  config:
+    auto: true
+    modelPolicies:
+      - provider: opencode-go-40k
+        model: deepseek-v4.1-flash
+        headroomTokens: 0
+        thresholdRatio: 0.48
+        retainTokens: 4000

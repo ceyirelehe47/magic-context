@@ -75,7 +75,7 @@ if (key !== undefined) {
   out.meta = one(
     `select compartment_in_progress, historian_failure_count, historian_last_error, last_context_percentage,
             memory_block_count, length(cached_m0_bytes) as m0_len, length(cached_m1_bytes) as m1_len,
-            cached_m0_materialized_at, last_response_time, last_input_tokens
+            cached_m0_materialized_at, last_response_time, last_input_tokens, protected_tokens_effective
        from session_meta where session_id = ?`,
     key,
   );
