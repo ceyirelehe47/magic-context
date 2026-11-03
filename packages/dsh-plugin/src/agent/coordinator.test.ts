@@ -304,3 +304,50 @@ describe("SurfaceMutationCoordinator (CAS + saga)", () => {
     );
   });
 });
+
+// Round 21: the in-process caches only grew — every applied opId stayed in
+// appliedOps for the life of the process and every session kept a queue entry
+// (a long DSH process with many sessions / plans leaked both). The outbox is
+// authoritative, so the caches are bounded and a settled queue is dropped.
+describe("coordinator caches are bounded (round 21)", () => {
+  it("appliedOps keeps at most APPLIED_OPS_PER_SESSION ids per session (oldest evicted)", async () => {
+    const { rememberAppliedOp, APPLIED_OPS_PER_SESSION } = await import("./coordinator");
+    const state = createCoordinatorState();
+    for (let i = 0; i < APPLIED_OPS_PER_SESSION + 50; i += 1) rememberAppliedOp(state, "s1", `op-${i}`);
+    const set = state.appliedOps.get("s1")!;
+    expect(set.size).toBe(APPLIED_OPS_PER_SESSION);
+    expect(set.has("op-0")).toBe(false);
+    expect(set.has(`op-${APPLIED_OPS_PER_SESSION + 49}`)).toBe(true);
+  });
+
+  it("appliedOps keeps at most APPLIED_OPS_SESSIONS sessions (least recently used evicted)", async () => {
+    const { rememberAppliedOp, APPLIED_OPS_SESSIONS } = await import("./coordinator");
+    const state = createCoordinatorState();
+    for (let i = 0; i < APPLIED_OPS_SESSIONS + 10; i += 1) {
+      rememberAppliedOp(state, `s-${i}`, "op");
+      rememberAppliedOp(state, "s-hot", `op-${i}`);
+    }
+    expect(state.appliedOps.size).toBe(APPLIED_OPS_SESSIONS);
+    expect(state.appliedOps.has("s-hot")).toBe(true);
+    expect(state.appliedOps.has("s-0")).toBe(false);
+  });
+
+  it("a settled plan queue is removed (no per-session entry left behind)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dsh-magic-coord-"));
+    try {
+      const db = await createTestDb(join(dir, "context.db"));
+      initializeDshAdapterTables(db);
+      const session = buildSession();
+      const state = createCoordinatorState();
+      const plan = deriveMutationPlan(viewOf(session), { db })!;
+      const stale = { ...plan, opId: "stale-op", inputDigest: "not-the-live-digest" } as MutationPlan;
+      const outcome = await enqueuePlan(state, makeHost(db), session, stale);
+      expect(outcome.status).toBe("stale-input");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(state.queues.size).toBe(0);
+      db.close();
+    } finally {
+      await cleanupDir(dir);
+    }
+  });
+});

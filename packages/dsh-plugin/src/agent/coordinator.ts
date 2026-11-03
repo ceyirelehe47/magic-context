@@ -71,6 +71,33 @@ export function createCoordinatorState(): CoordinatorState {
 }
 
 /**
+ * Round 21: bounds of the in-process applied-op cache. It used to grow for the
+ * life of the process (every opId of every session). The outbox stays
+ * authoritative (`getOutboxRecord` answers "already applied" for an evicted
+ * id), so eviction only costs one indexed lookup.
+ */
+export const APPLIED_OPS_PER_SESSION = 256;
+export const APPLIED_OPS_SESSIONS = 64;
+
+/** Remember an applied opId (FIFO per session, LRU over sessions). */
+export function rememberAppliedOp(state: CoordinatorState, sessionId: string, opId: string): void {
+  const applied = state.appliedOps.get(sessionId) ?? new Set<string>();
+  applied.delete(opId);
+  applied.add(opId);
+  while (applied.size > APPLIED_OPS_PER_SESSION) {
+    const oldest = applied.values().next().value as string;
+    applied.delete(oldest);
+  }
+  // Re-insert to mark the session most recently used.
+  state.appliedOps.delete(sessionId);
+  state.appliedOps.set(sessionId, applied);
+  while (state.appliedOps.size > APPLIED_OPS_SESSIONS) {
+    const oldestSession = state.appliedOps.keys().next().value as string;
+    state.appliedOps.delete(oldestSession);
+  }
+}
+
+/**
  * Re-derive the plan CAS facts from the LIVE session through the SAME
  * transcript path the plan was derived from (digest must match byte-for-byte).
  */
@@ -188,8 +215,12 @@ export function enqueuePlan(
   const run = previous.then(() =>
     executePlan(state, host, session, plan, sessionId),
   );
-  // Keep the chain alive even when this plan fails.
-  state.queues.set(sessionId, run.catch(() => {}));
+  // Keep the chain alive even when this plan fails; drop the entry once this
+  // plan is the settled tail (round 21: entries used to stay forever).
+  const tail: Promise<unknown> = run.catch(() => {}).then(() => {
+    if (state.queues.get(sessionId) === tail) state.queues.delete(sessionId);
+  });
+  state.queues.set(sessionId, tail);
   return run;
 }
 
@@ -204,12 +235,10 @@ async function executePlan(
   const log = host.log ?? (() => {});
 
   // CAS 1: opId — never applied before.
-  const applied = state.appliedOps.get(sessionId) ?? new Set<string>();
-  if (applied.has(plan.opId)) return { status: "already-applied" };
+  if (state.appliedOps.get(sessionId)?.has(plan.opId) === true) return { status: "already-applied" };
   const existing = getOutboxRecord(db, plan.opId);
   if (existing !== undefined && existing.status !== "abandoned") {
-    applied.add(plan.opId);
-    state.appliedOps.set(sessionId, applied);
+    rememberAppliedOp(state, sessionId, plan.opId);
     return { status: "already-applied" };
   }
 
@@ -235,8 +264,7 @@ async function executePlan(
     const { ackSeq } = applyPlanOps(host, session, plan);
     markOutboxApplied(db, plan.opId, ackSeq);
     markOutboxCommitted(db, plan.opId);
-    applied.add(plan.opId);
-    state.appliedOps.set(sessionId, applied);
+    rememberAppliedOp(state, sessionId, plan.opId);
     log(
       `[magic-context] applied plan ${plan.opId} (${plan.ops.length} op(s)) at seq ${ackSeq} for ${sessionId}`,
     );
