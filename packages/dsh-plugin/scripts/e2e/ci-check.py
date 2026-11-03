@@ -1126,7 +1126,27 @@ def check_h(c, out: Path, runs):
         return bool(m) and int(m.group(1)) <= ordinal <= int(m.group(2)) and H_FILE in block.split("Snippet:", 1)[-1]
 
     hit = next((b for b in msg if h_covers(b, fact_ord)), None)
-    others = [x for x in H_A_CODES if x != H_FILE and hit and x in hit]
+    # Round 25b: a FOLDED hit's head line is its compartment's title (historian
+    # text over the whole range). e2e 41696491092: hit = compartment [1, 12]
+    # titled "Saved three … facts (ARCH-KESTREL-4127, RULE-MARMOT-5830,
+    # FILE-HERON-2261)" — facts 1–3 are its own messages (ordinals 3, 7, 10),
+    # so the title legitimately names them. "No other fact mixed in" is judged
+    # on what the hit presents as the match: the Snippet (the message) must
+    # carry no other fact's codeword, and the title may only name codewords its
+    # own range's messages carry (h-a-history.json, as U14). A plain message hit
+    # (ordinal=…) is judged on the whole block, as before.
+    others = []
+    if hit:
+        fm = re.search(r"compartment_id=\d+ range=(\d+)-(\d+) match=hybrid", hit.split("\n", 1)[0])
+        if fm:
+            lo, hi = int(fm.group(1)), int(fm.group(2))
+            head, _, snippet = hit.partition("Snippet:")
+            range_codes = {cd for r in hreal if lo <= r["ordinal"] <= hi for cd in r.get("codes", [])}
+            others = [x for x in H_A_CODES if x != H_FILE and (x in snippet or (x in head and x not in range_codes))]
+            if not hreal:
+                others = others or ["<no history view>"]
+        else:
+            others = [x for x in H_A_CODES if x != H_FILE and x in hit]
     inj_hits = [b[:120] for b in msg if any(k in b for k in INJ)]
     c.add("U16", hit is not None and not others and not inj_hits and not injected_rows,
           "ctx_search message lane returns the fact's own user message (its ordinal, or folded into the compartment covering it), no other fact mixed in, no injected block",
@@ -1307,7 +1327,7 @@ def check_s(c, out: Path, runs):
         wrc = runs.get(n, ("", "missing"))
         rc[n], fin[n] = wrc[1], final_text(out / f"{n}.log") or ""
         same = wrc[0] and wrc[0] == runs.get(f"s-{n.split('-')[1]}-1", ("", ""))[0]
-        if not wrc[1].startswith("rc=0") or f"DONE sw{n.split('-')[2]}" not in fin[n] or not same:
+        if not wrc[1].startswith("rc=0") or f"DONE s{n.split('-')[1]}w{n.split('-')[2]}" not in fin[n] or not same:
             bad.append(n)
     c.add("ST1", not bad, "all 20 runs (5 sessions x 4 parallel rounds, each a restart) and the 25 warm-up turns before them exit 0 and finish their plan",
           {"bad": {n: (rc[n], fin[n][:60]) for n in bad}})
