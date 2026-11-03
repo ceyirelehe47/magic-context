@@ -108,7 +108,7 @@ describe("stripTagNotationStream", () => {
       type: "tool-call-delta",
       index: 2,
       argumentsDelta: "{\"q\":\"§4§\"}",
-    });
+    } as never);
     expect(out[out.length - 1]?.type).toBe("finish");
   });
 

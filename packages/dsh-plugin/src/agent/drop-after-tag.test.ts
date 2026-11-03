@@ -74,11 +74,11 @@ function addToolTurn(session: Session, i: number, size: number) {
     provider: "d",
     model: "m",
     source: { kind: "model" } as never,
-  });
+  } as never);
   session.append("assistant/message", { turn: i, step: 1, message: call } as never, { surfaceOp: "append" });
   const result = createToolResultMessage({ callId: `call-${i}` as never, content: [{ type: "text", text: `BODY${i} `.repeat(size) }], isError: false });
   session.append("tool/result", { turn: i, step: 1, message: result } as never, { surfaceOp: "append" });
-  const reply = createAssistantMessage({ content: [{ type: "text", text: `answer ${i}` }], provider: "d", model: "m", source: { kind: "model" } as never });
+  const reply = createAssistantMessage({ content: [{ type: "text", text: `answer ${i}` }], provider: "d", model: "m", source: { kind: "model" } as never } as never);
   session.append("assistant/message", { turn: i, step: 2, message: reply } as never, { surfaceOp: "append" });
 }
 
@@ -130,13 +130,13 @@ describe("drops land on messages that were already tagged (op copies are expande
         provider: "d",
         model: "m",
         source: { kind: "model" } as never,
-      });
+      } as never);
       session.append("assistant/message", { turn: 0, step: 1, message: calls } as never, { surfaceOp: "append" });
       for (const id of ["call-a", "call-b"]) {
         const result = createToolResultMessage({ callId: id as never, content: [{ type: "text", text: `${id} `.repeat(400) }], isError: false });
         session.append("tool/result", { turn: 0, step: 1, message: result } as never, { surfaceOp: "append" });
       }
-      const reply = createAssistantMessage({ content: [{ type: "text", text: "answer 0" }], provider: "d", model: "m", source: { kind: "model" } as never });
+      const reply = createAssistantMessage({ content: [{ type: "text", text: "answer 0" }], provider: "d", model: "m", source: { kind: "model" } as never } as never);
       session.append("assistant/message", { turn: 0, step: 2, message: reply } as never, { surfaceOp: "append" });
       await step();
       for (let i = 1; i <= 4; i += 1) {

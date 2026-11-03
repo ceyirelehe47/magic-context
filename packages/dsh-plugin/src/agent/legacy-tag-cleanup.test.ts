@@ -50,7 +50,7 @@ function buildConversation() {
     provider: "deepseek",
     model: "deepseek-chat",
     source: { kind: "model" } as never,
-  });
+  } as never);
   push("assistant/message", assistant1);
   const tool1 = createToolResultMessage({ callId: "call-1" as never, content: [{ type: "text", text: "file contents" }], isError: false });
   push("tool/result", tool1);

@@ -46,7 +46,7 @@ function buildConversation() {
     provider: "deepseek",
     model: "deepseek-chat",
     source: { kind: "model" } as never,
-  });
+  } as never);
   push("assistant/message", assistant1);
   const tool1 = createToolResultMessage({
     callId: "call-1" as never,
@@ -61,7 +61,7 @@ function buildConversation() {
     provider: "deepseek",
     model: "deepseek-chat",
     source: { kind: "model" } as never,
-  });
+  } as never);
   push("assistant/message", assistant2);
   const user3 = createUserMessage({
     content: [{ type: "text", text: "turn three question" }],
@@ -256,7 +256,7 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
         provider: "deepseek",
         model: "deepseek-chat",
         source: { kind: "model" } as never,
-      });
+      } as never);
       session.append("assistant/message", { turn: 4, step: 1, message: reply } as never, { surfaceOp: "append" });
       const payload3 = session.surface.nodes
         .map((seq) => sessionEventAt(session, seq))
@@ -292,7 +292,7 @@ describe("first-call §N§ preview uses the core tag key (one tag per message)",
         provider: "deepseek",
         model: "deepseek-chat",
         source: { kind: "model" } as never,
-      });
+      } as never);
       const result = createToolResultMessage({ callId: "call-9" as never, content: [{ type: "text", text: "ok" }], isError: false });
       const steer = createUserMessage({ content: [{ type: "text", text: "steer" }], source: { kind: "user" } });
       const messages = [...payload, callAssistant, result, steer];

@@ -52,7 +52,7 @@ function buildSession(turns = 3): Session {
           provider: "deepseek",
           model: "deepseek-chat",
           source: { kind: "model" } as never,
-        }),
+        } as never),
       } as never,
       { surfaceOp: "append" },
     );

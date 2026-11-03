@@ -49,11 +49,11 @@ function addRead(session: Session, i: number, body: string, withHeader = true) {
     provider: "d",
     model: "m",
     source: { kind: "model" } as never,
-  });
+  } as never);
   session.append("assistant/message", { turn: i, step: 1, message: call } as never, { surfaceOp: "append" });
   const result = createToolResultMessage({ callId: `call-${i}` as never, content: [{ type: "text", text: body }], isError: false });
   session.append("tool/result", { turn: i, step: 1, message: result } as never, { surfaceOp: "append" });
-  const reply = createAssistantMessage({ content: [{ type: "text", text: `answer ${i}` }], provider: "d", model: "m", source: { kind: "model" } as never });
+  const reply = createAssistantMessage({ content: [{ type: "text", text: `answer ${i}` }], provider: "d", model: "m", source: { kind: "model" } as never } as never);
   session.append("assistant/message", { turn: i, step: 2, message: reply } as never, { surfaceOp: "append" });
 }
 
@@ -124,7 +124,7 @@ describe("pressure truncation of protected large tool results (24k window deadlo
       // A newer usage sample for the latch.
       session.append(
         "assistant/message",
-        { turn: 4, step: 1, message: createAssistantMessage({ content: [{ type: "text", text: "" }], provider: "d", model: "m", source: { kind: "model" } as never }), usage: { inputTokens: 19_100, outputTokens: 1 } } as never,
+        { turn: 4, step: 1, message: createAssistantMessage({ content: [{ type: "text", text: "" }], provider: "d", model: "m", source: { kind: "model" } as never } as never), usage: { inputTokens: 19_100, outputTokens: 1 } } as never,
         { surfaceOp: "append" },
       );
       await step();
@@ -164,7 +164,7 @@ describe("pressure truncation of protected large tool results (24k window deadlo
       pressure.projectedTokens = 19_100;
       session.append(
         "assistant/message",
-        { turn: 4, step: 1, message: createAssistantMessage({ content: [{ type: "text", text: "" }], provider: "d", model: "m", source: { kind: "model" } as never }), usage: { inputTokens: 19_100, outputTokens: 1 } } as never,
+        { turn: 4, step: 1, message: createAssistantMessage({ content: [{ type: "text", text: "" }], provider: "d", model: "m", source: { kind: "model" } as never } as never), usage: { inputTokens: 19_100, outputTokens: 1 } } as never,
         { surfaceOp: "append" },
       );
       await step();
@@ -194,7 +194,7 @@ describe("pressure truncation of protected large tool results (24k window deadlo
       pressure.projectedTokens = 19_100;
       session.append(
         "assistant/message",
-        { turn: 4, step: 1, message: createAssistantMessage({ content: [{ type: "text", text: "" }], provider: "d", model: "m", source: { kind: "model" } as never }), usage: { inputTokens: 19_100, outputTokens: 1 } } as never,
+        { turn: 4, step: 1, message: createAssistantMessage({ content: [{ type: "text", text: "" }], provider: "d", model: "m", source: { kind: "model" } as never } as never), usage: { inputTokens: 19_100, outputTokens: 1 } } as never,
         { surfaceOp: "append" },
       );
       await step();
@@ -272,7 +272,7 @@ describe("one batch per pressure sample", () => {
       const usage = (n: number) =>
         session.append(
           "assistant/message",
-          { turn: 9, step: 1, message: createAssistantMessage({ content: [{ type: "text", text: "" }], provider: "d", model: "m", source: { kind: "model" } as never }), usage: { inputTokens: n, outputTokens: 1 } } as never,
+          { turn: 9, step: 1, message: createAssistantMessage({ content: [{ type: "text", text: "" }], provider: "d", model: "m", source: { kind: "model" } as never } as never), usage: { inputTokens: n, outputTokens: 1 } } as never,
           { surfaceOp: "append" },
         );
       usage(21_000);

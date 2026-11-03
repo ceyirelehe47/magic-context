@@ -123,7 +123,7 @@ async function runTurns(db: Database, dir: string, turns: number, withTool = fal
         provider: "deepseek",
         model: "deepseek-chat",
         source: { kind: "model" } as never,
-      });
+      } as never);
       session.append("assistant/message", { turn, step: 1, message: call } as never, { surfaceOp: "append" });
       const result = createToolResultMessage({ callId: `call-${turn}` as never, content: [{ type: "text", text: "file body" }], isError: false });
       session.append("tool/result", { turn, step: 1, message: result } as never, { surfaceOp: "append" });
@@ -139,7 +139,7 @@ async function runTurns(db: Database, dir: string, turns: number, withTool = fal
       provider: "deepseek",
       model: "deepseek-chat",
       source: { kind: "model" } as never,
-    });
+    } as never);
     replies.push({ id: reply.id, prefix: highest + 1 });
     session.append("assistant/message", { turn, step: 1, message: reply } as never, { surfaceOp: "append" });
   }

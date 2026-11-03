@@ -31,7 +31,7 @@ function appendTurn(session: Session, turn: number): void {
         provider: "p",
         model: "m",
         source: { kind: "model" } as never,
-      }),
+      } as never),
     } as never,
     { surfaceOp: "append" },
   );

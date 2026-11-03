@@ -34,7 +34,7 @@ function buildSession(): Session {
         provider: "deepseek",
         model: "deepseek-chat",
         source: { kind: "model" } as never,
-      }),
+      } as never),
     } as never,
     { surfaceOp: "append" },
   );
@@ -126,7 +126,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
         { agent: { id: session.id, session } as never } as never,
         async () => {
           downstream += 1;
-          return { reject: false, messages: [] };
+          return { reject: false, messages: [] } as never;
         },
       );
       expect(result).toEqual({ reject: false, messages: [] } as never);
@@ -154,7 +154,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
         createContextPlaneState(),
         deps,
         { agent: { id: session.id, session } as never } as never,
-        async () => ({ reject: false, messages: [] }),
+        async () => ({ reject: false, messages: [] } as never),
       );
       expect(session.surface.replaceGeneration).toBe(0);
       db.close();
@@ -189,7 +189,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
         createContextPlaneState(),
         deps,
         { agent: { id: session.id, session } as never } as never,
-        async () => ({ reject: false, messages: [] }),
+        async () => ({ reject: false, messages: [] } as never),
       );
       expect(fired).toHaveLength(1);
       expect(fired[0]?.sessionId).toBe("dsh:a1b2c3d4:sess-plane");
@@ -229,7 +229,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
         createContextPlaneState(),
         deps,
         { agent: { id: session.id, session } as never } as never,
-        async () => ({ reject: false, messages: [] }),
+        async () => ({ reject: false, messages: [] } as never),
       );
       const row = db
         .prepare("SELECT last_response_time AS t FROM session_meta WHERE session_id = ?")
@@ -266,7 +266,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
         createContextPlaneState(),
         deps,
         { agent: { id: session.id, session } as never } as never,
-        async () => ({ reject: false, messages: [] }),
+        async () => ({ reject: false, messages: [] } as never),
       );
       const row = db
         .prepare("SELECT last_context_percentage AS pct, last_input_tokens AS tokens FROM session_meta WHERE session_id = ?")
@@ -304,7 +304,7 @@ describe("context plane (pre-step wiring of transcript + coordinator)", () => {
         createContextPlaneState(),
         deps,
         { agent: { id: session.id, session } as never } as never,
-        async () => ({ reject: false, messages: [] }),
+        async () => ({ reject: false, messages: [] } as never),
       );
       expect(fired).toBe(0);
       db.close();

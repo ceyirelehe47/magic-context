@@ -83,7 +83,7 @@ function buildSession(): Session {
           provider: "deepseek",
           model: "deepseek-chat",
           source: { kind: "model" } as never,
-        }),
+        } as never),
       } as never,
       { surfaceOp: "append" },
     );

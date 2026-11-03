@@ -44,7 +44,7 @@ function bulkySession(calls: number, wordsPerOutput: number): Session {
       provider: "deepseek",
       model: "deepseek-chat",
       source: { kind: "model" } as never,
-    });
+    } as never);
     session.append("assistant/message", { turn: 1, step: i, message: assistant } as never, { surfaceOp: "append" });
     session.append("tool/call", { turn: 1, step: i, callId: `call-${i}` as never, name: "read_file", arguments: "{}" });
     const result = createToolResultMessage({ callId: `call-${i}` as never, content: [{ type: "text", text: bulkOutput(i, wordsPerOutput) }], isError: false });

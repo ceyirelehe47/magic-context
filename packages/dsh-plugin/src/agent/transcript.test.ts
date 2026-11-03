@@ -41,7 +41,7 @@ function buildSession() {
     provider: "deepseek",
     model: "deepseek-chat",
     source: { kind: "model" } as never,
-  });
+  } as never);
   session.append("assistant/message", { turn: 1, step: 1, message: assistant1 } as never, { surfaceOp: "append" });
   const tool1 = createToolResultMessage({
     callId: "call-1" as never,
@@ -60,7 +60,7 @@ function buildSession() {
     provider: "deepseek",
     model: "deepseek-chat",
     source: { kind: "model" } as never,
-  });
+  } as never);
   session.append("assistant/message", { turn: 2, step: 1, message: assistant2 } as never, { surfaceOp: "append" });
   // Dangling tool result at the tail (no following user).
   const tool2 = createToolResultMessage({

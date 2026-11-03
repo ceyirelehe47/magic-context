@@ -12,7 +12,7 @@ function buildSession() {
   const session = Session.create(SessionId("sess-cleanup"));
   const u1 = createUserMessage({ content: [{ type: "text", text: "hello" }], source: { kind: "user" } });
   session.append("user/message", u1, { surfaceOp: "append" });
-  const a1 = createAssistantMessage({ content: [{ type: "text", text: "let me check" }], provider: "deepseek", model: "deepseek-chat", source: { kind: "model" } as never });
+  const a1 = createAssistantMessage({ content: [{ type: "text", text: "let me check" }], provider: "deepseek", model: "deepseek-chat", source: { kind: "model" } as never } as never);
   session.append("assistant/message", { turn: 1, step: 1, message: a1 } as never, { surfaceOp: "append" });
   return session;
 }

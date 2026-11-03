@@ -61,7 +61,7 @@ function toolCall(text: string, callId: string) {
     provider: "deepseek",
     model: "deepseek-chat",
     source: { kind: "model" } as never,
-  });
+  } as never);
 }
 
 describe("new input after a pending fold is pre-tagged under core's exact :pN key", () => {
