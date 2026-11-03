@@ -1,0 +1,10 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/message-history-search.test.ts:
+(pass) ctx_search over DSH message history (P1-1) > finds each early fact by its codeword with the right ordinal (source) after the pre-step ran [313.78ms]
+(pass) ctx_search over DSH message history (P1-1) > does not leak another session's history (search scope = the canonical session) [289.94ms]
+
+ 2 pass
+ 0 fail
+ 24 expect() calls
+Ran 2 tests across 1 file. [1.50s]

@@ -47,6 +47,7 @@ import { escalationBands } from "@magic-context/core/shared/escalation-bands";
 import { createTagger } from "@magic-context/core/features/magic-context/tagger";
 import { markNoteNudgeDelivered, onNoteTrigger, peekNoteNudgeText } from "@magic-context/core/hooks/magic-context/note-nudger";
 import { transcriptRawMessageProvider } from "./historian-wiring";
+import { scheduleDshMessageHistoryIndex } from "./message-index";
 import { resolveAwaitAtTurnEndMs, type HistorianDrain } from "./historian-drain";
 import { isMagicChildSession } from "./worker";
 import { deriveTriggerBudget } from "@magic-context/core/hooks/magic-context/derive-budgets";
@@ -848,6 +849,10 @@ export async function runContextPlaneStep(
     } catch {
       // Note nudge must never break the pre-step chain (fail-open).
     }
+
+    // Round 24 (P1-1): keep core's message-history FTS index (ctx_search's
+    // message lane) caught up with the DSH log — OpenCode/Pi parity.
+    scheduleDshMessageHistoryIndex(db, canonicalSessionId, agent, deps.log);
 
     // Historian plane: evaluate the context-pressure trigger and fire the
     // background compartment pass (fire-and-forget; never blocks the step).

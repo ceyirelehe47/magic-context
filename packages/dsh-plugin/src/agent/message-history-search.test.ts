@@ -111,8 +111,8 @@ describe("ctx_search over DSH message history (P1-1)", () => {
           expect(first).not.toContain(other);
         }
       }
-      // a never-recorded codeword finds nothing
-      const none = ((await search.execute({ query: "ZEBU-NEVER-0000" }, exec)) as { text: string }).text;
+      // a never-recorded codeword (no token shared with any message) finds nothing; NOTE relaxed recall ORs tokens, so "ZEBU-NEVER-0000" hits "never touch …"
+      const none = ((await search.execute({ query: "QUOLL-ZEPHYR-8888" }, exec)) as { text: string }).text;
       expect(none).toContain("No results found");
     } finally {
       db.close();
