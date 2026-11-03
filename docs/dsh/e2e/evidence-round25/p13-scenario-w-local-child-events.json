@@ -1,0 +1,54 @@
+[
+ {
+  "type": "sandbox/mode",
+  "data": {
+   "mode": "workspace-write",
+   "source": "delegation"
+  }
+ },
+ {
+  "type": "sandbox/mode",
+  "data": {
+   "mode": "workspace-write",
+   "source": "delegation"
+  }
+ },
+ {
+  "type": "tool/call",
+  "data": {
+   "turn": 1,
+   "step": 1,
+   "callId": "call_3",
+   "name": "bash",
+   "arguments": "{\"description\":\"forced shell (not allowlisted)\",\"command\":\"echo FORCED-BASH-RAN > mc-worker-forced-bash.txt; echo MOCKSTEP:wchild:1\"}"
+  }
+ },
+ {
+  "type": "tool/result",
+  "data": {
+   "callId": "call_3",
+   "text": "Error: unknown tool \"bash\"",
+   "isError": true,
+   "error": "ToolNotFoundError"
+  }
+ },
+ {
+  "type": "tool/call",
+  "data": {
+   "turn": 1,
+   "step": 2,
+   "callId": "call_4",
+   "name": "write",
+   "arguments": "{\"file_path\":\"mc-worker-forced-write.txt\",\"content\":\"FORCED-WRITE MOCKSTEP:wchild:2\"}"
+  }
+ },
+ {
+  "type": "tool/result",
+  "data": {
+   "callId": "call_4",
+   "text": "Error: unknown tool \"write\"",
+   "isError": true,
+   "error": "ToolNotFoundError"
+  }
+ }
+]

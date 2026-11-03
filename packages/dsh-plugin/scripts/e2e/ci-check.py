@@ -39,6 +39,8 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       key shown as "running · pending restart" (settings view, /ctx-status),
       hot key shown and applied live (protection floor), cleared by a restart;
       U12 the page's historian model is the one the agent runs with
+  W1–W4 (round 25, scenario W, mock) worker child forced to call bash/write: refused (unknown tool), no effect, no leak
+  ST1–ST5 (round 25, scenario S, mock) 5 sessions x 4 parallel rounds with restarts: exit 0, no duplicates, no residue, bounded growth
   U26 (round 25, scenario H) every memory under a project identity, no active exact duplicate
   U13–U25 (round 24b, scenario H) multi-session memory CORRECTNESS: four facts
       with codewords pinned in session A, historian >= 2 passes, restarts; the
@@ -1235,6 +1237,109 @@ def check_h(c, out: Path, runs):
            "sourceTypes": sorted({str(m.get("st")) for m in with_p}), "class": None if (with_p and not raw_path and not dups) else "product"})
 
 
+def check_w(c, out: Path, runs):
+    """Round 25 scenario W (P1-3, ci-x.sh): the worker self-test on the mock
+    model; the worker's CHILD (allowlist read/grep/glob) is FORCED to call bash
+    and write. W1 ran, W2 the forced calls were emitted to the child, W3 each
+    was refused as an unknown tool with no effect on disk, W4 the child was
+    offered only allowlisted tools while the parent kept its own (no leak)."""
+    if "w-1" not in runs:
+        c.add("W0", False, "scenario W ran (worker self-test on the mock)", "no w-1 run")
+        return
+    rc = runs.get("w-1", ("", "missing"))[1]
+    rep = selftest_report(out / "w-1.log")
+    fin = final_text(out / "w-1.log") or ""
+    c.add("W1", rc.startswith("rc=0") and bool(rep and rep.get("ok")) and "DONE w1" in fin,
+          "w-1: worker self-test ran on the mock model and the parent turn completed",
+          {"rc": rc, "ok": (rep or {}).get("ok"), "visible": (rep or {}).get("childVisibleTools"), "final": fin[:120]})
+    reqs = x_requests(out)
+    child = [r for r in reqs if r.get("plan") == "wchild"]
+    parent = [r for r in reqs if r.get("plan") == "w1"]
+    emitted = sorted({r.get("step") for r in child if r.get("outcome") == "tool"})
+    c.add("W2", 1 in emitted and 2 in emitted, "the child was made to call bash (step 1) and write (step 2) although neither is allowlisted",
+          {"childRequests": len(child), "toolStepsEmitted": emitted})
+    raw = (out / "w-child.jsonl").read_text(errors="replace") if (out / "w-child.jsonl").exists() else ""
+    unknown = {t: bool(re.search(r'unknown tool \\?"' + t + r'\\?"', raw)) for t in ("bash", "write")}
+    files = [l for l in ((out / "w-forced-files.txt").read_text().splitlines() if (out / "w-forced-files.txt").exists() else []) if l.strip()]
+    ran = "FORCED-BASH-RAN" in raw.replace("echo FORCED-BASH-RAN", "")
+    c.add("W3", bool(raw) and all(unknown.values()) and not files and not ran,
+          "forced bash / write calls are refused by the executor (unknown tool) and change nothing on disk",
+          {"childLog": bool(raw), "unknownTool": unknown, "forcedFiles": files, "bashOutputSeen": ran})
+    child_tools = sorted({t for r in child for t in (r.get("tools") or [])})
+    parent_after = [r for r in parent if (r.get("step") or 0) >= 2 or r.get("outcome") == "text"]
+    parent_tools = sorted({t for r in parent_after for t in (r.get("tools") or [])})
+    c.add("W4", bool(child_tools) and set(child_tools) <= ALLOWED_CHILD_TOOLS and {"bash", "write"} <= set(parent_tools),
+          "the child is offered only allowlisted tools; the parent still has bash/write after the worker (no leak either way)",
+          {"childTools": child_tools, "parentToolsAfter": parent_tools[:40]})
+
+
+def check_s(c, out: Path, runs):
+    """Round 25 scenario S (P1-2, ci-x.sh): 5 sessions x 4 rounds on the mock
+    model, each round in parallel, every run a restart, one shared DB."""
+    names = [f"s-{i}-{j}" for j in (1, 2, 3, 4) for i in (1, 2, 3, 4, 5)]
+    if not any(n in runs for n in names):
+        c.add("ST0", False, "scenario S ran (multi-session stress, mock)", "no s-* runs")
+        return
+    rc = {n: runs.get(n, ("", "missing"))[1] for n in names}
+    fin = {n: final_text(out / f"{n}.log") or "" for n in names}
+    bad = [n for n in names if not rc[n].startswith("rc=0") or f"DONE s{n.split('-')[1]}r{n.split('-')[2]}" not in fin[n]]
+    c.add("ST1", not bad, "all 20 runs (5 sessions x 4 parallel rounds, each a restart) exit 0 and finish their plan",
+          {"bad": {n: (rc[n], fin[n][:60]) for n in bad}})
+    dumps = {j: load_json(out / f"s-db-r{j}.json") or {} for j in (1, 2, 3, 4)}
+    last = dumps[4].get("sessions") or {}
+    sids = [s for s in ((out / "s.sids").read_text().strip().split(",") if (out / "s.sids").exists() else []) if s]
+    structural = {s: {k: v for k, v in (last.get(s) or {}).items() if k in ("duplicates", "overlaps", "gaps", "duplicateTagNumbers") and v}
+                  for s in sids}
+    structural = {s: v for s, v in structural.items() if v}
+    c.add("ST2", len(sids) == 5 and bool(last) and not structural and dumps[4].get("integrity") == "ok",
+          "no duplicate / overlapping / gapped compartments, no duplicate tag numbers, integrity ok",
+          {"sessions": len(sids), "issues": structural, "integrity": dumps[4].get("integrity")})
+    residue = {}
+    for s in sids:
+        row = last.get(s) or {}
+        r = {}
+        if row.get("liveLeases"):
+            r["liveLeases"] = row["liveLeases"]
+        if (row.get("meta") or {}).get("cip"):
+            r["compartmentInProgress"] = row["meta"]["cip"]
+        if row.get("outboxOpen"):
+            r["outboxOpen"] = row["outboxOpen"]
+        if r:
+            residue[s] = r
+    procs = [l for l in ((out / "s-leftover-procs.txt").read_text().splitlines() if (out / "s-leftover-procs.txt").exists() else []) if l.strip()]
+    c.add("ST3", not residue and not procs, "no residue after the runs: no live lease, no compartment-in-progress flag, no open outbox op, no process left",
+          {"residue": residue, "procs": procs[:5]})
+    sizes = [((dumps[j].get("bytes") or {}).get("db", 0) + (dumps[j].get("bytes") or {}).get("wal", 0)) for j in (1, 2, 3, 4)]
+    d_prev, d_last = max(sizes[1] - sizes[0], sizes[2] - sizes[1]), sizes[3] - sizes[2]
+    def times(j):
+        vals = []
+        for i in (1, 2, 3, 4, 5):
+            p = out / f"s-{i}-{j}.time"
+            try:
+                kb, sec = p.read_text().split()[-2:]
+                vals.append((int(kb), float(sec)))
+            except Exception:
+                pass
+        return vals
+    t1, t3 = times(1), times(4)
+    rss1 = max((v[0] for v in t1), default=None)
+    rss3 = max((v[0] for v in t3), default=None)
+    sec1 = sorted(v[1] for v in t1)[len(t1) // 2] if t1 else None
+    sec3 = sorted(v[1] for v in t3)[len(t3) // 2] if t3 else None
+    growth_ok = sizes[3] > 0 and sizes[3] < 64 * 1024 * 1024 and d_last <= 3 * max(d_prev, 0) + 2 * 1024 * 1024
+    rss_ok = rss1 is None or rss3 is None or rss3 <= rss1 * 1.5 + 100 * 1024
+    time_ok = sec1 is None or sec3 is None or sec3 <= sec1 * 2 + 15
+    c.add("ST4", growth_ok and rss_ok and time_ok,
+          "no abnormal growth: DB(+WAL) growth per round bounded, max RSS and median wall time of round 4 within bounds of round 1",
+          {"dbBytes": sizes, "rssKb": [rss1, rss3], "medianSec": [sec1, sec3], "rows": dumps[4].get("rows"), "pages": dumps[4].get("pages")})
+    hist = {s: (last.get(s) or {}).get("historianRuns") for s in sids}
+    comps = {s: (last.get(s) or {}).get("compartments") for s in sids}
+    fails = {s: ((last.get(s) or {}).get("meta") or {}).get("hf") for s in sids}
+    c.add("ST5", any((v or 0) > 0 for v in comps.values()),
+          "the stress exercised the historian: compartments were published under concurrency",
+          {"compartments": comps, "historianRuns": hist, "failureCounts": fails})
+
+
 def check(out: Path) -> int:
     c = Checks()
     runs = {}
@@ -1329,6 +1434,8 @@ def check(out: Path) -> int:
     check_r23_history(c, out, runs)
     check_x(c, out, runs)
     check_y(c, out, runs)
+    check_w(c, out, runs)
+    check_s(c, out, runs)
     check_r22_k(c, out, runs)
     check_h(c, out, runs)
 

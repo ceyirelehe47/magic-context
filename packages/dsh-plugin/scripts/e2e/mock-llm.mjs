@@ -197,6 +197,8 @@ const server = createServer((req, res) => {
       chars: serialized.length,
       maxTokens: body.max_tokens ?? body.max_completion_tokens ?? null,
       messages: (body.messages ?? []).length,
+      // round 25 (scenario W): the tool names the agent OFFERED in this request
+      tools: (Array.isArray(body.tools) ? body.tools : []).map((t) => t?.function?.name ?? t?.name).filter(Boolean),
     };
     if (promptTokens > window) {
       row.outcome = "context_length_exceeded";

@@ -1,0 +1,116 @@
+[
+ {
+  "plan": "w1",
+  "step": 1,
+  "outcome": "tool",
+  "tools": [
+   "bash",
+   "create_goal",
+   "ctx_expand",
+   "ctx_memory",
+   "ctx_note",
+   "ctx_reduce",
+   "ctx_search",
+   "ctx_worker_selftest",
+   "edit",
+   "exit_plan_mode",
+   "get_goal",
+   "glob",
+   "grep",
+   "interrupt_agent",
+   "job_kill",
+   "job_list",
+   "job_output",
+   "list_agents",
+   "read",
+   "read_image",
+   "send_message",
+   "skill",
+   "subagent",
+   "subagent_fork",
+   "todo_write",
+   "todowrite",
+   "update_goal",
+   "web_fetch",
+   "web_search",
+   "workflow",
+   "working_directory",
+   "write"
+  ]
+ },
+ {
+  "plan": null,
+  "step": null,
+  "outcome": "title",
+  "tools": []
+ },
+ {
+  "plan": "wchild",
+  "step": 1,
+  "outcome": "tool",
+  "tools": [
+   "glob",
+   "grep",
+   "read"
+  ]
+ },
+ {
+  "plan": "wchild",
+  "step": 2,
+  "outcome": "tool",
+  "tools": [
+   "glob",
+   "grep",
+   "read"
+  ]
+ },
+ {
+  "plan": "wchild",
+  "step": 3,
+  "outcome": "text",
+  "tools": [
+   "glob",
+   "grep",
+   "read"
+  ]
+ },
+ {
+  "plan": "w1",
+  "step": 2,
+  "outcome": "text",
+  "tools": [
+   "bash",
+   "create_goal",
+   "ctx_expand",
+   "ctx_memory",
+   "ctx_note",
+   "ctx_reduce",
+   "ctx_search",
+   "ctx_worker_selftest",
+   "edit",
+   "exit_plan_mode",
+   "get_goal",
+   "glob",
+   "grep",
+   "interrupt_agent",
+   "job_kill",
+   "job_list",
+   "job_output",
+   "list_agents",
+   "read",
+   "read_image",
+   "send_message",
+   "skill",
+   "subagent",
+   "subagent_fork",
+   "todo_write",
+   "todowrite",
+   "update_goal",
+   "web_fetch",
+   "web_search",
+   "workflow",
+   "working_directory",
+   "write"
+  ]
+ }
+]

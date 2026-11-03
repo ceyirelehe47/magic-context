@@ -71,6 +71,26 @@ plans["y3"] = [{"text": "DONE y3"}]
 for _k in ("y2b", "y2c", "y2d"):
     plans[_k] = [{"text": f"DONE {_k}"}]
 plans["xr"] = [{"text": "DONE xr"}]
+# round 25 scenario W (P1-3): the worker CHILD is made to force calls to tools
+# outside its allowlist; the bash/write args carry their own step marker, so
+# each forced call is emitted once (whether or not it runs)
+plans["w1"] = [{"tool": "ctx_worker_selftest", "args": {}}, {"text": "DONE w1"}]
+plans["wchild"] = [
+    {"tool": "bash", "args": {"description": "forced shell (not allowlisted)",
+                              "command": "echo FORCED-BASH-RAN > mc-worker-forced-bash.txt; echo MOCKSTEP:wchild:1"}},
+    {"tool": "write", "args": {"file_path": "mc-worker-forced-write.txt", "content": "FORCED-WRITE MOCKSTEP:wchild:2"}},
+    {"text": "DONE wchild MOCKSTEP:w1:1"},
+]
+# round 25 scenario S (P1-2): 5 sessions x 4 rounds, 2 long (3 reads/round)
+# and 3 short (1 read/round), every run a restart, each round all in parallel
+for si in range(1, 6):
+    for rj in range(1, 5):
+        key = f"s{si}r{rj}"
+        plans[key] = []
+        for k in range(1, (4 if si <= 2 else 2)):
+            write(f"{key}-{k}.txt", f"MOCKSTEP:{key}:{k}", zh_lines(4000, f"s{si}{rj}{k}", ZH2 if (si + k) % 2 else ZH))
+            plans[key].append(read(f"{key}-{k}.txt"))
+        plans[key].append({"text": f"DONE {key}"})
 json.dump(plans, open(plans_out, "w"), ensure_ascii=False)
 PY
 TOKROOT="$(ls -d "$REPO"/node_modules/.bun/ai-tokenizer@*/node_modules | head -n 1)"
@@ -174,6 +194,61 @@ if [[ -n "$YSID" ]]; then
   f="$(ls "$DSH_HOME"/sessions/*/"$YSID"/session.v4.jsonl.zstd 2>/dev/null | head -n 1)"
   [[ -n "$f" ]] && zstd -qdc "$f" > "$OUT/y-session.jsonl" 2>/dev/null
 fi
+
+# --- Scenario W (round 25, P1-3): the worker self-test on the mock model; the
+# worker's CHILD (allowlist read/grep/glob) is made to call bash and write
+# anyway. Checks W1–W4: the forced calls reach the executor, are refused, have
+# no effect on disk, and the parent's own tools are untouched.
+find "$REPO" "$E2E_ROOT" -maxdepth 7 -name 'mc-worker-forced-*' -delete 2>/dev/null
+export OPENCODE_SESSION="mc-ci-w-$(date +%s)"
+MAGIC_CONTEXT_DSH_WORKER_SELFTEST=1 MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_WORKER_PROMPT_SUFFIX='[[MOCK:wchild]]' \
+  MC_HISTORIAN_THRESHOLD=95 xrun w-1 "Run the worker self-test as planned. [[MOCK:w1]]"
+find "$REPO" "$E2E_ROOT" -maxdepth 7 -name 'mc-worker-forced-*' > "$OUT/w-forced-files.txt" 2>/dev/null
+WCID="$(python3 -c 'import re,sys
+t=open(sys.argv[1],errors="replace").read()
+m=re.search(r"\"childSessionId\\?\"\s*:\s*\\?\"([0-9a-f-]{36})",t)
+print(m.group(1) if m else "")' "$OUT/w-1.log" 2>/dev/null)"
+echo "$WCID" > "$OUT/w-child.sid"
+if [[ -n "$WCID" ]]; then
+  f="$(ls "$DSH_HOME"/sessions/*/"$WCID"/session.v4.jsonl.zstd 2>/dev/null | head -n 1)"
+  [[ -n "$f" ]] && zstd -qdc "$f" > "$OUT/w-child.jsonl" 2>/dev/null
+fi
+echo "[ci-x] w: child=$WCID forced files: $(wc -l < "$OUT/w-forced-files.txt")"
+
+# --- Scenario S (round 25, P1-2): short multi-session stress on the mock model.
+# 5 sessions x 4 rounds sharing the DB; every run is a fresh process (restart);
+# each round runs the 5 sessions IN PARALLEL. Per run: rc, wall time and max
+# RSS (GNU time when present); per round: ci-s.ts dump (duplicates, overlaps,
+# leases, open outbox rows, file sizes). Checks S1–S6.
+SMARK="SSTRESS$$"
+declare -A SSID
+TIMEBIN="$(command -v /usr/bin/time || true)"
+srun() { # srun <name> <plan> <session-env> [sid]
+  local name="$1" plan="$2" sess="$3" sid="${4:-}"
+  if [[ -n "$TIMEBIN" ]]; then
+    RUN_LOG="$E2E_ROOT/logs/run-$name.log" OPENCODE_SESSION="$sess" MC_HISTORIAN_THRESHOLD=35 "$TIMEBIN" -f '%M %e' -o "$OUT/$name.time" \
+      bash -c "$(declare -f xrun session_of); HERE='$HERE' OUT='$OUT'; xrun '$name' 'Read the files as planned. [[MOCK:$plan]] $SMARK' '$sid'"
+  else
+    RUN_LOG="$E2E_ROOT/logs/run-$name.log" OPENCODE_SESSION="$sess" MC_HISTORIAN_THRESHOLD=35 xrun "$name" "Read the files as planned. [[MOCK:$plan]] $SMARK" "$sid"
+  fi
+}
+for rj in 1 2 3 4; do
+  SPIDS=()
+  for si in 1 2 3 4 5; do
+    srun "s-$si-$rj" "s${si}r${rj}" "mc-ci-s$si-$$" "${SSID[$si]:-}" &
+    SPIDS+=($!)
+  done
+  wait "${SPIDS[@]}"  # NOT a bare wait: the mock model is a background child too
+  for si in 1 2 3 4 5; do
+    [[ -z "${SSID[$si]:-}" ]] && SSID[$si]="$(session_of "$OUT/s-$si-$rj.log")"
+  done
+  SIDS="$(for si in 1 2 3 4 5; do printf '%s,' "${SSID[$si]:-}"; done)"
+  printf '%s\n' "${SIDS%,}" > "$OUT/s.sids"
+  [[ -f "$DB" ]] && bun "$HERE/ci-s.ts" "$DB" "${SIDS%,}" > "$OUT/s-db-r$rj.json" 2>/dev/null
+done
+sleep 2
+pgrep -af "$SMARK" | grep -v pgrep > "$OUT/s-leftover-procs.txt" 2>/dev/null || true
+echo "[ci-x] s: sessions ${SIDS%,}; leftover: $(wc -l < "$OUT/s-leftover-procs.txt")"
 
 kill "$MOCK_PID" 2>/dev/null
 wait "$MOCK_PID" 2>/dev/null

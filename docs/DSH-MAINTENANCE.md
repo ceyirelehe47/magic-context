@@ -42,6 +42,44 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
+Baseline (round 24, 2026-11-04, DSH 0.2.1-rc.5, core v0.49.35; release tags
+unchanged; push run 41679319893 @ `e5ce3b756`): `typecheck:dsh` **0 errors**,
+`dsh-plugin` **567 pass** (+15 over round 23c's 552; 566 after 24a/24b,
+24c adds `injected-history` 1), `adapter-api` **15 pass**,
+`contracts:dsh` **104 pass**, 0 fail; real-model `e2e` **107 judged**
+(round 23c's 93 + R15 + scenario H U13–U25): __E2E_FINAL__.
+Evidence: `docs/dsh/e2e/evidence-round24/`.
+
+Round 24 fixes (adapter only, no core change; red test first):
+- 24a `41e74f26d` (red `154b17192`): the first open of a fresh shared DB is
+  serialised across DSH processes (O_EXCL `<db>.dsh-open.lock` around core
+  `openDatabaseAsync`) — mitigates known limitation 18 (g) (core migration race).
+- 24a `8a765eb7d` (red `877be0ccb`, R15 check): the MC main backstop skips a
+  region whose Magic summary cannot be smaller, before `compaction/start` —
+  fixes 18 (f) ("summary is not smaller", R10); e2e 2/2 (41665756434,
+  41669354809).
+- 24a `4a586cb21` (red `2c2ddbc30`): P1-1 — the DSH log feeds core's
+  message-history FTS index (`scheduleReconciliation`, history view ordinals);
+  ctx_search's message lane was always empty on DSH (round 21 U1 "No results found").
+- 24b `f3d44e73b` (red `bb1d47b6e`/`14a6a9cab`): project embedding registered and
+  compartments auto-embedded on DSH (`agent/embedding-wiring.ts`); ctx_search
+  says visibly when semantic search is unavailable (FTS only).
+- 24b `005a25850`: e2e scenario H (P1-1 memory correctness, U13–U25, embed-mock).
+- 24c `a529b7846` (red `f8de60d87`): **Magic's own injected text is not
+  history** — `historyContentProvider` / `withoutInjectedText`: the m0 baseline
+  (`<session-history>`/`<project-memory>`) and `<ctx-search-hint>` messages
+  (durable `magic-context` user messages on DSH, transform-only on OpenCode/Pi)
+  no longer reach the message-history index, the background historian or the
+  summarize hook (own text blocks removed; folded tool results, ordinals, ids
+  kept). e2e 41672370986: the message lane returned the injected
+  `<project-memory>` and compartments of unrelated read turns carried all four
+  pinned facts.
+- 24c e2e checker fixes, no assertion relaxed: `e5ce3b756` (U16–U18 fact
+  ordinal from the FTS rows, fold-aware message hit, U17 range must cover the
+  fact, new injected-block guards in U14/U16/U18), `7d8ebad5d` (R14 replay
+  decodes DSH's storage-form seq ranges), `d8daa0264` (scenario Y gets real
+  history: Y3 had passed on a compartment of the injected m0 block only).
+
 Baseline (round 23c, 2026-11-03, DSH 0.2.1-rc.5, core v0.49.35; release tags
 unchanged; push run 41640091776 and dispatch run 41640093586 (`e2e=true`) @ `96c27be69`; final e2e: see `evidence-round23c/README.md`):
 `typecheck:dsh` **0 errors**, core typecheck **0 errors**, `dsh-plugin`
@@ -1479,8 +1517,9 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       after-COMMIT point; (e) in real DSH the busy probe's dead-owner branch
       is not directly observable at the first step (the first pass already
       reclaimed the row before the step observer runs); it is covered by the
-      cross-process unit cases; (f) **observed twice, not fixed (P1
-      candidate):** e2e 41640093586 and 41642823892 ("819 >= 475") R10 — in scenario L two consecutive
+      cross-process unit cases; (f) **FIXED in round 24a (`8a765eb7d`, red
+      `877be0ccb`; e2e 2/2: 41665756434, 41669354809 R10+R15 PASS) — was
+      observed twice (P1 candidate):** e2e 41640093586 and 41642823892 ("819 >= 475") R10 — in scenario L two consecutive
       backstop checks at 38.2 % / 39.6 % (≥ 36 % on that route) right after a
       committed compaction failed with compaction-basic's "summary is not
       smaller than the shadowed content (423 estimated framed tokens >= 239)":
@@ -1491,8 +1530,12 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       41636248583 and in round 23); unrelated to the P0-2 change (the lease
       holder there is the live process itself). Option for later: skip the MC
       main backstop when the region after the last checkpoint is smaller than
-      the Magic summary would be; (g) **found in 23c, upstream core, not
-      fixed:** two processes opening a FRESH (never migrated) DB at the same
+      the Magic summary would be (this is what `8a765eb7d` does: the backstop
+      guard skips such a region before `compaction/start`); (g) **MITIGATED in
+      round 24a by the adapter (`41e74f26d`, red `154b17192`: an O_EXCL open
+      lock serialises the first open of the shared DB across DSH processes;
+      repro 8/48 → 0/48 pairs) — the core race itself is not changed;
+      found in 23c, upstream core:** two processes opening a FRESH (never migrated) DB at the same
       moment can race core's migration — `migration-v95-perf-indexes.ts`
       checks `sqlite_master` and then runs `CREATE TABLE temporal_decisions`
       without `IF NOT EXISTS`/a write transaction, so the loser fails with
@@ -1510,6 +1553,43 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       (e2e 41642823892: read #2 emitted, then killed). Magic tags that
       synthesized result after the restart (tag 3 in y-2); no partial original
       ever reaches the log. Y6 accepts exactly "whole or TOOL_OUTCOME_UNKNOWN".
+
+19. **Round 24 (2026-11-04) — status (24a/24b/24c).**
+    - **Fixed:** 18 (f) (`8a765eb7d`, e2e 2/2); P1-1 message lane
+      (`4a586cb21`) and compartment lane (`f3d44e73b`); injected text as
+      history (`a529b7846`). **Mitigated:** 18 (g) by the adapter open lock
+      (`41e74f26d`); the core migration race itself is unchanged upstream.
+    - **P1-1 verified by scenario H** (U13–U25, real model, mock embeddings):
+      __H_RUNS__.
+    - **Behaviour change (parity, intended):** injected messages no longer count
+      as meaningful user turns for core's 5-user-turn protected tail
+      (`PROTECTED_TAIL_USER_TURNS`), so on DSH the historian now starts after
+      the same number of REAL user turns as on OpenCode/Pi — later than before
+      in short sessions (scenario Y needed 3 more turns to have anything to
+      publish).
+    - **Known, not changed — exact-identifier ranking under RRF (core).** With
+      the compartment lane on, core folds a message hit into its covering
+      compartment and fuses lanes by rank (`mergeMessageAndCompartmentResults`);
+      a codeword query can rank compartments that share a common token
+      ("file") above the one whose message contains the codeword (41672370986
+      and 41679402115: the fact's compartment was result [3]). Observed with the
+      bag-of-words e2e mock only; behaviour with a real embedding model is
+      **pending verification**. Same in OpenCode/Pi (core).
+    - **Known, not changed — already-written data.** Compartments written by
+      earlier builds may contain injected m0 / hint text (the historian read
+      them since the history provider existed; `/ctx-recomp` rebuilds); FTS rows
+      indexed by `4a586cb21`…`56cd64986` (unreleased) keep injected blocks —
+      core re-reconciles incrementally and does not re-check old rows.
+    - **Known, not changed — DSH's runtime-context snapshot** (`source.kind:
+      runtime-context`, DSH's own) still counts as a user turn and is indexed;
+      it is not Magic's text and is left as DSH writes it.
+    - **Known, not changed — R0 / pi-ai clamp (limitation 17).** e2e
+      41672370986 `pnew-05`: 87 669 provider tokens on the 100k route → 1
+      output token, `max-tokens`, rc 1 (backstop correctly deferred at 94.2 %,
+      historian busy). Same as round 22's r1 pnew; not Magic.
+    - **Known, not changed — e2e replay tools** must decode DSH's storage-form
+      `sourceEventSeqs` ranges (`decodeSeqRanges`); production code reads
+      sessions through DSH's own API and is not affected.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

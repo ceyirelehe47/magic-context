@@ -13,6 +13,7 @@ import type { ContentBlock } from "@deepseek-ai/dsh-llm";
 import { defineTool, type ToolDefinition } from "@deepseek-ai/dsh-tools";
 import { textBlock } from "../compat/dsh-0.1/session";
 import { runMagicWorker } from "./worker";
+import { e2eWorkerPromptSuffix } from "./e2e-hooks";
 
 export const WORKER_SELFTEST_ENV = "MAGIC_CONTEXT_DSH_WORKER_SELFTEST";
 export const WORKER_SELFTEST_TOOL = "ctx_worker_selftest";
@@ -65,7 +66,8 @@ export function createWorkerSelftestTool(ctx: Context, log?: (message: string) =
       const result = await runMagicWorker(ctx, {
         parent: agent,
         label: "magic-worker-selftest",
-        prompt: WORKER_PROMPT,
+        // Round 25 (P1-3): e2e-only mock-plan marker (inert without MAGIC_CONTEXT_DSH_E2E=1).
+        prompt: ((suffix) => (suffix === undefined ? WORKER_PROMPT : `${WORKER_PROMPT}\n${suffix}`))(e2eWorkerPromptSuffix()),
         signal: controller.signal,
         timeoutMs,
         probeTools: ["bash", "write", "edit", "read", "glob", "grep", "ctx_search", "ctx_reduce", "spawn_agent"],

@@ -5,7 +5,8 @@
 #
 # Env knobs: PROFILE (test), EXTRA_PATCH (extra --patch file),
 # MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS (default 60000 here),
-# MC_HISTORIAN_THRESHOLD (historian trigger %, default 40), RUN_TIMEOUT (240s).
+# MC_HISTORIAN_THRESHOLD (historian trigger %, default 40), RUN_TIMEOUT (240s),
+# RUN_LOG (explicit log path; parallel runs must not share run-<n>).
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 TASK="$1"
@@ -16,7 +17,7 @@ export OPENCODE_SESSION="${OPENCODE_SESSION:-mc-e2e-$(date +%s)}"
 export MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS="${MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS:-60000}"
 export MAGIC_CONTEXT_DEBUG_HISTORIAN="${MAGIC_CONTEXT_DEBUG_HISTORIAN:-1}"
 N=$(ls "$E2E_ROOT/logs" | grep -c '^run-' || true)
-LOG="$E2E_ROOT/logs/run-$((N + 1)).log"
+LOG="${RUN_LOG:-$E2E_ROOT/logs/run-$((N + 1)).log}"  # RUN_LOG: parallel runs (round 25 scenario S)
 ARGS=(--profile "$PROFILE" --patch "$(dirname "$0")/model-opencode-go.yml")
 [[ -n "${EXTRA_PATCH:-}" ]] && ARGS+=(--patch "$EXTRA_PATCH")
 ARGS+=("$TASK" --json)

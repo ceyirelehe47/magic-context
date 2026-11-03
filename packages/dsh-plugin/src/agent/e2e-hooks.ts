@@ -57,6 +57,21 @@ export const E2E_FAKE_LEASE_ENV = "MAGIC_CONTEXT_DSH_E2E_FAKE_LEASE_MS";
 export const E2E_SUMMARIZE_LEASE_WAIT_ENV = "MAGIC_CONTEXT_DSH_E2E_SUMMARIZE_LEASE_WAIT_MS";
 export const E2E_STATUS_DUMP_ENV = "MAGIC_CONTEXT_DSH_E2E_STATUS_DUMP";
 export const E2E_CRASH_AT_ENV = "MAGIC_CONTEXT_DSH_E2E_CRASH_AT";
+export const E2E_WORKER_PROMPT_SUFFIX_ENV = "MAGIC_CONTEXT_DSH_E2E_WORKER_PROMPT_SUFFIX";
+
+/**
+ * Round 25 (P1-3, scenario W): a mock-plan marker (`[[MOCK:<plan>]]`, nothing
+ * else accepted) appended to the worker self-test's prompt, so the
+ * deterministic mock model can make the worker's CHILD force calls to tools
+ * outside its allowlist (bash / write). Inert unless the master gate is open;
+ * the self-test tool itself is registered only with
+ * MAGIC_CONTEXT_DSH_WORKER_SELFTEST=1.
+ */
+export function e2eWorkerPromptSuffix(env: Env = process.env): string | undefined {
+  if (!e2eGateOpen(env)) return undefined;
+  const raw = env[E2E_WORKER_PROMPT_SUFFIX_ENV];
+  return typeof raw === "string" && /^\[\[MOCK:[a-z0-9_-]{1,32}\]\]$/i.test(raw) ? raw : undefined;
+}
 
 export type E2eCrashPoint =
   | "outbox-pending"
