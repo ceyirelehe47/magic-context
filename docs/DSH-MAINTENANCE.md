@@ -47,7 +47,7 @@ unchanged; push run 41640091776 and dispatch run 41640093586 (`e2e=true`) @ `96c
 `typecheck:dsh` **0 errors**, core typecheck **0 errors**, `dsh-plugin`
 **552 pass** (round 23c +8 over round 23b's 544: crash-recovery 6, lease-liveness 2),
 `adapter-api` **15 pass**, `contracts:dsh` **100 pass**, 0 fail; `e2e`
-**92/93 PASS on 41640093586 (R10 FAIL — intermittent backstop "summary is not smaller" on a tiny region, real model, see known limitation 18 (f))** (round 23b's 87 = 79 + scenario X (X1–X8); round 23c adds
+**Final: 93/93 PASS on dispatch 41647689313 @ `40379e65a` (checks green in the same run); also 93/93 on 41644306462 @ `eb541b837`.** Earlier 92/93 on 41640093586 (R10 FAIL — intermittent backstop "summary is not smaller" on a tiny region, real model, see known limitation 18 (f); seen in 2 of the last 4 runs) (round 23b's 87 = 79 + scenario X (X1–X8); round 23c adds
 scenario Y (Y1–Y6, kill -9 during a historian hold)).
 Evidence: `docs/dsh/e2e/evidence-round23c/` (23b: `evidence-round23b/`).
 
