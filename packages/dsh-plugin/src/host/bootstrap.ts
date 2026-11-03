@@ -21,6 +21,7 @@ import {
 import { getMagicContextStorageDir } from "@magic-context/core/shared/data-path";
 import {
   applySqliteTuningPragmas,
+  resolveDatabasePath,
   getMigrationOnOpenRefusal,
   getSchemaFenceRejection,
   openDatabaseAsync,
@@ -37,6 +38,7 @@ import {
   writeDshLivenessMarker,
 } from "../compat/dsh-0.1/liveness";
 import { initializeDshAdapterTables } from "../agent/outbox";
+import { acquireDshOpenLock } from "./open-lock";
 
 export type { Database };
 
@@ -111,10 +113,19 @@ export async function bootstrapDshStorage(
     projectPath: opts.directory,
     pid: process.pid,
   });
+  // Round 24: serialize the open (and the migration it may run) across DSH
+  // processes — core's migrations are not safe against two processes migrating
+  // a fresh file at once (see open-lock.ts). Released right after the open.
+  const releaseOpenLock = await acquireDshOpenLock(resolveDatabasePath(opts.dbPath).dbPath, log);
   try {
-    const db = await openDatabaseAsync(
-      opts.dbPath === undefined ? undefined : { dbPath: opts.dbPath },
-    );
+    let db: Database | null;
+    try {
+      db = await openDatabaseAsync(
+        opts.dbPath === undefined ? undefined : { dbPath: opts.dbPath },
+      );
+    } finally {
+      releaseOpenLock();
+    }
     if (db === null) {
       const fence = getSchemaFenceRejection();
       const guard = getMigrationOnOpenRefusal();

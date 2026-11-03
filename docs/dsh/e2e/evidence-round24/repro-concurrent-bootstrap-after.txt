@@ -1,0 +1,5 @@
+# after fix (open lock in bootstrapDshStorage), same script
+iterations 48 procs/iteration 2 parallel 4
+bad iterations 0 bad processes 0
+iterations 24 procs/iteration 4 parallel 3
+bad iterations 0 bad processes 0

@@ -19,7 +19,9 @@
  * open by an OpenCode/Pi process is still core's race (documented).
  */
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { isPidAlive } from "@magic-context/core/shared/rpc-utils";
+import { ensureStorageDirectorySync } from "@magic-context/core/shared/storage-permissions";
 
 const POLL_MS = 50;
 const MAX_WAIT_MS = 120_000;
@@ -61,18 +63,15 @@ export async function acquireDshOpenLock(
   const started = Date.now();
   const mine = JSON.stringify({ pid: process.pid, acquiredAt: started });
   let waitedFor: number | null = null;
+  // The very first open on a machine has no storage dir yet; create it (core's
+  // own storage-dir helper, same permissions as the open would use).
+  ensureStorageDirectorySync(dirname(path));
   for (;;) {
     try {
       writeFileSync(path, mine, { flag: "wx" });
       break;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") {
-        // Storage dir not created yet: core creates it during open. Nothing
-        // can race on a file in a dir that does not exist; open unlocked.
-        log("[magic-context] dsh open lock: storage dir missing, opening without the lock");
-        return () => {};
-      }
       if (code !== "EEXIST") throw error;
     }
     const now = Date.now();

@@ -1,0 +1,11 @@
+bun test v1.4.4 (38afee6c8)
+
+src/host/bootstrap-concurrent-open.test.ts:
+(pass) dsh bootstrap: concurrent first open of a fresh DB > waits while another live DSH process holds the open lock, then opens [1044.29ms]
+(pass) dsh bootstrap: concurrent first open of a fresh DB > takes over a lock whose holder process is dead (no wait for a crashed opener) [220.29ms]
+(pass) dsh bootstrap: concurrent first open of a fresh DB > three real processes opening one fresh DB at once all succeed (6 rounds) [4624.65ms]
+
+ 3 pass
+ 0 fail
+ 33 expect() calls
+Ran 3 tests across 1 file. [6.14s]
