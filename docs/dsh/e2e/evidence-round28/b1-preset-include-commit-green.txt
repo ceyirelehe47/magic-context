@@ -1,0 +1,13 @@
+# B1 GREEN — preset-include overrides write() AND commit()
+
+## Unit (bun test src/entries/preset-include.test.ts)
+
+ 4 pass
+ 0 fail
+ 12 expect() calls
+Ran 4 tests across 1 file. [298.00ms]
+a3 built stock file changed: false
+
+## The built entry (bun build src/entries/preset-include.ts, include external) through the same real-package repro
+a3 built stock file changed: false
+r5 built stock file changed: false
