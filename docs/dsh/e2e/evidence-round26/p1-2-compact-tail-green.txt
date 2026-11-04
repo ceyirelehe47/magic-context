@@ -1,0 +1,12 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/compact-unprocessed-tail.test.ts:
+(pass) /compact with an unprocessed tail (round 26 P1-2, limitation 17) > the checkpoint summary carries the uncovered tail (the user constraint verbatim) until the historian covers it [770.52ms]
+(pass) /compact with an unprocessed tail (round 26 P1-2, limitation 17) > a fully covered region renders compartments only (no tail block) [252.61ms]
+(pass) /compact with an unprocessed tail (round 26 P1-2, limitation 17) > a long tail is bounded: user text kept first, the block stays under its cap [262.76ms]
+(pass) unsummarized tail vs compaction-basic's 'summary must be smaller' rule > a region whose own text is too small for summary + tail gets no tail block (compaction stays valid) [482.43ms]
+
+ 4 pass
+ 0 fail
+ 15 expect() calls
+Ran 4 tests across 1 file. [2.71s]

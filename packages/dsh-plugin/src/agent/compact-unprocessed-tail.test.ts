@@ -159,3 +159,24 @@ describe("/compact with an unprocessed tail (round 26 P1-2, limitation 17)", () 
     });
   });
 });
+
+describe("unsummarized tail vs compaction-basic's 'summary must be smaller' rule", () => {
+  it("a region whose own text is too small for summary + tail gets no tail block (compaction stays valid)", async () => {
+    await withDb(async (db) => {
+      const agent = agentOf(buildSession(8, CONSTRAINT));
+      const provider = historyContentProvider(agent, SID);
+      const messages = provider.readMessages();
+      const hook = createMagicSummarizeHook({ db, sessionId: SID, ctx: {}, provider, summarize: partialHistorian(12) as never, leaseHolderId: "r26-small" });
+      // Region parts carry their text (as compaction-basic passes them): 320 chars, below compartments + tail.
+      const region = messages.map((m) => ({ id: m.id, role: m.role, content: [{ type: "text", text: "x".repeat(20) }] }));
+      const text = summaryText(await hook({ messages: region as never }, agent));
+      expect(text).not.toContain("unsummarized_tail");
+      // A large region (real text) keeps the tail.
+      await withDb(async (db2) => {
+        const hook2 = createMagicSummarizeHook({ db: db2, sessionId: SID, ctx: {}, provider, summarize: partialHistorian(12) as never, leaseHolderId: "r26-big" });
+        const big = messages.map((m) => ({ id: m.id, role: m.role, content: [{ type: "text", text: "y".repeat(2_000) }] }));
+        expect(summaryText(await hook2({ messages: big as never }, agent))).toContain(CONSTRAINT);
+      });
+    });
+  });
+});

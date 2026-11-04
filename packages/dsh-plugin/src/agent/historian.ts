@@ -86,6 +86,7 @@ import {
   type SessionChunk,
 } from "@magic-context/core/hooks/magic-context/read-session-chunk";
 import { describeError } from "@magic-context/core/shared/error-message";
+import { getIndexableContent } from "@magic-context/core/features/magic-context/message-index";
 import {
   deriveHistorianChunkTokens,
   resolveHistorianContextLimit,
@@ -1211,7 +1212,27 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
         (c) => c.endMessage >= firstOrdinal && c.startMessage <= lastOrdinal,
       );
       const facts: SessionFact[] = getSessionFacts(deps.db, sessionId);
-      const text = buildCompartmentBlock(compartments, facts);
+      let text = buildCompartmentBlock(compartments, facts);
+      // Round 26 (P1-2, limitation 17): the historian may leave the end of the
+      // region unprocessed (`<unprocessed_from>`). The native checkpoint still
+      // shadows it, so without this the model sees NOTHING of those messages
+      // until the next background pass — a user constraint there is lost for
+      // the next turns. Carry the uncovered tail (text only, bounded) in the
+      // summary; a later compaction re-renders it from compartments.
+      const coveredEnd = getLastCompartmentEndMessage(deps.db, sessionId);
+      if (coveredEnd < lastOrdinal) {
+        // compaction-basic rejects a summary that is not smaller than the
+        // shadowed region: keep summary + tail under 80 % of the region's own
+        // text (unknown region size → the fixed cap only).
+        const regionChars = regionTextChars(messages);
+        const budget = regionChars > 0 ? Math.floor(regionChars * 0.8) - text.length : UNSUMMARIZED_TAIL_MAX_CHARS;
+        const tail = budget >= 300 ? renderUnsummarizedTail(deps.provider, Math.max(firstOrdinal, coveredEnd + 1), lastOrdinal, Math.min(UNSUMMARIZED_TAIL_MAX_CHARS, budget)) : "";
+        if (tail.length === 0) debugConsole(`[magic-context] summarize: unsummarized tail ${coveredEnd + 1}-${lastOrdinal} not carried (budget ${budget} chars of region ${regionChars})`);
+        if (tail.length > 0) {
+          text = text.length > 0 ? `${text}\n\n${tail}` : tail;
+          debugConsole(`[magic-context] summarize: region ${firstOrdinal}-${lastOrdinal} covered through ${coveredEnd}; unsummarized tail ${Math.max(firstOrdinal, coveredEnd + 1)}-${lastOrdinal} carried in the summary (${tail.length} chars)`);
+        }
+      }
       if (text.length === 0) {
         throw new Error(
           `magic-context: summarize produced no compartment content for ${sessionId} range ${firstOrdinal}-${lastOrdinal}`,
@@ -1227,6 +1248,84 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
   };
 }
 
+
+/** Text chars of a compaction region's messages (0 when the parts carry none). */
+function regionTextChars(messages: readonly unknown[]): number {
+  let total = 0;
+  const visit = (value: unknown, depth: number): void => {
+    if (depth > 6 || value === null || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    for (const key of ["text", "output", "content", "result"]) {
+      const v = record[key];
+      if (typeof v === "string") total += v.length;
+      else if (v !== null && typeof v === "object") visit(v, depth + 1);
+    }
+  };
+  for (const message of messages) visit(message, 0);
+  return total;
+}
+
+/** Cap of the unsummarized-tail block (chars): ≈ 2k tokens. */
+export const UNSUMMARIZED_TAIL_MAX_CHARS = 8_000;
+const TAIL_USER_MAX_CHARS = 2_000;
+const TAIL_ASSISTANT_MAX_CHARS = 600;
+
+function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/**
+ * Round 26 (P1-2): the messages [from, to] the summary does not cover, as a
+ * bounded text block. User text is kept first (constraints live there),
+ * assistant text is clipped, tool output is left out (ctx_expand has it).
+ * Over the cap, the OLDEST assistant lines go first, then the oldest user
+ * lines are clipped further; the ordinal range for ctx_expand is always given.
+ */
+export function renderUnsummarizedTail(
+  provider: RawMessageProvider,
+  from: number,
+  to: number,
+  maxChars: number = UNSUMMARIZED_TAIL_MAX_CHARS,
+): string {
+  if (to < from) return "";
+  let raw: readonly { ordinal: number; role: string; parts: unknown[] }[];
+  try {
+    raw = provider.readMessages() as never;
+  } catch {
+    return "";
+  }
+  const lines: Array<{ ordinal: number; role: string; text: string }> = [];
+  for (const message of raw) {
+    if (message.ordinal < from || message.ordinal > to) continue;
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    const content = getIndexableContent(message.role, Array.isArray(message.parts) ? message.parts : []);
+    if (content.length === 0) continue;
+    lines.push({
+      ordinal: message.ordinal,
+      role: message.role,
+      text: clip(content, message.role === "user" ? TAIL_USER_MAX_CHARS : TAIL_ASSISTANT_MAX_CHARS),
+    });
+  }
+  const header = `<unsummarized_tail from="${from}" to="${to}">\nMessages ${from}-${to} were compacted before the historian summarized them. Their text follows (tool output omitted); the full messages stay recoverable with ctx_expand ${from}-${to}. Instructions and constraints the user gave here still apply.`;
+  const footer = "</unsummarized_tail>";
+  const size = () => header.length + footer.length + lines.reduce((n, l) => n + l.text.length + 12, 0);
+  // Over the cap: drop the oldest assistant lines first, then clip user lines.
+  while (size() > maxChars) {
+    const idx = lines.findIndex((l) => l.role === "assistant");
+    if (idx < 0) break;
+    lines.splice(idx, 1);
+  }
+  for (let i = 0; i < lines.length && size() > maxChars; i += 1) {
+    lines[i] = { ...lines[i]!, text: clip(lines[i]!.text, 400) };
+  }
+  while (size() > maxChars && lines.length > 1) lines.shift();
+  if (lines.length === 0 || size() > maxChars) return "";
+  return [header, ...lines.map((l) => `[${l.ordinal}] ${l.role}: ${l.text}`), footer].join("\n");
+}
 
 /**
  * E2E-ONLY fault injection (round 19): exercise the historian repair retry in
