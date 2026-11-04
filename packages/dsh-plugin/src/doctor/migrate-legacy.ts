@@ -697,8 +697,22 @@ export function timestampTag(now = new Date()): string {
   return now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
 }
 
+/**
+ * A backup file name that does not exist yet: `<base>.db`, else `<base>-2.db`,
+ * `-3`, … (round 26, e2e 41774795839 M5: apply → restore → apply inside one
+ * second refused the second backup — the stamp has second resolution).
+ * Never overwrites.
+ */
+export function freshBackupPath(dir: string, base: string): string {
+  let candidate = join(dir, `${base}.db`);
+  for (let n = 2; existsSync(candidate) || existsSync(`${candidate}.meta.json`); n += 1) {
+    candidate = join(dir, `${base}-${n}.db`);
+  }
+  return candidate;
+}
+
 export function backupDatabase(db: Database, dbPath: string, outPath?: string, now = new Date()): BackupResult {
-  const target = outPath ?? join(dirname(dbPath), "backups", `${basename(dbPath, ".db")}-${timestampTag(now)}.db`);
+  const target = outPath ?? freshBackupPath(join(dirname(dbPath), "backups"), `${basename(dbPath, ".db")}-${timestampTag(now)}`);
   mkdirSync(dirname(target), { recursive: true });
   if (existsSync(target)) throw new Error(`backup target exists: ${target}`);
   db.prepare("VACUUM INTO ?").run(target);
@@ -769,7 +783,7 @@ export function restoreDatabase(backupPath: string, dbPath: string, now = new Da
   if (existsSync(dbPath)) {
     const current = new SqliteDatabase(dbPath);
     try {
-      safetyCopy = join(dirname(dbPath), "backups", `${basename(dbPath, ".db")}-pre-restore-${timestampTag(now)}.db`);
+      safetyCopy = freshBackupPath(join(dirname(dbPath), "backups"), `${basename(dbPath, ".db")}-pre-restore-${timestampTag(now)}`);
       mkdirSync(dirname(safetyCopy), { recursive: true });
       current.prepare("VACUUM INTO ?").run(safetyCopy);
       current.exec("PRAGMA wal_checkpoint(TRUNCATE)");

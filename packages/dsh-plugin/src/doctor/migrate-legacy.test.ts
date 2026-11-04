@@ -272,6 +272,25 @@ describe("migrate-legacy (round 26 P0-1)", () => {
     }
   });
 
+  it("apply → restore → apply within the same second: the second backup gets its own file (e2e 41774795839 M5)", async () => {
+    const f = await legacyFixture();
+    try {
+      const now = new Date("2026-11-04T05:02:28.100Z");
+      const first = backupDatabase(f.db, f.dbPath, undefined, now);
+      const second = backupDatabase(f.db, f.dbPath, undefined, new Date("2026-11-04T05:02:28.900Z"));
+      expect(second.path).not.toBe(first.path);
+      expect(existsSync(first.path) && existsSync(second.path)).toBe(true);
+      expect(second.integrity).toBe("ok");
+      f.db.close();
+      const r1 = restoreDatabase(first.path, f.dbPath, now);
+      const r2 = restoreDatabase(first.path, f.dbPath, now);
+      expect(r1.ok && r2.ok).toBe(true);
+      expect(r2.safetyCopy).not.toBe(r1.safetyCopy);
+    } finally {
+      cleanup(f);
+    }
+  });
+
   it("empty DB and missing DB: no error, nothing to do", async () => {
     const root = mkdtempSync(join(tmpdir(), "dsh-magic-legacy-empty-"));
     try {
