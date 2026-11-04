@@ -33,6 +33,10 @@ on:
         description: "Optional concurrency slot: dispatches with different slots run in parallel instead of queueing (round 28, repeated e2e for I1 statistics)"
         type: string
         default: ""
+      dsh_version:
+        description: "Optional @deepseek-ai/dsh version for the e2e job (round 28b compatibility lane, e.g. 0.2.2-alpha.3). Empty = the pinned DSH_PINNED below. Only the e2e job uses it; checks always run on the repo lockfile's DSH."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -43,7 +47,8 @@ concurrency:
 
 env:
   BUN_VERSION: 1.4.2 # packageManager: bun@1.4.2
-  DSH_VERSION: 0.2.1-rc.5
+  DSH_PINNED: 0.2.1-rc.5 # the adapter's compat contract (src/doctor/env.ts DSH_COMPAT_EXPECTED_VERSION)
+  DSH_VERSION: ${{ inputs.dsh_version || '0.2.1-rc.5' }}
 
 jobs:
   checks:
@@ -158,7 +163,22 @@ jobs:
           bash scripts/e2e/install-profile.sh test headless
           source scripts/e2e/env.sh
           node dist/cli.js setup --profile test
-          node dist/cli.js doctor --profile test
+          # Round 28b: on the pinned DSH doctor must exit 0 (unchanged). On an
+          # evaluated other version (input dsh_version) its exact-version pin
+          # check FAILs by design; that one line alone is tolerated (warning),
+          # any other FAIL still stops the job.
+          set +e
+          node dist/cli.js doctor --profile test | tee "$RUNNER_TEMP/doctor.txt"
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            other=$(grep '^\[FAIL\]' "$RUNNER_TEMP/doctor.txt" | grep -vc '^\[FAIL\] DSH version$' || true)
+            if [ "$DSH_VERSION" != "$DSH_PINNED" ] && [ "$other" = "0" ]; then
+              echo "::warning::doctor: only the exact DSH version pin failed (installed $DSH_VERSION, pinned $DSH_PINNED)"
+            else
+              exit "$rc"
+            fi
+          fi
 
       - name: Real turns (worker self-test, 3-process session, round 17 scenarios C/S/U)
         working-directory: packages/dsh-plugin
@@ -183,6 +203,7 @@ jobs:
           set +e
           python3 scripts/e2e/ci-check.py check "$CI_OUT"
           rc=$?
+          echo "DSH $DSH_VERSION (pinned $DSH_PINNED)" >> "$GITHUB_STEP_SUMMARY"
           cat "$CI_OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"
           exit $rc
 

@@ -57,6 +57,21 @@ for l in open(sys.argv[1], errors="replace"):
   TMAGIC="$(grep -c '^\[magic-context\]' "$OUT/turn-$s.log" 2>/dev/null || true)"
   TFENCE="$(grep -ci 'schema' "$OUT/turn-$s.log" 2>/dev/null || true)"
 }
+# Round 28b: compatibility lane (dsh-install input dsh_version). On a DSH other
+# than the pinned DSH_PINNED, doctor's exact-version pin check FAILs by design;
+# when that is the ONLY FAIL line the step's doctor rc counts as 0 and the step
+# records doctorPin=1 (install-accept-check.py reports it as A0 WARN). On the
+# pinned version nothing changes.
+PIN_ONLY=0
+DRC=0
+doctor_rc() { # doctor_rc <log> <rc>  -> sets DRC and PIN_ONLY (no subshell)
+  PIN_ONLY=0; DRC="$2"
+  if [[ "$2" -ne 0 && -n "${DSH_PINNED:-}" && "${DSH_VERSION:-}" != "$DSH_PINNED" ]] \
+     && grep -q '^\[FAIL\] DSH version$' "$1" && [[ "$(grep '^\[FAIL\]' "$1" | grep -vc '^\[FAIL\] DSH version$')" == "0" ]]; then
+    PIN_ONLY=1; DRC=0
+  fi
+}
+
 install_tgz() { # install_tgz <tgz> <step>
   (cd "$OUT" && timeout 300 node "$DSH_BIN" plugin --profile $P add "$1") > "$OUT/install-$2.log" 2>&1
   echo $?
@@ -74,40 +89,40 @@ timeout 60 node "$DSH_BIN" --profile $P --dump-default-config > "$OUT/dump-confi
 rc_i=$(install_tgz "$OLD" a)
 start_mock
 CLI setup --profile $P > "$OUT/setup-a.log" 2>&1; rc_s=$?
-CLI doctor --profile $P > "$OUT/doctor-a.log" 2>&1; rc_d=$?
+CLI doctor --profile $P > "$OUT/doctor-a.log" 2>&1; rc_d=$?; doctor_rc "$OUT/doctor-a.log" "$rc_d"; rc_d=$DRC; pin_a=$PIN_ONLY
 ver=$(CLI --version 2>/dev/null | tail -n 1)
 turn a
-rec step a install "$rc_i" setup "$rc_s" doctor "$rc_d" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" \
+rec step a install "$rc_i" setup "$rc_s" doctor "$rc_d" doctorPin "$pin_a" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" \
   db "$([[ -f "$DB" ]] && echo yes || echo no)" tags "$(dbq 'select count(*) from tags')" sid "$SID" \
   mock "$(head -c 120 "$OUT/mock.log")"
 
 # --- b: upgrade to NEW
 rc_i=$(install_tgz "$NEW" b)
 CLI setup --profile $P > "$OUT/setup-b.log" 2>&1; rc_s=$?
-CLI doctor --profile $P > "$OUT/doctor-b.log" 2>&1; rc_d=$?
+CLI doctor --profile $P > "$OUT/doctor-b.log" 2>&1; rc_d=$?; doctor_rc "$OUT/doctor-b.log" "$rc_d"; rc_d=$DRC; pin_b=$PIN_ONLY
 ver=$(CLI --version 2>/dev/null | tail -n 1)
 tags_before=$(dbq 'select count(*) from tags')
 turn b
-rec step b install "$rc_i" setup "$rc_s" doctor "$rc_d" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" \
+rec step b install "$rc_i" setup "$rc_s" doctor "$rc_d" doctorPin "$pin_b" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" \
   tagsBefore "$tags_before" tags "$(dbq 'select count(*) from tags')" integrity "$(dbq 'pragma integrity_check')"
 
 # --- c: disable
 CLI setup --profile $P --disable-preset root > "$OUT/setup-c.log" 2>&1; rc_s=$?
-CLI doctor --profile $P > "$OUT/doctor-c.log" 2>&1; rc_d=$?
+CLI doctor --profile $P > "$OUT/doctor-c.log" 2>&1; rc_d=$?; doctor_rc "$OUT/doctor-c.log" "$rc_d"; rc_d=$DRC; pin_c=$PIN_ONLY
 block="$(grep -c 'dsh-magic-context' "$PDIR/cordis.patch.yml" 2>/dev/null || true)"
 tags_before=$(dbq 'select count(*) from tags')
 turn c
-rec step c setup "$rc_s" doctor "$rc_d" doctorDisabled "$(grep -c 'disabled in every preset' "$OUT/doctor-c.log" 2>/dev/null || true)" rc "${TRC:-x}" magicLines "$TMAGIC" patchMentions "$block" \
+rec step c setup "$rc_s" doctor "$rc_d" doctorPin "$pin_c" doctorDisabled "$(grep -c 'disabled in every preset' "$OUT/doctor-c.log" 2>/dev/null || true)" rc "${TRC:-x}" magicLines "$TMAGIC" patchMentions "$block" \
   tagsBefore "$tags_before" tags "$(dbq 'select count(*) from tags')"
 
 # --- d: roll back to OLD (re-enabled)
 rc_i=$(install_tgz "$OLD" d)
 CLI setup --profile $P > "$OUT/setup-d.log" 2>&1; rc_s=$?
-CLI doctor --profile $P > "$OUT/doctor-d.log" 2>&1; rc_d=$?
+CLI doctor --profile $P > "$OUT/doctor-d.log" 2>&1; rc_d=$?; doctor_rc "$OUT/doctor-d.log" "$rc_d"; rc_d=$DRC; pin_d=$PIN_ONLY
 ver=$(CLI --version 2>/dev/null | tail -n 1)
 tags_before=$(dbq 'select count(*) from tags')
 turn d
-rec step d install "$rc_i" setup "$rc_s" doctor "$rc_d" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" schemaLines "$TFENCE" \
+rec step d install "$rc_i" setup "$rc_s" doctor "$rc_d" doctorPin "$pin_d" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" schemaLines "$TFENCE" \
   tagsBefore "$tags_before" tags "$(dbq 'select count(*) from tags')" integrity "$(dbq 'pragma integrity_check')"
 
 kill "$MOCK_PID" 2>/dev/null; wait "$MOCK_PID" 2>/dev/null

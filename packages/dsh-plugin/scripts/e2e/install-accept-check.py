@@ -33,6 +33,11 @@ ok_d = I("d", "install") == 0 and I("d", "setup") == 0 and I("d", "doctor") == 0
 fenced = I("d", "install") == 0 and I("d", "schemaLines") > 0 and not ok_d
 add("A4", True if ok_d else ("warn" if fenced else False),
     "roll back to dsh.2: data readable (turn runs, rows kept) — or an explicit schema refusal (WARN, documented)", d)
+# A0 (round 28b compatibility lane): doctor's exact DSH version pin was the only
+# FAIL in these steps (install-accept.sh counted their doctor rc as 0). Never on
+# the pinned DSH; WARN = the adapter is not certified for this DSH version.
+pin = [k for k in "abcd" if I(k, "doctorPin") == 1]
+add("A0", True if not pin else "warn", "doctor passed every check except (on a non-pinned DSH) its exact version pin", {"pinOnlySteps": pin})
 print("| id | result | check | detail |\n|---|---|---|---|")
 for r in rows:
     print("| %s | %s | %s | %s |" % r)
