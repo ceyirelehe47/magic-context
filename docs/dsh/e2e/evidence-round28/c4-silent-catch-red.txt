@@ -1,0 +1,6 @@
+error: expect(received).toHaveLength(expected)
+(fail) context plane: fail-open catches are no longer silent (round 28) > a throwing historian fire is logged (once per message), and the step still completes [233.26ms]
+error: expect(received).toBe(expected)
+(fail) context plane: fail-open catches are no longer silent (round 28) > a failing session_meta persistence is logged, and the trigger still runs [196.54ms]
+ 0 pass
+ 2 fail
