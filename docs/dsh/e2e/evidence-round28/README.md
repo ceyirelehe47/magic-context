@@ -26,8 +26,11 @@ credentials.
 | 41841161491 | dsh-ci checks (push) | rc.5 | 5b3ae0917 | success | | | | |
 | 41841941636 | dsh-ci checks (push) | rc.5 | adb5ed80d | success | | | | dsh-plugin **624**/0 |
 | 41841943616 | dsh-install | 0.2.2-alpha.3 + allow-version | adb5ed80d | A0 WARN, A1–A4 PASS | | | | A0 WARN = only doctor's version pin failed; exemption needed (by design) |
-R28C_RUNS
-| 41775904921 | dsh-soak (12 h, 4 × 180 min) | rc.5 | 901fb7874 (round 26 code) | SOAK_STATUS | | | | |
+| 41842386831 | dsh-ci e2e rc.5 #1 (28c) | rc.5 | adb5ed80d | 133 / 1 FAIL (C3) / 1 WARN (E2) | PASS | PASS | PASS | C3 peak at the last step, 待验证 (`c6-28c-c3-y2.md`) |
+| 41845836776 | dsh-ci e2e rc.5 #2 (28c) | rc.5 | 95333e55d | 135 / 0 / 0 | PASS | PASS | PASS | — (C3 PASS again) |
+| 41842392546 | dsh-ci e2e (slot a3) | 0.2.2-alpha.3 + allow-version | adb5ed80d | 132 / 1 FAIL (Y2) / 2 WARN (E2, T3) | PASS | PASS | PASS | Y2 check timing (`c6-28c-c3-y2.md`) |
+| 41842397847 | dsh-ci e2e (slot a3b) | 0.2.2-alpha.3 + allow-version | adb5ed80d | 133 / 1 FAIL (Y2) / 1 WARN (E2) | PASS | PASS | PASS | Y2 same |
+| 41775904921 | dsh-soak (12 h, 4 × 180 min) | rc.5 | 901fb7874 (round 26 code) | seg 1+2 success, K1–K9 PASS cumulative (6681/6681 mock, real 12/12); seg 3 running, seg 4 queued at 22:25 CST | | | | |
 
 ## Files
 
@@ -36,4 +39,5 @@ R28C_RUNS
 - `c3-reown-multi-owner-*` — re-own with ≥ 2 stale owners red/green.
 - `c4-silent-catch-*` — context plane silent catch red/green.
 - `c5-r2-r4-r7-model-selfdrop.md` — R2/R4/R7 analysis (model ctx_reduce against the prompt).
+- `c6-28c-c3-y2.md` — 28c: C3 on rc.5 #1 and Y2 on alpha.3, offline re-check.
 - `b1-preset-include-commit-*` — alpha.3 preset include commit() red/green + repro.

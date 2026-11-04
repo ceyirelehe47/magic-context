@@ -64,7 +64,16 @@ report). Evidence: `docs/dsh/e2e/evidence-round28/` (run table in its README).
 | 41840694149 | install | alpha.3 | 21985b4ef | failure | DSH plugin manager rejects the bundle (peer pin 0.2.1-rc.5) → exemption lane `adb5ed80d` | | | |
 | 41841943616 | install | alpha.3 (+allow-version) | adb5ed80d | A0 WARN, A1–A4 PASS | — (A0 WARN = pin-only doctor FAIL + exemption needed, by design) | | | |
 | 41841941636 | push checks | rc.5 | adb5ed80d | success | dsh-plugin 624/0 | | | |
-| R28C_RUNS |
+| 41842386831 | e2e rc.5 #1 (28c) | rc.5 | adb5ed80d | 133 / 1 / 1 (E2) | C3: peak at the last step (6th read pair, U turns at 66–72 %), 待验证, check unchanged (`evidence-round28/c6-28c-c3-y2.md`) | PASS | PASS | PASS |
+| 41845836776 | e2e rc.5 #2 (28c) | rc.5 | 95333e55d (docs only over adb5ed80d) | 135 / 0 / 0 | — (C3 PASS again) | PASS | PASS | PASS |
+| 41842392546 | e2e alpha.3 slot a3 (28c) | alpha.3 + allow-version | adb5ed80d | 132 / 1 / 2 (E2, T3) | Y2: first-step busy probe sees the NEW process's own fresh lease (check timing), Magic behaviour correct | PASS | PASS | PASS |
+| 41842397847 | e2e alpha.3 slot a3b (28c) | alpha.3 + allow-version | adb5ed80d | 133 / 1 / 1 (E2) | Y2: same as a3 | PASS | PASS | PASS |
+
+"Two consecutive green" for round 28c (no FAIL besides known won't-fix upstream /
+DSH-native items) is **not met** at `adb5ed80d`: rc.5 #1 41842386831 has C3 FAIL
+(待验证, not a known upstream item), rc.5 #2 41845836776 is 135 / 0 / 0. The
+round 28b e2e #0 41839150646 @ `f6ce05a22` was also 0 FAIL, but on older code and
+not consecutive with #2. No third run was dispatched this round (budget).
 
 Round 28 commits (adapter / scenarios / scripts / CI only, no core change; red test first):
 - `92c8f5127` RED: folded tool record must be one past-tense prose summary (fold-format).
@@ -1973,7 +1982,13 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       | plugin manager install / boot | rejects the bundle: peers pin 0.2.1-rc.5 exactly | install 41840694149 failure | by design (DSH); CI grants `dsh plugin allow-version … --accept-risk` off-pin (`adb5ed80d`); users on alpha.3 would need the same exemption until peers change |
       | doctor | exact-version pin FAILs (only that line) | 41841943616 A0 WARN `doctorPin=1` | expected off-pin; tolerated in CI only |
       | install → upgrade → disable → roll back | PASS | 41841943616 A1–A4 PASS | — |
-      | real-model e2e | A3_E2E_RESULT | A3_E2E_RUNS | A3_E2E_DISPO |
+      | real-model e2e (135 judged) | 132–133 PASS, **1 FAIL each (Y2)**, I1/I2/R10 PASS | 41842392546, 41842397847 vs rc.5 41839150646 / 41842386831 | Y2 已复现 2/2 on alpha.3, 0 on rc.5: the first step's busy probe catches the new process's own fresh lease 4 ms after it took over the dead one; takeover, noop passes, nothing left behind all correct. Check timing assumption; not relaxed — pending user. Every other check matches rc.5 (T3 PASS/WARN and E2 WARN vary on both) |
+      | other e2e checks | same as rc.5 | same runs | no new FAIL other than Y2 |
+    - **28c e2e findings (no code change; checks not relaxed):** Y2 FAIL on
+      alpha.3 2/2 (check timing: first-step busy probe sees the new process's own
+      fresh lease), C3 FAIL once on rc.5 (peak at the last step), both in
+      `evidence-round28/c6-28c-c3-y2.md`. Neither is an adapter fault on the
+      evidence; both are listed for the user.
     - **Fixed this round (adapter):** open-lock crash residues (`bb86b923c`);
       re-own with ≥ 2 stale owners (`8ea0321a8`); silent catch in context plane
       (`952a3970a`); alpha.3 preset include (`bdeb8bfa0`); test flake
