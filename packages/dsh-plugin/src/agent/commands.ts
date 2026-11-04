@@ -20,6 +20,7 @@
  * slices wire in. Until wired, they answer with an explicit "not wired"
  * message instead of failing.
  */
+import { embedDeferralStatusBlock, readEmbedDeferral } from "./embedding-wiring";
 import { backstopSkipStatusBlock, readBackstopSkip } from "./backstop-guard";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
@@ -204,7 +205,9 @@ export function registerCtxStatusCommand(ctx: Context, opts: CtxCommandsOptions)
           stripOpenCodeDbStatusLine(statusText) +
             pendingRestartStatusBlock(pending) +
             // Round 24 (R10): a skipped native backstop is never silent.
-            backstopSkipStatusBlock(readBackstopSkip(db, sessionId)),
+            backstopSkipStatusBlock(readBackstopSkip(db, sessionId)) +
+            // Round 27b (C5): a stalled auto-embed is never silent.
+            embedDeferralStatusBlock(readEmbedDeferral(db, sessionId)),
         );
       } catch (error) {
         return errorResult(`## Magic Status — Failed\n\n${describeError(error).brief}`);
