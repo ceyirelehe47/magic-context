@@ -1,0 +1,171 @@
+# DSH fork: long low-cost soak of the DSH adapter (round 26, task pack P1-4).
+# See docs/DSH-MAINTENANCE.md ("Soak") and packages/dsh-plugin/scripts/e2e/soak.sh.
+#
+# workflow_dispatch only. SEGMENTS serial jobs (matrix, max-parallel 1) of
+# SEGMENT_MINUTES each; every segment restores the previous one's state (the
+# shared Magic DB, the DSH sessions, the CSV and counters) from the artifact
+# soak-state-<n-1>, loops real `dsh` headless processes on the deterministic
+# mock model (24k window enforced, mock historian) with a REAL-model sample
+# every REAL_EVERY_MINUTES (OpenCode Go, secret OPENCODE_API_KEY), and uploads
+# soak-state-<n>. The final job runs soak-check.py over the whole CSV (RSS,
+# DB / WAL, residue: leases / in-progress / outbox / open lock, leftover
+# processes, latency, historian failures) and fails on a threshold.
+#
+#   short check:  segments=2  segment_minutes=10
+#   12 h soak:    segments=4  segment_minutes=180
+name: dsh-soak
+
+on:
+  workflow_dispatch:
+    inputs:
+      segments:
+        description: "Serial segments (jobs)"
+        default: "2"
+      segment_minutes:
+        description: "Minutes of runs per segment (job timeout = this + 40)"
+        default: "10"
+      real_every_minutes:
+        description: "Real-model sample interval in minutes (0 = none)"
+        default: "30"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: dsh-soak
+  cancel-in-progress: false
+
+env:
+  BUN_VERSION: 1.4.2
+  DSH_VERSION: 0.2.1-rc.5
+
+jobs:
+  plan:
+    if: github.repository == 'ceyirelehe47/magic-context'
+    runs-on: ubuntu-latest
+    outputs:
+      segs: ${{ steps.p.outputs.segs }}
+      timeout: ${{ steps.p.outputs.timeout }}
+    steps:
+      - id: p
+        run: |
+          n='${{ inputs.segments }}'; m='${{ inputs.segment_minutes }}'
+          [[ "$n" =~ ^[0-9]+$ && "$n" -ge 1 && "$n" -le 8 ]] || { echo "::error::segments must be 1..8"; exit 1; }
+          [[ "$m" =~ ^[0-9]+$ && "$m" -ge 1 && "$m" -le 300 ]] || { echo "::error::segment_minutes must be 1..300"; exit 1; }
+          echo "segs=$(python3 -c "import json;print(json.dumps(list(range(1,$n+1))))")" >> "$GITHUB_OUTPUT"
+          echo "timeout=$((m + 40))" >> "$GITHUB_OUTPUT"
+
+  soak:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout) }}
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        seg: ${{ fromJSON(needs.plan.outputs.segs) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scratch dirs
+        run: |
+          echo "E2E_ROOT=$RUNNER_TEMP/e2e" >> "$GITHUB_ENV"
+          echo "SOAK_STATE=$RUNNER_TEMP/soak-state" >> "$GITHUB_ENV"
+          echo "PREV=$(( ${{ matrix.seg }} - 1 ))" >> "$GITHUB_ENV"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Bootstrap + build + scratch profile
+        working-directory: packages/dsh-plugin
+        env:
+          INSTALL_TIMEOUT: "600"
+        run: |
+          bash scripts/e2e/bootstrap.sh
+          bun run build
+          bash scripts/e2e/install-profile.sh test headless
+          source scripts/e2e/env.sh
+          node dist/cli.js setup --profile test
+
+      - name: Previous segment state
+        if: matrix.seg > 1
+        uses: actions/download-artifact@v4
+        with:
+          name: soak-state-${{ env.PREV }}
+          path: ${{ runner.temp }}/soak-state
+
+      - name: Soak segment ${{ matrix.seg }}
+        working-directory: packages/dsh-plugin
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          SOAK_SEGMENT: ${{ matrix.seg }}
+          SOAK_MINUTES: ${{ inputs.segment_minutes }}
+          SOAK_REAL_EVERY_MIN: ${{ inputs.real_every_minutes }}
+        run: |
+          if [ "${{ matrix.seg }}" -gt 1 ] && [ ! -f "$SOAK_STATE/state.tgz" ]; then
+            echo "::error::segment ${{ matrix.seg }}: no state from segment $PREV"; exit 1
+          fi
+          bash scripts/e2e/soak.sh
+          python3 scripts/e2e/soak-check.py "$SOAK_STATE/soak.csv" "$SOAK_STATE/summary-${{ matrix.seg }}.md" || true
+          cat "$SOAK_STATE/summary-${{ matrix.seg }}.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Redact text files
+        if: always()
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          python3 - "$SOAK_STATE" <<'PY'
+          import os, sys, pathlib
+          key = os.environ.get("OPENCODE_API_KEY", "")
+          for p in pathlib.Path(sys.argv[1]).glob("*"):
+              if p.suffix not in (".log", ".csv", ".jsonl", ".md", ".json", ".txt") or not p.is_file():
+                  continue
+              s = p.read_text(errors="replace")
+              if len(key) >= 8 and key in s:
+                  p.write_text(s.replace(key, "<REDACTED:OPENCODE_API_KEY>"))
+          PY
+
+      - name: Upload segment state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-state-${{ matrix.seg }}
+          path: ${{ runner.temp }}/soak-state
+          retention-days: 7
+          if-no-files-found: error
+
+  check:
+    needs: [plan, soak]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Last segment's state (cumulative CSV)
+        uses: actions/download-artifact@v4
+        with:
+          name: soak-state-${{ inputs.segments }}
+          path: soak-state
+      - name: Trend check
+        run: |
+          set +e
+          python3 packages/dsh-plugin/scripts/e2e/soak-check.py soak-state/soak.csv soak-state/summary.md
+          rc=$?
+          cat soak-state/summary.md >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-report-${{ github.run_id }}
+          path: |
+            soak-state/soak.csv
+            soak-state/summary.md
+            soak-state/fail-*.log
+          retention-days: 14
+          if-no-files-found: warn
