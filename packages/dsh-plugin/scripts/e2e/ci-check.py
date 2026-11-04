@@ -50,6 +50,15 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       questions (and its injected <project-memory> carries the codes); a
       correction wins over the old value in storage, injection and search; a
       never-recorded fact gets no invented codeword; no cross-session mixing
+  T1–T4 (round 26, scenario T; real main model, mock historian route) /compact
+      with a historian <unprocessed_from> inside the region: the mini-historian
+      left the user constraint uncovered, the summary carries it in an
+      <unsummarized_tail> block (original message shadowed, nothing else
+      carries the codeword), and the next process obeys the constraint
+  M1–M5 (round 26, scenario M) legacy-data migration through the BUILT CLI on
+      a legacy fixture DB: scan/dry-run read-only, apply (backup, migrated rows,
+      flags), idempotent, restore digest match; a real DSH run injects the
+      migrated memory
   P1  no dsh process left after the runs
 """
 import hashlib
@@ -1079,11 +1088,22 @@ def check_h(c, out: Path, runs):
         extra = sorted(set(x.get("codes", [])) - own_codes)
         if extra:
             foreign.append((x["range"], extra))
-    c.add("U14", int(reads[1]) >= 2 and len(acomps) >= 2 and bool(arows) and bool(hreal) and not numbering_mismatch
-          and not markup and not foreign,
+    # Round 26 (e2e 41769676548): since 8a7864594 (core parity) the historian
+    # prompt carries a <project-memory> dedup block with every ACTIVE memory, so
+    # a summary can restate a code that is already an active memory before the
+    # pass (h-db-a2 = the state before the first pass). That is a model
+    # attribution slip, not a leak of unseen text: WARN, not FAIL. A code that
+    # is in neither the range nor that block still FAILS.
+    pre_mem = {cd for m in ((load_json(out / "h-db-a2.json") or {}).get("memories") or [])
+               if isinstance(m, dict) and m.get("status", "active") in ("active", "permanent") for cd in m.get("codes", [])}
+    unexplained = [(r, [cd for cd in ex if cd not in pre_mem]) for r, ex in foreign]
+    unexplained = [(r, ex) for r, ex in unexplained if ex]
+    ok14 = int(reads[1]) >= 2 and len(acomps) >= 2 and bool(arows) and bool(hreal) and not numbering_mismatch \
+        and not markup and not unexplained
+    c.add("U14", (True if not foreign else "warn") if ok14 else False,
           "session A: historian published compartments in >= 2 passes, covering the four fact turns; no compartment carries a codeword no message (text, tool call or result) in its range carries, nor injected-block markup",
           {"readTurns": reads[0], "passesWithNewCompartments": reads[1], "compartments": [(x["range"], x["codes"]) for x in acomps],
-           "foreignCodes": foreign, "injectedMarkup": markup, "historyRows": len(hrows), "numberingMismatch": numbering_mismatch,
+           "foreignCodes": foreign, "foreignNotInProjectMemoryBlock": unexplained, "injectedMarkup": markup, "historyRows": len(hrows), "numberingMismatch": numbering_mismatch,
            "codesInCompartmentText": fact_codes_in_comps, "searchTurnOrdinal": search_turn if search_turn < 10 ** 9 else None})
 
     # U15 automatic injection: the NEW session's injected m0 <project-memory> carries the four codes
@@ -1214,10 +1234,18 @@ def check_h(c, out: Path, runs):
     cm0 = ((load_json(out / "h-db-c1.json") or {}).get("sessions") or {}).get(csid, {}).get("m0") if csid else None
     cm0 = cm0 if isinstance(cm0, dict) else {}
     pm = set(cm0.get("projectMemoryCodes") or [])
-    c.add("U22", H_TODO2 in ans_c and H_TODO not in ans_c and H_TODO2 in pm and H_TODO not in pm,
-          "session C (new): current todo answered and injected with the NEW codeword, the old one absent",
-          {"answer": ans_c[:200], "m0ProjectMemoryCodes": sorted(pm),
-           "class": None if (H_TODO2 in pm and H_TODO not in pm) else "product"})
+    # Round 26 (e2e 41769676548): the agent's own replacement memory may NAME
+    # the old code ("This replaces the cancelled TODO-BISON-9074"). The old
+    # code in the injected block is stale only when an active memory carries
+    # it WITHOUT the new code (U21's definition of a stale todo).
+    stale_src = [m["id"] for m in mems if H_TODO in m.get("codes", []) and H_TODO2 not in m.get("codes", [])
+                 and m.get("status", "active") == "active"]
+    old_injected_stale = H_TODO in pm and bool(stale_src)
+    c.add("U22", H_TODO2 in ans_c and H_TODO not in ans_c and H_TODO2 in pm and not old_injected_stale,
+          "session C (new): current todo answered and injected with the NEW codeword; the old one is not injected as a live fact",
+          {"answer": ans_c[:200], "m0ProjectMemoryCodes": sorted(pm), "staleActiveSources": stale_src,
+           "oldNamedOnlyInReplacement": H_TODO in pm and not stale_src,
+           "class": None if (H_TODO2 in pm and not old_injected_stale) else "product"})
 
     # U23 ctx_search after the change: new value, no stale active memory, no session-A history leaking into C
     ok_c2, c2res, _ = h_results(out / "h-c2.log", "ctx_search")
@@ -1386,6 +1414,95 @@ def check_s(c, out: Path, runs):
           {"compartments": comps, "historianRuns": hist, "failureCounts": fails})
 
 
+def check_t(c, out: Path, runs):
+    """T1–T4 (round 26, scenario T, limitation 17 / P1-2)."""
+    if "t-1" not in runs:
+        c.add("T0", False, "scenario T ran (/compact with <unprocessed_from>)", "no t-* runs")
+        return
+    code = (out / "t.codeword").read_text().strip() if (out / "t.codeword").exists() else "OTTER-LANTERN-6152"
+    rc = {n: runs.get(n, ("", "missing"))[1] for n in ("t-1", "t-2", "t-3", "t-4")}
+    done = e2e_lines(out / "t-3.log", "/compact at idle: done")
+    c.add("T1", all(v.startswith("rc=0") for v in rc.values()) and bool(done) and "kind=success" in done[0],
+          "scenario T runs exit 0 and the e2e /compact at idle (t-3) succeeded", {"rc": rc, "done": [d[-200:] for d in done[:1]]})
+    t = load_json(out / "t-tail.json") or {}
+    cons = t.get("constraint") or {}
+    s_ord = cons.get("historyOrdinal")
+    hr = [r for r in (t.get("historianRuns") or []) if isinstance(r, dict)]
+    deferred = [r for r in hr if s_ord is not None and r.get("unprocessed_from") == s_ord
+                and (r.get("chunk_end_ordinal") or 0) >= s_ord]
+    comps = [r for r in (t.get("compartments") or []) if isinstance(r, dict)]
+    last_end = max([r.get("end_message") or 0 for r in comps], default=0)
+    c.add("T2", bool(cons.get("found")) and bool(deferred) and last_end < (s_ord or 0),
+          "the /compact mini-historian answered <unprocessed_from> = the constraint's ordinal; compartments end before it",
+          {"constraintOrdinal": s_ord, "historianRuns": hr[-3:], "lastCompartmentEnd": last_end,
+           "error": (out / "t-tail.err").read_text(errors="replace")[-300:] if (out / "t-tail.err").exists() else ""})
+    cps = [x for x in (t.get("compactions") or []) if isinstance(x, dict)]
+    tail = (cps[-1].get("tail") if cps else None) or {}
+    leaks = [h for h in (t.get("surfaceHits") or []) if isinstance(h, dict) and not h.get("summary")]
+    ok3 = bool(cps) and bool(tail) and tail.get("carriesCodeword") is True and s_ord is not None \
+        and (tail.get("from") or 0) <= s_ord <= (tail.get("to") or -1) and cons.get("originalOnSurface") is False and not leaks
+    c.add("T3", ok3,
+          "the checkpoint shadows the constraint and its summary carries it in <unsummarized_tail> (no other surface copy)",
+          {"compactions": cps[-2:], "originalOnSurface": cons.get("originalOnSurface"), "otherSurfaceHits": leaks[:3]})
+    final4 = final_text(out / "t-4.log") or ""
+    calls4 = [ev.get("tool") for ev in events(out / "t-4.log") if ev.get("type") == "tool_call"]
+    # Anything injected into t-4's own turn that carries the codeword (a
+    # ctx-search hint) would make the answer unattributable to the summary.
+    evs4 = session_events(out / "t-session-4.jsonl")
+    start4 = next((i for i, e in enumerate(evs4) if "Name a colour. Answer from" in json.dumps(e.get("data") or {}, ensure_ascii=False)), None)
+    inj4 = [e.get("type") for e in (evs4[start4 + 1:] if start4 is not None else [])
+            if code in json.dumps(e.get("data") or {}, ensure_ascii=False)
+            and "ctx-search-hint" in json.dumps(e.get("data") or {}, ensure_ascii=False)]
+    obeyed = code in final4
+    c.add("T4", (True if not calls4 and not inj4 else "warn") if obeyed else False,
+          "restart: asked to name a colour (tools forbidden), the model answers the codeword from the summary",
+          {"rc": rc["t-4"], "final": final4[:200], "toolCalls": calls4, "codewordInjectedInTurn": inj4[:3]})
+
+
+def check_m(c, out: Path, runs):
+    """M1–M5 (round 26, scenario M, P0-1 legacy migration via the built CLI)."""
+    if not (out / "m-digests.json").exists():
+        c.add("M0", False, "scenario M ran (legacy migration through the built CLI)", "no m-digests.json")
+        return
+    d = load_json(out / "m-digests.json") or {}
+    txt = lambda n: (out / f"m-{n}.txt").read_text(errors="replace") if (out / f"m-{n}.txt").exists() else ""
+    st = lambda n: load_json(out / f"m-state-{n}.json") or {}
+    pre, app, res, fin = st("pre"), st("apply"), st("restore"), st("final")
+    c.add("M1", "rc=0" in txt("scan") and "rc=0" in txt("dry") and "unique: 1" in txt("scan") and "Dry run" in txt("dry")
+          and bool(d.get("pre")) and d.get("pre") == d.get("scan") == d.get("dry"),
+          "scan and --dry-run are read-only (logical digest unchanged) and classify the legacy rows",
+          {"digests": {k: (v or "")[:12] for k, v in d.items()}, "scan": txt("scan")[:240]})
+    act = app.get("activeUnderIdentity") or []
+    c.add("M2", "rc=0" in txt("apply") and "rollback:" in txt("apply") and d.get("backup") == "present"
+          and "unique" in act and act.count("live") == 1 and "cancelled" not in act
+          and app.get("memoryCount") == pre.get("memoryCount") and app.get("ftsInjected") == 0 and (app.get("legacyFlags") or 0) >= 1,
+          "--apply: backup, unique fact under the identity, duplicate archived, cancelled stays cancelled, nothing deleted, FTS cleaned, compartment flagged",
+          {"apply": txt("apply")[-300:], "state": {k: app.get(k) for k in ("activeUnderIdentity", "memoryCount", "ftsInjected", "legacyFlags")}, "preCount": pre.get("memoryCount")})
+    c.add("M3", "Nothing to apply" in txt("apply2") and d.get("apply2") == d.get("apply"),
+          "--apply again is a no-op (idempotent)", txt("apply2")[-160:])
+    c.add("M4", "rc=0" in txt("restore") and "MATCH" in txt("restore") and d.get("restore") == d.get("pre")
+          and res.get("memories") == pre.get("memories"),
+          "--restore <backup> reproduces the pre-migration DB (digest MATCH)", txt("restore")[-240:])
+    rows = []
+    if (out / "m-requests.jsonl").exists():
+        for line in (out / "m-requests.jsonl").read_text().splitlines():
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                pass
+    def hits(prefix):
+        rs = [r for r in rows if str(r.get("session", "")).startswith(prefix) and r.get("outcome") in ("text", "tool")]
+        return sorted({n for r in rs for n in (r.get("needles") or [])}), len(rs)
+    hp, np_ = hits("mc-ci-m-pre-")
+    ho, no = hits("mc-ci-m-post-")
+    rc = {n: runs.get(n, ("", "missing"))[1] for n in ("m-pre", "m-post")}
+    c.add("M5", all(v.startswith("rc=0") for v in rc.values()) and np_ > 0 and no > 0
+          and "RULE-MARMOT-5830" not in hp and "RULE-MARMOT-5830" in ho and "TODO-BISON-9074" not in ho
+          and "unique" in (fin.get("activeUnderIdentity") or []),
+          "real DSH: the raw-path fact reaches the model only after the migration; the cancelled fact never does",
+          {"rc": rc, "preNeedles": hp, "postNeedles": ho, "requests": [np_, no]})
+
+
 def check(out: Path) -> int:
     c = Checks()
     runs = {}
@@ -1484,6 +1601,8 @@ def check(out: Path) -> int:
     check_s(c, out, runs)
     check_r22_k(c, out, runs)
     check_h(c, out, runs)
+    check_t(c, out, runs)
+    check_m(c, out, runs)
 
     # --- P: process hygiene
     left = (out / "leftover-procs.txt").read_text().split() if (out / "leftover-procs.txt").exists() else []

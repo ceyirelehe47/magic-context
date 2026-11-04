@@ -78,6 +78,26 @@ function historianXml(messages) {
     hi = Math.max(hi, Number(m[2] ?? m[1]));
   }
   if (!Number.isFinite(lo)) return "<output><compartments></compartments></output>";
+  // Round 26 (scenario T, limitation 17): MOCK_HISTORIAN_DEFER_NEEDLE=<text>
+  // leaves the chunk unprocessed FROM the first ordinal block that contains
+  // <text> (a real `<unprocessed_from>` inside the chunk, as a historian does
+  // when the chunk ends mid-topic). Only when an earlier block exists to cover.
+  const needle = process.env.MOCK_HISTORIAN_DEFER_NEEDLE ?? "";
+  let unprocessed = hi + 1;
+  if (needle.length > 0) {
+    const blocks = [...text.matchAll(/^\[(\d+)(?:-(\d+))?\]/gm)];
+    for (let i = 0; i < blocks.length; i += 1) {
+      const start = Number(blocks[i][1]);
+      const body = text.slice(blocks[i].index, i + 1 < blocks.length ? blocks[i + 1].index : text.length);
+      if (body.includes(needle)) {
+        if (start > lo) {
+          hi = start - 1;
+          unprocessed = start;
+        }
+        break;
+      }
+    }
+  }
   return `<output>
 <compartments>
 <compartment start="${lo}" end="${hi}" title="mock work ${lo}-${hi}" episode_type="design" importance="50">
@@ -91,7 +111,7 @@ function historianXml(messages) {
 </facts>
 <meta>
 <messages_processed>${lo}-${hi}</messages_processed>
-<unprocessed_from>${hi + 1}</unprocessed_from>
+<unprocessed_from>${unprocessed}</unprocessed_from>
 </meta>
 </output>`;
 }
@@ -200,6 +220,8 @@ const server = createServer((req, res) => {
       // round 25 (scenario W): the tool names the agent OFFERED in this request
       tools: (Array.isArray(body.tools) ? body.tools : []).map((t) => t?.function?.name ?? t?.name).filter(Boolean),
     };
+    // round 26 (scenario M): which of MOCK_LOG_NEEDLES (comma list) the request carried
+    if (process.env.MOCK_LOG_NEEDLES) row.needles = process.env.MOCK_LOG_NEEDLES.split(",").filter((x) => x && serialized.includes(x));
     if (promptTokens > window) {
       row.outcome = "context_length_exceeded";
       appendFileSync(logPath, `${JSON.stringify(row)}\n`);

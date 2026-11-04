@@ -19,6 +19,8 @@
 #                     <8 KB files until compaction-basic must summarize
 #   pnew-* / pold-*   round 19 P: native pressure compaction vs MC 65 % on a
 #                     100k main route (shipped policy vs explicit DSH defaults)
+#   t-*               round 26 T: /compact with <unprocessed_from> (ci-t.sh)
+#   m-*               round 26 M: legacy migration via the built CLI (ci-m.sh)
 # Everything lands in $CI_OUT (default $E2E_ROOT/ci); ci-check.py judges it.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -358,6 +360,11 @@ if [[ -n "$LSID" ]]; then
 fi
 unset MC_E2E_MAIN_PROVIDER
 
+# ============================ round 26 scenario T ============================
+# /compact with a historian <unprocessed_from> inside the region (limitation 17,
+# P1-2): real main model, mock historian route; checks T1–T4. See ci-t.sh.
+P_FIX="$P_FIX" bash "$HERE/ci-t.sh"
+
 # ============================ round 22 scenario K ============================
 # Pending restart vs hot keys in ONE long process (checks U7–U11). Headless is
 # one process per turn, so the edit happens DURING a turn: k-1 reads six files
@@ -426,6 +433,11 @@ unset MC_E2E_MAIN_PROVIDER
 # (no key; requests priced with a real BPE count and the window enforced):
 # checks X1–X8. See ci-x.sh.
 bash "$HERE/ci-x.sh"
+
+# ============================ round 26 scenario M ============================
+# Legacy-data migration through the built CLI on a fixture DB in an isolated
+# data dir + mock-model DSH runs before/after (P0-1); checks M1–M5. See ci-m.sh.
+bash "$HERE/ci-m.sh"
 
 # ============================ round 24b scenario H ============================
 # Multi-session memory correctness on the real model (task pack P1-1): four
