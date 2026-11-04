@@ -183,6 +183,46 @@ describe("dsh-magic-context doctor (Phase 2 slice C)", () => {
     }
   });
 
+  it("accepts DSH 0.2.2-alpha.3 as a declared version (round 29)", async () => {
+    const env = makeEnv();
+    process.env.XDG_CONFIG_HOME = env.configHome;
+    try {
+      env.installDir = fakeInstall(join(env.root, "install"), "0.2.2-alpha.3");
+      const report = await runDshDoctor([], {
+        dshHome: env.dshHome,
+        dshInstallDir: env.installDir,
+        directory: env.work,
+      });
+      const version = byId(report).get("dsh-version");
+      expect(version?.status).toBe("ok");
+      expect(version?.detail).toContain("0.2.2-alpha.3");
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      await cleanup(env.root);
+    }
+  });
+
+  it("still fails an untested DSH such as 0.2.2-rc.1 (round 29)", async () => {
+    const env = makeEnv();
+    process.env.XDG_CONFIG_HOME = env.configHome;
+    try {
+      env.installDir = fakeInstall(join(env.root, "install"), "0.2.2-rc.1");
+      const report = await runDshDoctor([], {
+        dshHome: env.dshHome,
+        dshInstallDir: env.installDir,
+        directory: env.work,
+      });
+      const version = byId(report).get("dsh-version");
+      expect(version?.status).toBe("fail");
+      expect(version?.detail).toContain("0.2.2-rc.1");
+      expect(version?.detail).toContain("0.2.2-alpha.3");
+      expect(report.exitCode).toBe(1);
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      await cleanup(env.root);
+    }
+  });
+
   it("fails the version check on an exact-rc mismatch", async () => {
     const env = makeEnv();
     process.env.XDG_CONFIG_HOME = env.configHome;

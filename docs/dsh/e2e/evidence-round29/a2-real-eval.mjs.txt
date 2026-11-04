@@ -1,0 +1,15 @@
+// usage: node real-eval.mjs <app-boot dir> <manifest.json>  -> evaluates with DSH's REAL plugin compatibility check
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+const [dir, manifestPath] = process.argv.slice(2);
+const req = createRequire(dir + "/package.json");
+const entry = req.resolve("@deepseek-ai/dsh-app-boot");
+const boot = await import(pathToFileURL(entry).href);
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+const runtime = boot.getDshRuntimeVersion();
+const versions = [runtime, "0.2.1-rc.5", "0.2.2-alpha.3", "0.2.2-rc.1", "0.2.2-alpha.2", "0.2.2"];
+for (const v of [...new Set(versions)]) {
+  const r = boot.evaluatePluginCompatibility(manifest, {}, v);
+  console.log(`app-boot ${runtime} | ${manifest.name}@${manifest.version} on dsh ${v}${v === runtime ? " (this runtime)" : ""}: ${r === undefined ? "ACCEPTED" : "REJECTED " + JSON.stringify(Object.keys(r.requirements).length) + " unmet"}`);
+}

@@ -1,0 +1,21 @@
+- Expected  - 4
++ Received  + 1
+(fail) DSH version declaration (round 29) > env exports the supported list; the pinned default stays 0.2.1-rc.5 [1.18ms]
+Expected: "@deepseek-ai/dsh-client-connection: 0.2.1-rc.5 | 0.2.2-alpha.3"
+Received: "@deepseek-ai/dsh-client-connection: 0.2.1-rc.5"
+(fail) DSH version declaration (round 29) > every DSH peer is exactly the supported list as '||'-joined exact versions [8.75ms]
+Expected: "0.2.2-alpha.3: "
+Received: "0.2.2-alpha.3: @deepseek-ai/dsh-client-connection,@deepseek-ai/dsh-client-ui-primitives,@deepseek-ai/dsh-client-ui-slots,@deepseek-ai/dsh-session,@deepseek-ai/dsh-agent,@deepseek-ai/dsh-compaction,@deepseek-ai/dsh-compaction-basic,@deepseek-ai/dsh-llm,@deepseek-ai/dsh-token-meter"
+(fail) DSH version declaration (round 29) > DSH's own rule accepts 0.2.1-rc.5 and 0.2.2-alpha.3 [1.41ms]
+(pass) DSH version declaration (round 29) > DSH's own rule rejects every untested DSH version [0.89ms]
+(pass) DSH version declaration (round 29) > devDependencies (lockfile, default CI path) stay pinned to 0.2.1-rc.5 [0.33ms]
+ 2 pass
+ 3 fail
+Expected: "ok"
+Received: "fail"
+(fail) dsh-magic-context doctor (Phase 2 slice C) > accepts DSH 0.2.2-alpha.3 as a declared version (round 29) [76.99ms]
+Expected to contain: "0.2.2-alpha.3"
+Received: "installed 0.2.2-rc.1 at /tmp/dsh-magic-doctor-eIiNGj/install/node_modules/@deepseek-ai/dsh; the adapter pins exact-rc 0.2.1-rc.5 (compat/dsh-0.1)."
+(fail) dsh-magic-context doctor (Phase 2 slice C) > still fails an untested DSH such as 0.2.2-rc.1 (round 29) [22.29ms]
+ 0 pass
+ 2 fail
