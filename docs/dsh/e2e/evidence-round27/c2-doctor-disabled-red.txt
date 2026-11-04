@@ -1,0 +1,58 @@
+bun test v1.4.4 (38afee6c8)
+
+src/doctor/doctor-disabled.test.ts:
+76 |         expect(readManagedBlock(text)).toBeUndefined();
+77 |         expect(JSON.stringify(parseEntryListYaml(text))).not.toContain("magic");
+78 | 
+79 |         const after = await doctor(ctx);
+80 |         const wiring = after.checks.find((c) => c.id === `profile-wiring.${ctx.name}`)!;
+81 |         expect(wiring.status).toBe("warn");
+                                   ^
+error: expect(received).toBe(expected)
+
+Expected: "warn"
+Received: "fail"
+
+      at <anonymous> (<repo>/packages/dsh-plugin/src/doctor/doctor-disabled.test.ts:81:31)
+      at async withProfile (<repo>/packages/dsh-plugin/src/doctor/doctor-disabled.test.ts:37:11)
+      at async <anonymous> (<repo>/packages/dsh-plugin/src/doctor/doctor-disabled.test.ts:67:13)
+(fail) doctor after Magic was disabled in every preset (round 27 C2) > flat (root): an explicit full disable is reported as disabled (warn), not as a broken install; exit code unchanged from the enabled state [36.70ms]
+(pass) doctor after Magic was disabled in every preset (round 27 C2) > flat (root): a plain setup re-enables (marker cleared) and doctor is ok again [6.78ms]
+76 |         expect(readManagedBlock(text)).toBeUndefined();
+77 |         expect(JSON.stringify(parseEntryListYaml(text))).not.toContain("magic");
+78 | 
+79 |         const after = await doctor(ctx);
+80 |         const wiring = after.checks.find((c) => c.id === `profile-wiring.${ctx.name}`)!;
+81 |         expect(wiring.status).toBe("warn");
+                                   ^
+error: expect(received).toBe(expected)
+
+Expected: "warn"
+Received: "fail"
+
+      at <anonymous> (<repo>/packages/dsh-plugin/src/doctor/doctor-disabled.test.ts:81:31)
+      at async withProfile (<repo>/packages/dsh-plugin/src/doctor/doctor-disabled.test.ts:37:11)
+      at async <anonymous> (<repo>/packages/dsh-plugin/src/doctor/doctor-disabled.test.ts:67:13)
+(fail) doctor after Magic was disabled in every preset (round 27 C2) > web presets: an explicit full disable is reported as disabled (warn), not as a broken install; exit code unchanged from the enabled state [11.22ms]
+(pass) doctor after Magic was disabled in every preset (round 27 C2) > web presets: a plain setup re-enables (marker cleared) and doctor is ok again [22.86ms]
+(pass) doctor after Magic was disabled in every preset (round 27 C2) > a profile that carries the bundle but was never set up still FAILS (not loosened) [2.72ms]
+117 |     await withProfile(true, async (ctx) => {
+118 |       const opts = { dshHome: ctx.dshHome, dshInstallDir: ctx.installDir, env: env(ctx.root) };
+119 |       expect((await runDshSetup([], opts)).exitCode).toBe(0);
+120 |       expect((await runDshSetup(["--disable-preset", "root"], opts)).exitCode).toBe(0);
+121 |       const marker = readFileSync(join(ctx.dir, "cordis.patch.yml"), "utf8").split("\n").find((l) => l.includes("disabled in every preset"));
+122 |       expect(marker).toBeDefined();
+                           ^
+error: expect(received).toBeDefined()
+
+Received: undefined
+
+      at <anonymous> (<repo>/packages/dsh-plugin/src/doctor/doctor-disabled.test.ts:122:22)
+      at async withProfile (<repo>/packages/dsh-plugin/src/doctor/doctor-disabled.test.ts:37:11)
+      at async <anonymous> (<repo>/packages/dsh-plugin/src/doctor/doctor-disabled.test.ts:117:11)
+(fail) doctor after Magic was disabled in every preset (round 27 C2) > a hand-copied marker next to live Magic rows changes nothing (rows win) [3.52ms]
+
+ 3 pass
+ 3 fail
+ 30 expect() calls
+Ran 6 tests across 1 file. [816.00ms]
