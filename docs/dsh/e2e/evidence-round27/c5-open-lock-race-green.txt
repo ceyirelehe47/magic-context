@@ -1,0 +1,15 @@
+# C5 open-lock stale takeover (open-lock-race.test.ts, 8 real processes × 6 rounds per run)
+
+- before (b037dadf1 open-lock.ts): scratch 4/40 + 3/80 OVERLAP; test run 4/48 OVERLAP (c5-open-lock-race-red.txt)
+- takeover mutex only (intermediate, not committed): 1/48 OVERLAP — second race: the lock was created EMPTY by writeFileSync(wx) and written after; a racer reading in between judged it 'unreadable record' (stale) and removed it
+- final (mutex + temp-file hard-link create + unreadable only stale after 5 s mtime): 8/8 runs × 48 = 384 acquisitions, 0 OVERLAP
+
+bun test v1.4.4 (38afee6c8)
+
+src/host/open-lock-race.test.ts:
+(pass) dsh open lock: stale-lock takeover race (round 27 C5) > 8 processes taking over the same dead holder's lock never hold it at the same time [11493.70ms]
+
+ 1 pass
+ 0 fail
+ 2 expect() calls
+Ran 1 test across 1 file. [11.77s]
