@@ -20,8 +20,8 @@
  * on a real error). Only DSH processes honour this lock: a concurrent first
  * open by an OpenCode/Pi process is still core's race (documented).
  */
-import { linkSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { linkSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { isPidAlive } from "@magic-context/core/shared/rpc-utils";
 import { isPidNewerThan } from "../agent/lease-liveness";
 import { ensureStorageDirectorySync } from "@magic-context/core/shared/storage-permissions";
@@ -116,6 +116,7 @@ export async function acquireDshOpenLock(
   // The very first open on a machine has no storage dir yet; create it (core's
   // own storage-dir helper, same permissions as the open would use).
   ensureStorageDirectorySync(dirname(path));
+  sweepOpenLockResidue(path, log);
   for (;;) {
     if (createExclusive(path, mine)) break;
     const now = Date.now();
@@ -204,4 +205,91 @@ function withTakeoverMutex(lockPath: string, fn: () => void): boolean {
     if (held !== null && held.raw === mine) rmSync(mutex, { force: true });
   }
   return true;
+}
+
+/**
+ * Round 28: a temp file of {@link createExclusive} lives for microseconds
+ * (write → link → rm, all synchronous); one older than this was left by a
+ * process killed in between.
+ */
+const TMP_RESIDUE_MS = 60_000;
+/** A dead writer's temp is removed sooner, but never one younger than this. */
+const TMP_DEAD_WRITER_MS = 1_000;
+
+/**
+ * Round 28 (task 2): remove what a crash inside the open lock's critical
+ * sections leaves behind — `<lock>.<pid>.<rand>.tmp`,
+ * `<lock>.takeover.<pid>.<rand>.tmp` (killed between createExclusive's write
+ * and its rm) and `<lock>.takeover` (killed inside the takeover mutex; before
+ * this it was removed only lazily, when a later process needed the mutex).
+ *
+ * Safety: the lock file itself is never touched here (it keeps its own stale
+ * rules in the acquire loop). A temp is removed only when older than
+ * TMP_RESIDUE_MS, or older than TMP_DEAD_WRITER_MS with its writer pid dead.
+ * No temp of THIS process can be in flight (createExclusive is synchronous and
+ * the sweep runs synchronously before it), and a temp that was hard-linked
+ * into place shares the lock's inode, so unlinking it never removes a live
+ * lock. `.takeover` is removed by the same rule withTakeoverMutex applies
+ * (dead pid, or older than TAKEOVER_STALE_MS), exact record. Best effort:
+ * never throws.
+ */
+export function sweepOpenLockResidue(lockPath: string, log: (message: string) => void): number {
+  let removed = 0;
+  const dir = dirname(lockPath);
+  const base = basename(lockPath);
+  const takeoverBase = basename(dshOpenLockTakeoverPath(lockPath));
+  const tmpPattern = new RegExp(
+    `^(?:${escapeRe(base)}|${escapeRe(takeoverBase)})\\.(\\d+)\\.[A-Za-z0-9]+\\.tmp$`,
+  );
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  const now = Date.now();
+  for (const name of names) {
+    const match = tmpPattern.exec(name);
+    if (match === null) continue;
+    const full = join(dir, name);
+    const ageMs = fileAgeMs(full, now);
+    if (!Number.isFinite(ageMs)) continue;
+    const pid = Number(match[1]);
+    const writerDead = pid !== process.pid && isPidAlive(pid) === "dead";
+    if (ageMs > TMP_RESIDUE_MS || (writerDead && ageMs > TMP_DEAD_WRITER_MS)) {
+      try {
+        rmSync(full, { force: true });
+        removed += 1;
+      } catch {
+        // best effort
+      }
+    }
+  }
+  const takeover = dshOpenLockTakeoverPath(lockPath);
+  const held = readLock(takeover);
+  if (held !== null) {
+    const pid = typeof held.record.pid === "number" ? held.record.pid : null;
+    const at = typeof held.record.acquiredAt === "number" ? held.record.acquiredAt : null;
+    const stale =
+      (pid !== null && pid !== process.pid && isPidAlive(pid) === "dead") ||
+      (at === null && fileAgeMs(takeover, now) > TAKEOVER_STALE_MS) ||
+      (at !== null && now - at > TAKEOVER_STALE_MS);
+    if (stale) {
+      const again = readLock(takeover);
+      if (again !== null && again.raw === held.raw) {
+        try {
+          rmSync(takeover, { force: true });
+          removed += 1;
+        } catch {
+          // best effort
+        }
+      }
+    }
+  }
+  if (removed > 0) log(`[magic-context] dsh open lock: removed ${removed} crash residue file(s) next to ${base}`);
+  return removed;
+}
+
+function escapeRe(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

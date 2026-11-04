@@ -1,0 +1,13 @@
+(pass) dsh open lock: crash residues are swept at acquire (round 28) > repro: SIGKILL during acquire/release loops leaves .tmp / .takeover files, and the next acquire removes them [68.99ms]
+(pass) dsh open lock: crash residues are swept at acquire (round 28) > dead-writer temp files and a dead holder's .takeover are removed; the lock is acquired [1.61ms]
+(pass) dsh open lock: crash residues are swept at acquire (round 28) > never removes a live writer's fresh temp, a live .takeover, or a live lock [904.31ms]
+ 3 pass
+ 0 fail
+(pass) dsh open lock: holder pid alive but not the lock's writer (round 25 B1) > a lock left by an earlier process with OUR pid is taken over at once [2.23ms]
+(pass) dsh open lock: holder pid alive but not the lock's writer (round 25 B1) > a lock whose pid was reused by a process started later is taken over at once [101.43ms]
+(pass) dsh open lock: holder pid alive but not the lock's writer (round 25 B1) > control: a live holder that took the lock after it started is still waited for [1606.86ms]
+ 3 pass
+ 0 fail
+(pass) dsh open lock: stale-lock takeover race (round 27 C5) > 8 processes taking over the same dead holder's lock never hold it at the same time [11374.10ms]
+ 1 pass
+ 0 fail
