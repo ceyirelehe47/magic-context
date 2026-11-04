@@ -53,6 +53,33 @@ export const SELECTION_MARKER = "# magic-presets:";
 export const MANAGED_BEGIN = "# >>> dsh-magic-context (managed by `dsh-magic-context setup`; do not edit inside) >>>";
 export const MANAGED_END = "# <<< dsh-magic-context <<<";
 
+/**
+ * Round 27: one comment line setup leaves when it removed the managed block
+ * because the selection became empty (`--disable-preset` of the last preset).
+ * The rows are gone either way; the marker only lets doctor tell "disabled on
+ * purpose" from "never set up". Any later block write clears it.
+ */
+export const DISABLED_MARKER =
+  "# dsh-magic-context: Magic disabled in every preset by `dsh-magic-context setup --disable-preset` (re-enable: `dsh-magic-context setup [--preset <id>]`)";
+
+export function hasDisabledMarker(text: string): boolean {
+  return text.split("\n").some((line) => line.trim() === DISABLED_MARKER);
+}
+
+export function clearDisabledMarker(text: string): string {
+  if (!hasDisabledMarker(text)) return text;
+  return text
+    .split("\n")
+    .filter((line) => line.trim() !== DISABLED_MARKER)
+    .join("\n");
+}
+
+/** Add the disabled marker (once) at the top of the file, above the user's own lines. */
+export function addDisabledMarker(text: string): string {
+  if (hasDisabledMarker(text)) return text;
+  return `${DISABLED_MARKER}\n${text}`;
+}
+
 /** Profile layout from its bundle list. */
 export function profileLayoutOf(bundles: readonly string[]): ProfileLayout {
   return bundles.includes(WEB_APP_BUNDLE) ? "preset" : "flat";
@@ -284,6 +311,7 @@ export function buildWebPresetEntries(presetPatches: readonly Row[]): PatchEntry
  *   - anything else (flow-style non-empty list, a mapping) is refused.
  */
 export function mergeManagedBlock(existing: string | undefined, blockBody: string): string {
+  if (existing !== undefined) existing = clearDisabledMarker(existing);
   const block = `${MANAGED_BEGIN}\n${blockBody.trimEnd()}\n${MANAGED_END}\n`;
   if (existing === undefined || existing.trim() === "") return block;
   const begin = existing.indexOf(MANAGED_BEGIN);

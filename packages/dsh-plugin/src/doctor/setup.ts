@@ -29,6 +29,8 @@ import {
   mergeManagedBlock,
   readManagedBlock,
   removeManagedBlock,
+  addDisabledMarker,
+  hasDisabledMarker,
   MAGIC_PRESET_ID,
 } from "../compat/dsh-0.1/profile-patch";
 import {
@@ -284,9 +286,16 @@ export async function runDshSetup(
     try {
       const existing = existsSync(plan.patchPath) ? readFileSync(plan.patchPath, "utf8") : undefined;
       if (existing === undefined || readManagedBlock(existing) === undefined) {
-        steps.push({ status: "ok", title: "Profile patch layer", detail: `${plan.patchPath}: no managed block; nothing to remove.` });
+        // Round 27: still record the explicit disable (doctor reads it), once.
+        if (existing !== undefined && !hasDisabledMarker(existing) && !dryRun) {
+          writeFileAtomic(plan.patchPath, addDisabledMarker(existing), 0o644);
+          generatedFiles.push(plan.patchPath);
+        }
+        steps.push({ status: "ok", title: "Profile patch layer", detail: `${plan.patchPath}: no managed block; nothing to remove (Magic stays disabled in every preset).` });
       } else {
-        const stripped = removeManagedBlock(existing);
+        // Round 27: leave the disabled marker so doctor reports the state
+        // instead of "no Magic rows — run setup".
+        const stripped = addDisabledMarker(removeManagedBlock(existing));
         parseEntryListYaml(stripped);
         if (dryRun) {
           steps.push({ status: "ok", title: "Profile patch layer (dry run)", detail: `would remove the managed block from ${plan.patchPath}.` });

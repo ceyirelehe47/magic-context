@@ -97,7 +97,7 @@ CLI doctor --profile $P > "$OUT/doctor-c.log" 2>&1; rc_d=$?
 block="$(grep -c 'dsh-magic-context' "$PDIR/cordis.patch.yml" 2>/dev/null || true)"
 tags_before=$(dbq 'select count(*) from tags')
 turn c
-rec step c setup "$rc_s" doctor "$rc_d" rc "${TRC:-x}" magicLines "$TMAGIC" patchMentions "$block" \
+rec step c setup "$rc_s" doctor "$rc_d" doctorDisabled "$(grep -c 'disabled in every preset' "$OUT/doctor-c.log" 2>/dev/null || true)" rc "${TRC:-x}" magicLines "$TMAGIC" patchMentions "$block" \
   tagsBefore "$tags_before" tags "$(dbq 'select count(*) from tags')"
 
 # --- d: roll back to OLD (re-enabled)

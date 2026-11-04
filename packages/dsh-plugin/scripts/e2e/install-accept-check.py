@@ -25,8 +25,9 @@ add("A2", I("b", "install") == 0 and I("b", "setup") == 0 and I("b", "doctor") =
     and I("b", "magicLines") > 0 and I("b", "tagsBefore") > 0 and I("b", "tags") > I("b", "tagsBefore")
     and V("b", "integrity") == "ok" and "dsh.2" not in V("b", "version") and V("b", "version") != "",
     "upgrade to the HEAD tgz in place: same session continues, earlier rows kept, integrity ok", b)
-add("A3", I("c", "setup") == 0 and I("c", "rc") == 0 and I("c", "magicLines") == 0 and I("c", "tags") == I("c", "tagsBefore"),
-    "disable (setup --disable-preset root): the turn runs with no Magic line and no Magic write", c)
+add("A3", I("c", "setup") == 0 and I("c", "rc") == 0 and I("c", "magicLines") == 0 and I("c", "tags") == I("c", "tagsBefore")
+    and I("c", "doctor") == 0 and I("c", "doctorDisabled") > 0,
+    "disable (setup --disable-preset root): the turn runs with no Magic line and no Magic write; doctor exits 0 and says 'disabled in every preset' (round 27 C2)", c)
 ok_d = I("d", "install") == 0 and I("d", "setup") == 0 and I("d", "doctor") == 0 and I("d", "rc") == 0 \
     and I("d", "magicLines") > 0 and I("d", "tags") >= I("d", "tagsBefore") > 0 and V("d", "integrity") == "ok" and "dsh.2" in V("d", "version")
 fenced = I("d", "install") == 0 and I("d", "schemaLines") > 0 and not ok_d

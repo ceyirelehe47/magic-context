@@ -45,6 +45,7 @@ import {
   STOCK_TOKEN_METER_ROW_ID,
   hasItemAfterManagedBlock,
   readManagedBlock,
+  hasDisabledMarker,
 } from "../compat/dsh-0.1/profile-patch";
 import { selectionChangeOf } from "./setup";
 import { describePressurePolicy, type PressureRowConfig } from "../compat/dsh-0.1/pressure-policy";
@@ -398,6 +399,7 @@ export async function runDshDoctor(
       const block = readManagedBlock(text);
       let status: CheckStatus = "ok";
       let detail: string;
+      let disabledOnPurpose = false;
       if (plan.issue !== undefined) {
         status = "fail";
         detail = `${plan.scannedFile ?? plan.profileDir}: stock layout changed (${plan.issue}).`;
@@ -412,6 +414,15 @@ export async function runDshDoctor(
         detail = hand
           ? `${plan.patchPath}: Magic rows present but not in the setup-managed block (hand-written layer).`
           : `${plan.patchPath}: no Magic rows — compaction-basic still active, the Magic agent plane is not mounted in any preset.`;
+        // Round 27 C2: an explicit full disable (setup removed the block and
+        // left its marker) is a state, not a broken install: warn, exit 0.
+        if (!hand && hasDisabledMarker(text)) {
+          status = "warn";
+          disabledOnPurpose = true;
+          detail =
+            `${plan.patchPath}: Magic disabled in every preset (\`setup --disable-preset\`). The bundle is installed but ` +
+            "inactive: stock compaction-basic and token-meter run and Magic writes nothing to the DB.";
+        }
       } else {
         const comparison = plan.blockBody === undefined ? undefined : compareManagedBlock(block, plan.blockBody);
         if (comparison === undefined || !comparison.upToDate) {
@@ -458,7 +469,12 @@ export async function runDshDoctor(
         title: `Profile patch layer — profile ${name}`,
         status,
         detail,
-        fix: status === "ok" ? undefined : `Run \`dsh-magic-context setup --profile ${name}\` (fails closed on a layout mismatch).`,
+        fix: disabledOnPurpose
+          ? `Intended: nothing to do. Re-enable with \`dsh-magic-context setup --profile ${name}${plan.layout === "flat" ? "" : " --preset <id>"}\`` +
+            `${plan.layout === "flat" ? " (or --preset root)" : ""}; uninstall with \`dsh plugin --profile ${name} remove ${MAGIC_CONTEXT_PACKAGE}\`.`
+          : status === "ok"
+            ? undefined
+            : `Run \`dsh-magic-context setup --profile ${name}\` (fails closed on a layout mismatch).`,
       });
 
       // Per-preset enablement (+ the meter swap), checked against any
