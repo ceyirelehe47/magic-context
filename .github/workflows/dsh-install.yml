@@ -1,0 +1,110 @@
+# Round 26 (P2-5) — release acceptance of the PACKED tarballs.
+#   pack:   build + `bun pm pack` the plugin at HEAD and at tag dsh/0.49.35-dsh.2
+#           (each from its own checkout, its own lockfile) → artifact tgz-<ref>
+#   accept: clean runner, NO repo workspace install: DSH from npm, the plugin
+#           only from the two tarballs via `dsh plugin --profile headless add`.
+#           install dsh.2 → upgrade HEAD (data kept) → disable → roll back dsh.2
+#           (data readable or an explicit schema refusal). Judged by
+#           install-accept-check.py. Mock model only: no secrets.
+name: dsh-install
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  BUN_VERSION: 1.4.2
+  DSH_VERSION: 0.2.1-rc.5
+
+jobs:
+  pack:
+    if: github.repository == 'ceyirelehe47/magic-context'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: head
+            ref: ""
+          - name: dsh2
+            ref: dsh/0.49.35-dsh.2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Filtered workspace install + build + pack
+        run: |
+          timeout 600 bun install --ignore-scripts --backend=hardlink \
+            --filter '@cortexkit/opencode-magic-context' --filter '@cortexkit/retina-local-fs' \
+            --filter 'dsh-magic-context-adapter' --filter 'dsh-magic-context'
+          cd packages/dsh-plugin
+          bun run build
+          rm -f dsh-magic-context-*.tgz
+          timeout 120 bun pm pack --quiet
+          mkdir -p "$RUNNER_TEMP/tgz"
+          mv dsh-magic-context-*.tgz "$RUNNER_TEMP/tgz/${{ matrix.name }}.tgz"
+          tar -tzf "$RUNNER_TEMP/tgz/${{ matrix.name }}.tgz" | wc -l
+          tar -xzOf "$RUNNER_TEMP/tgz/${{ matrix.name }}.tgz" package/package.json | python3 -c 'import json,sys; p=json.load(sys.stdin); print(p["name"], p["version"], p.get("dependencies"))'
+          git rev-parse HEAD > "$RUNNER_TEMP/tgz/${{ matrix.name }}.sha"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tgz-${{ matrix.name }}
+          path: ${{ runner.temp }}/tgz
+          retention-days: 7
+
+  accept:
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packages/dsh-plugin/scripts/e2e
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tgz-*
+          path: ${{ runner.temp }}/tgz
+          merge-multiple: true
+      - name: Clean env — DSH from npm only (no repo node_modules)
+        run: |
+          echo "E2E_ROOT=$RUNNER_TEMP/e2e" >> "$GITHUB_ENV"
+          echo "CI_OUT=$RUNNER_TEMP/e2e/accept" >> "$GITHUB_ENV"
+          test ! -d node_modules && echo "repo node_modules: absent"
+          mkdir -p "$RUNNER_TEMP/e2e/dsh"
+          cd "$RUNNER_TEMP/e2e/dsh"
+          echo '{"name":"dsh-accept","private":true}' > package.json
+          timeout 300 npm install --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION"
+          npm i -g pnpm@9 >/dev/null 2>&1 || true
+          node node_modules/@deepseek-ai/dsh/lib/bin.js --version || true
+          ls -la "$RUNNER_TEMP/tgz"
+      - name: install → upgrade → disable → roll back
+        env:
+          OPENCODE_API_KEY: unused-mock-only
+        run: |
+          bash packages/dsh-plugin/scripts/e2e/install-accept.sh "$RUNNER_TEMP/tgz/dsh2.tgz" "$RUNNER_TEMP/tgz/head.tgz"
+      - name: Check
+        run: |
+          python3 packages/dsh-plugin/scripts/e2e/install-accept-check.py "$CI_OUT" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dsh-install-${{ github.run_id }}
+          path: ${{ runner.temp }}/e2e/accept
+          retention-days: 7
+          if-no-files-found: warn
