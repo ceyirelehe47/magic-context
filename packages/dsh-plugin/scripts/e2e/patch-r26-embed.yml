@@ -1,0 +1,27 @@
+# Round 26 scenario E (ci-e.sh, P1-3): the deterministic mock as the MAIN model
+# on a 200k window (session A of scenario H is resumed; its history came from
+# the real 40k route), historian effectively off (95 %). Only ctx_search runs.
+# Self-contained (provider defined here), whatever the patch merge semantics.
+- id: llm-pi-ai
+  config:
+    providers:
+      mock-200k:
+        displayName: Mock (200k)
+        apiKeyEnv: MOCK_LLM_KEY
+        api: openai-completions
+        baseURL: !!js "'http://127.0.0.1:' + (process.env.MOCK_LLM_PORT ?? '18577') + '/w200000/v1'"
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: mock-model
+            contextWindow: 200000
+            maxTokens: 16384
+- id: agent-default-model
+  config:
+    provider: mock-200k
+    model: mock-model
+- id: magic-agent
+  config:
+    historian:
+      model: mock-200k/mock-model
+      executeThresholdPercentage: 95

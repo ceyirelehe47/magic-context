@@ -59,6 +59,9 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
       a legacy fixture DB: scan/dry-run read-only, apply (backup, migrated rows,
       flags), idempotent, restore digest match; a real DSH run injects the
       migrated memory
+  E1–E2 (round 26, scenario E, mock main model) exact-identifier ranking on
+      scenario H's session A: bag-of-words mock vs a REAL embedding model
+      (all-MiniLM-L6-v2); E2 WARN = the ranking issue holds with real vectors
   P1  no dsh process left after the runs
 """
 import hashlib
@@ -1503,6 +1506,56 @@ def check_m(c, out: Path, runs):
           {"rc": rc, "preNeedles": hp, "postNeedles": ho, "requests": [np_, no]})
 
 
+def check_e(c, out: Path, runs):
+    """E1–E2 (round 26, scenario E, P1-3): exact-identifier ranking, bag-of-words
+    mock vs a real embedding model on the same session-A history."""
+    if "e-bow-q" not in runs:
+        c.add("E0", False, "scenario E ran (ranking: bag of words vs real embeddings)", "no e-* runs")
+        return
+    codes = (out / "e.codes").read_text().split() if (out / "e.codes").exists() else []
+    hist = load_json(out / "h-a-history.json") or {}
+    first_ord = {}
+    for r in hist.get("rows") or []:
+        for cd in r.get("codes", []):
+            if not r.get("injected") and cd not in first_ord:
+                first_ord[cd] = r.get("ordinal")
+
+    def ranks(name):
+        _, ok, bad = h_results(out / f"{name}.log", "ctx_search")
+        res = {}
+        for code, text in zip(codes, ok[: len(codes)]):
+            blocks = h_blocks(text)
+            by_text = next((i + 1 for i, b in enumerate(blocks) if code in b), None)
+            by_range = None
+            o = first_ord.get(code)
+            for i, b in enumerate(blocks):
+                m = re.search(r"range=(\d+)-(\d+)", b)
+                if o is not None and m and int(m.group(1)) <= o <= int(m.group(2)):
+                    by_range = i + 1
+                    break
+            res[code] = {"text": by_text, "range": by_range, "n": len(blocks)}
+        para = h_blocks(ok[len(codes)]) if len(ok) > len(codes) else []
+        return res, len(ok), len(bad), [h_flat(b)[:90] for b in para[:3]]
+
+    bow = ranks("e-bow-q")
+    real = ranks("e-real-q") if "e-real-q" in runs else ({}, 0, 0, [])
+    real_rows = [json.loads(l) for l in (out / "e-real-requests.jsonl").read_text().splitlines() if l.strip()] if (out / "e-real-requests.jsonl").exists() else []
+    real_req = len(real_rows)
+    real_inputs = sum(int(r.get("n") or 0) for r in real_rows)  # > requests ⇒ stored content was (re-)embedded too
+    rc = {n: runs.get(n, ("", "missing"))[1] for n in ("e-bow-q", "e-real-q")}
+    ok1 = all(v.startswith("rc=0") for v in rc.values()) and bow[1] >= len(codes) and real[1] >= len(codes) and real_req > 0
+    c.add("E1", ok1, "scenario E: both embedding backends answered every ctx_search on session A (real model served requests)",
+          {"rc": rc, "results": {"bow": bow[1], "real": real[1]}, "errors": {"bow": bow[2], "real": real[2]}, "realEmbedRequests": real_req, "realEmbedInputs": real_inputs,
+           "embedder": (out / "e-real-embed.log").read_text(errors="replace")[-200:] if (out / "e-real-embed.log").exists() else ""})
+    best = lambda r: min([x for x in (r.get("text"), r.get("range")) if x is not None], default=None)
+    not_first_real = [cd for cd in codes if best(real[0].get(cd, {})) != 1]
+    c.add("E2", (True if not not_first_real else "warn") if ok1 else False,
+          "exact identifier ranked first with the REAL embedding model (WARN = ranking issue confirmed with real embeddings)",
+          {"real": real[0], "bow": bow[0], "notFirstReal": not_first_real,
+           "notFirstBow": [cd for cd in codes if best(bow[0].get(cd, {})) != 1],
+           "paraphraseTop3": {"bow": bow[3], "real": real[3]}})
+
+
 def check(out: Path) -> int:
     c = Checks()
     runs = {}
@@ -1603,6 +1656,7 @@ def check(out: Path) -> int:
     check_h(c, out, runs)
     check_t(c, out, runs)
     check_m(c, out, runs)
+    check_e(c, out, runs)
 
     # --- P: process hygiene
     left = (out / "leftover-procs.txt").read_text().split() if (out / "leftover-procs.txt").exists() else []

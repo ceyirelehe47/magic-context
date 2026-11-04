@@ -445,6 +445,11 @@ bash "$HERE/ci-m.sh"
 # and a never-recorded fact; checks U13–U25. See ci-h.sh.
 bash "$HERE/ci-h.sh"
 
+# ============================ round 26 scenario E ============================
+# Exact-identifier ranking on session A: bag-of-words mock vs a real embedding
+# model (P1-3); mock main model; checks E1–E2. See ci-e.sh.
+bash "$HERE/ci-e.sh"
+
 # --- U: doctor after all runs (shared DB opens, no live liveness markers left)
 node "$HERE/../../dist/cli.js" doctor --profile test > "$OUT/doctor-after.txt" 2>&1
 echo "rc=$?" >> "$OUT/doctor-after.txt"

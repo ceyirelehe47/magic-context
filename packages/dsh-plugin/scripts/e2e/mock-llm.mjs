@@ -175,6 +175,9 @@ function decide(body, session) {
     st.done = k; // text steps complete on emission
     return { kind: "text", text: step.text, plan, step: k };
   }
+  // round 26 (scenario E): a tool step whose result cannot carry the step
+  // marker (ctx_search) completes on emission when it says {"once": true}
+  if (step.once === true) st.done = k;
   return { kind: "tool", name: step.tool ?? "bash", args: step.args ?? { description: `mock step ${k}`, command: step.bash }, plan, step: k };
 }
 
