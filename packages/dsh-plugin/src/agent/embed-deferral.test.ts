@@ -73,7 +73,7 @@ async function status(db: Database, agent: Agent): Promise<string> {
   const cmd = registered.find((r) => r.name === "ctx-status")!;
   const result = (await cmd.handler({ agent, rawInput: "", signal: new AbortController().signal })) as CommandResult;
   expect(result.kind).toBe("success");
-  return result.kind === "success" ? result.text : "";
+  return result.kind === "success" ? (result.text ?? "") : "";
 }
 
 function setIndexed(db: Database, n: number): void {
