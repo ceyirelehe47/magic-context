@@ -15,7 +15,8 @@ model key only ever lived in the `OPENCODE_API_KEY` secret.
 | 41775611238 | dsh-ci checks (push) | 901fb7874 | dsh-plugin 589/1 | `host-unload-release` "Cannot use a closed database" — intermittent (same code green on 96677e175); pending verification |
 | 41775066316 | dsh-install | 96677e175 | A1–A4 FAIL | pnpm 9: `ERR_PNPM_ADDING_TO_ROOT` in the profile workspace; job falsely green (tee) — both fixed 901fb7874 |
 | 41775619062 | dsh-install | 901fb7874 | A1–A4 PASS | install dsh.2 → upgrade dsh.4 (HEAD) → disable → roll back dsh.2 |
-| 41774795839 | dsh-ci e2e | 906ce5fc5 | E2E_RESULT | first e2e with the T2 + Y4 fixes |
+| 41774795839 | dsh-ci e2e | 906ce5fc5 | e2e 121/6 (+E2 WARN) | T2 + Y4 PASS; M5 real (backup name collision inside one second → 47125f480); T3 real model restated the codeword in its own reasoning (seq 81) — model; S2/S6/S7 child's stock compaction-basic "summary is not smaller" ×7 → max-tokens — native/model; U23 model answered from injection without ctx_search; E2 real MiniLM ranks 5/7, 6/7, 2/7, 1/7 |
+| 41777488761 | dsh-ci checks + e2e | 47125f480 | checks green (dsh-plugin 591/0); e2e 127 PASS + 1 WARN, 0 FAIL | E2 WARN: real MiniLM ranks 1/6, 1/6, 1/6, 2/6 |
 | 41775904921 | dsh-soak (12 h: 4 × 180 min, real every 30) | 901fb7874 | dispatched | not awaited this round |
 
 ## Files

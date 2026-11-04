@@ -42,6 +42,23 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
+Baseline (round 26, 2026-11-04, DSH 0.2.1-rc.5, core v0.49.35; release tags
+unchanged; run 41777488761 @ `47125f480`, checks + e2e in one dispatch):
+`typecheck:dsh` **0 errors**, test-file typecheck 0, `dsh-plugin` **591 pass** (+15
+over round 25's 576: migrate-legacy 9, compact-unprocessed-tail 5, new-input-fold-tags
++1), `adapter-api` **15**, `contracts:dsh` **104**, 0 fail; real-model `e2e` **128
+judged: 127 PASS + 1 WARN (E2, the P1-3 ranking observation), 0 FAIL** (round 25's
+117 + scenarios T, M, E and the new T2/M checks). Soak short 41773273940 K1–K9 PASS;
+install acceptance 41775619062 A1–A4 PASS. Evidence: `docs/dsh/e2e/evidence-round26/`.
+
+Round 26 fixes (adapter only, no core change; red test first): migrate-legacy
+`9565e87ef` (red `ec3a0aa67`), bun 1.4.2 open flags `8ba07a9fa`, backup-name
+collision `47125f480`; /compact unprocessed tail `5e8380dd7` (red `a8dc67ede`);
+/compact mini-historian telemetry `07284476f`; tail-fold tool-tag re-own `906ce5fc5`.
+Tests/CI: scenarios T + M `946f7b1ca`, E `ee6d04e0e`, `dsh-soak.yml` `ade660ee6`,
+`dsh-install.yml` `96677e175` / `901fb7874`, test typecheck `10d8dc8d2`; docs
+`753413144`, `8cb85c5b3`.
+
 Baseline (round 25, 2026-11-04, DSH 0.2.1-rc.5, core v0.49.35; release tags
 unchanged; push run 41692123988 @ `34819c87a`, 41693389965 @ `955a12d08`):
 `typecheck:dsh` **0 errors**, `dsh-plugin` **576 pass** (+9 over round 24's
@@ -1688,6 +1705,59 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       old behaviour holds (wait / TTL). Same-machine pid namespaces only, as
       before (limitation 18 (a)).
     - **Not done this round:** P2 (release); no tag moved or created.
+
+21. **Round 26 (2026-11-04) — status.**
+    - **Limitation 19/20 (orphan raw-path memories, injected text in FTS /
+      compartments) — repair path shipped:** `dsh-magic-context migrate-legacy`
+      (scan / `--backup` / `--dry-run` / `--apply` / `--restore`, nothing deleted;
+      `9565e87ef`, bun 1.4.2 open flags `8ba07a9fa`, backup-name collision inside one
+      second `47125f480`). Scenario M (real DSH before/after, isolated data dir) M1–M5.
+      Not automatic: the user runs it (doctor names it).
+    - **Limitation 17 (/compact unprocessed tail) — fixed:** the checkpoint summary
+      carries `<unsummarized_tail>` while the historian leaves the region uncovered
+      (`5e8380dd7`); the /compact mini-historian now writes its `historian_runs` row
+      (`07284476f`). Scenario T on e2e 41774795839: T2 `unprocessed_from` 9 = the
+      constraint's ordinal, compartments [1, 8], T4 the restarted model answers the
+      codeword from the summary with tools forbidden.
+    - **Y4 — tag drift of an unreplaced tail fold (fixed `906ce5fc5`):** a process
+      killed between a tail tool result and the landed surface replace left the
+      call owned by `synth-user-…`; the next user message absorbed it and core gave
+      the call a second tag (model saw §4§ for a §3§ result). Tool tags are re-owned
+      before tagging; absorbed assistant TEXT still gets a new `:pN` tag (round 10).
+    - **P1-3 exact-identifier ranking — reproduced with REAL embeddings, not every
+      run (scenario E, `Xenova/all-MiniLM-L6-v2` = core's default local model, query =
+      the code itself, rank of the memory holding it):** e2e 41774795839 — 5/7
+      (ARCH-KESTREL-4127), 6/7 (RULE-MARMOT-5830), 2/7 (FILE-HERON-2261), 1/7
+      (TODO-BISON-9074); e2e 41777488761 — 1/6, 1/6, 1/6, 2/6 (bag-of-words mock in the
+      same run: 5/6 for ARCH-KESTREL-4127). Session A is written by the real main
+      model, so the candidate set differs per run. An exact identifier is not reliably
+      first: the fix belongs to core's RRF fusion (exact-token / FTS-match boost) —
+      **not changed here; core change pending a decision**.
+    - **New: the model imitates the folded tool format (P1 candidate).** e2e
+      41769676548 R9/R11 (lock-a): instead of calling `read`, the real model wrote an
+      8 314-char assistant TEXT imitating Magic's folded `[tool: read #call_N]` /
+      `[tool result: …]` blocks (limitation 1) with fabricated file content, until
+      max-tokens. Observed once (not in 41771964169 / 41774795839). If it recurs,
+      candidate mitigation in the adapter: a fold format that reads less like a
+      transcript the model should continue (e.g. a framed, non-conversational
+      header). Not changed this round.
+    - **P1-4 soak:** `dsh-soak.yml` short run 41773273940 (2 × 10 min) K1–K9 PASS
+      (348/348 mock runs, 3/3 real samples, RSS 1.08×, WAL 0, 0 historian failures).
+      12-hour run (4 × 180 min) dispatched as 41775904921 — result pending.
+    - **P2-5 release acceptance:** `dsh-install.yml` packs HEAD and tag
+      `dsh/0.49.35-dsh.2`, installs on a clean runner through
+      `dsh plugin --profile headless add <tgz>` (pnpm, DSH from npm): install →
+      upgrade (rows kept, integrity ok) → disable → roll back, A1–A4 PASS on
+      41775619062. Findings: (a) DSH's plugin manager needs pnpm 10+ (pnpm 9 refuses
+      with `ERR_PNPM_ADDING_TO_ROOT` in the profile workspace); (b) pnpm warns
+      "Issues with peer dependencies" — the `@deepseek-ai/*` peers are provided by
+      the DSH install itself (`autoInstallPeers: false`), no duplicate copy was
+      installed; (c) both tarballs are schema v95, so the rollback crossed no schema
+      fence (a fence refusal is untested); (d) `doctor` exits 1 after
+      `setup --disable-preset root` disabled the only preset ("Profile patch layer:
+      no Magic rows" with a re-run-setup hint) — misleading, not fixed.
+    - **Flaky (pending verification):** `host-unload-release` "Cannot use a closed
+      database" once on checks 41775611238 (same code green on 41775057793).
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
