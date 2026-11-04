@@ -1,0 +1,39 @@
+error: expect(received).toBeGreaterThan(expected)
+Expected: > 0
+Received: 0
+(fail) reownAbsorbedTailToolTags: one call with two or more stale owners (round 28) > two stale synthetic owners: the lowest (pre-kill) number moves to the absorbing user, the other is folded into it, queued ops follow [178.14ms]
+error: expect(received).toEqual(expected)
+-     "owner": "user-1",
++     "owner": "synth-user-A",
++     "status": "active",
++   },
++   {
++     "n": 5,
++     "owner": "synth-user-B",
++     "status": "active",
++   },
++   {
++     "n": 6,
++     "owner": "synth-user-C",
+- Expected  - 1
++ Received  + 11
+(fail) reownAbsorbedTailToolTags: one call with two or more stale owners (round 28) > three stale synthetic owners collapse to one row with the lowest number [143.22ms]
+error: expect(received).toEqual(expected)
++     "n": 2,
++     "owner": "synth-user-A",
++     "status": "active",
++   },
++   {
+- Expected  - 0
++ Received  + 5
+(fail) reownAbsorbedTailToolTags: one call with two or more stale owners (round 28) > an old duplicate already owned by the absorbing user keeps ITS number; stale synthetic orphans are folded into it [134.50ms]
+(pass) reownAbsorbedTailToolTags: one call with two or more stale owners (round 28) > never touches an owner still in the view or a non-synthetic owner [143.48ms]
+(pass) reownAbsorbedTailToolTags: one call with two or more stale owners (round 28) > control: the single-stale-owner case (round 26/27b) is unchanged [129.71ms]
+error: expect(received).toEqual(expected)
++   51,
++   53,
+- Expected  - 0
++ Received  + 2
+(fail) reownAbsorbedTailToolTags: one call with two or more stale owners (round 28) > through the context plane: a real fold over a call with two stale synthetic rows mints NO third number; the surface shows the pre-kill number [358.18ms]
+ 2 pass
+ 4 fail
