@@ -18,9 +18,12 @@ Provenance: imported verbatim from the community port
 `THIRD_PARTY_NOTICES.md` are kept in both packages; see `IMPORTED.md`.
 
 Pinned versions: `@deepseek-ai/dsh*` **0.2.1-rc.5** (exact, devDependencies +
-peers), `@deepseek-ai/cordis ~4.0.5`, core = the upstream tag the branch is
+lockfile = the default path); **declared** DSH releases (peers, round 29):
+exactly `0.2.1-rc.5 || 0.2.2-alpha.3` (`DSH_COMPAT_SUPPORTED_VERSIONS` in
+`src/doctor/env.ts`; any other DSH, e.g. 0.2.2-rc.1, is refused by DSH's plugin
+manager and by `doctor`), `@deepseek-ai/cordis ~4.0.5`, core = the upstream tag the branch is
 based on (currently **v0.49.35**, merged in round 16). `doctor` checks the installed DSH against
-`DSH_COMPAT_EXPECTED_VERSION` in `src/doctor/env.ts`.
+`DSH_COMPAT_SUPPORTED_VERSIONS` (default `DSH_COMPAT_EXPECTED_VERSION`) in `src/doctor/env.ts`.
 
 ## Commands
 
@@ -42,7 +45,36 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 28 / 28b / 28c, 2026-11-04, DSH 0.2.1-rc.5 pinned, core v0.49.35;
+Baseline (round 29, 2026-11-04/05, DSH **0.2.1-rc.5 (default) + 0.2.2-alpha.3
+declared**, core v0.49.35; release tags unchanged — no dsh.5; code HEAD
+`0ef173b60`): `typecheck:dsh` **0 errors**, `dsh-plugin` **631 pass** (+7 over
+round 28's 624: `dsh-compat-declaration` 5, doctor 2), `adapter-api` **15**,
+`contracts:dsh` **105**, 0 fail (push 41859522777 @ `0ef173b60`); real-model `e2e`
+**135 judged** (unchanged). Install acceptance A0–A4 (A0 redefined, see below).
+Evidence: `docs/dsh/e2e/evidence-round29/` (run table in its README). No
+exemption on either declared DSH; the `allow-version` lane stays only for an
+undeclared DSH or an old tarball that does not declare the running one.
+
+| run id | kind | DSH | exemption | PASS / FAIL / WARN | FAIL classification | I1 | I2 | R10 (P / backstop) |
+|---|---|---|---|---|---|---|---|---|
+| 41859522777 | push checks | lockfile rc.5 | — | success | dsh-plugin 631/0, adapter 15, contracts 105 | | | |
+| 41859544648 | install | rc.5 | none | A0–A4 PASS | — | | | |
+| 41859553540 | install | alpha.3 | HEAD none; old dsh.2 (steps a, d) only | A0 WARN, A1–A4 PASS | — (A0 WARN = dsh.2 tarball's peers are rc.5-only; `headNeeded: []`) | | | |
+| 41859559537 | e2e slot r29r5 | rc.5 | none | 133 / 0 / 2 (T3, E2) | — | PASS | PASS | PASS / PASS |
+| 41859567651 | e2e slot r29a3 | alpha.3 | none | 131 / 2 / 2 (T3, E2) | Y2: known check timing (pending user); R11: real model said DONE after 2/8 reads right after the backstop deferral — no later check, 0 compartments (model, `evidence-round29/b1-a3-r11-y2.md`) | PASS | PASS | PASS / PASS |
+| 41859577345 | e2e slot r29a3b | alpha.3 | none | 133 / 1 / 1 (E2) | Y2: same timing signature (holder = new process 4933, killed 4875) | PASS | PASS | PASS / PASS |
+
+Round 29 commits (adapter manifest / doctor / CI / docs only, no core change; red test first):
+- `b79200fa0` RED: real DSH plugin manager (app-boot rc.5 and alpha.3) rejects the manifest on alpha.3; doctor FAILs alpha.3.
+- `5d8d4f58e` peers `0.2.1-rc.5 || 0.2.2-alpha.3`; `DSH_COMPAT_SUPPORTED_VERSIONS` / `isSupportedDshVersion` drive doctor and setup; devDependencies stay rc.5.
+- `0ef173b60` CI: `dsh-declared.py`; exemption and the version-line-only doctor tolerance only for an undeclared DSH / tarball; U6 strict on declared DSHs; A0 can now FAIL if HEAD needs an exemption.
+
+**Y2 — 待用户决定 (pending).** On alpha.3 Y2 FAILs every time (4/4: 28c ×2, 29 ×2;
+0/5 on rc.5): the first step's busy probe sees the NEW process's own fresh lease.
+Magic's behaviour is correct; the assertion is unchanged until the user decides
+whether a busy probe whose only lease belongs to the live new process is acceptable.
+
+Previous baseline (round 28 / 28b / 28c, 2026-11-04, DSH 0.2.1-rc.5 pinned, core v0.49.35;
 release tags unchanged; HEAD `adb5ed80d`): `typecheck:dsh` **0 errors**, test-file
 typecheck 0, `dsh-plugin` **624 pass** (+14 over round 27's 610), `adapter-api`
 **15**, `contracts:dsh` **105**, 0 fail (push 41841941636 @ `adb5ed80d`); real-model
@@ -1970,17 +2002,16 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       live-tail text restating it. Seen as WARN on 41832529681 and 41839150646.
       Whether this WARN classification is acceptable, or T3 should FAIL there, is
       the user's call; the check is unchanged until then.
-    - **DSH 0.2.2-alpha.3 compatibility (evaluation lane only; 是否声明支持
-      alpha.3 待用户决定 — whether to declare alpha.3 support is the user's
-      decision).** Peer dependencies stay pinned to `@deepseek-ai/dsh-* 0.2.1-rc.5`
-      and `DSH_COMPAT_EXPECTED_VERSION` is unchanged (release decision, not
-      changed here).
+    - **DSH 0.2.2-alpha.3 compatibility (round 28 evaluation; declared in round
+      29 — user approved 2026-11-04 23:25 CST, see limitation 24).** The rows
+      below are the round 28 findings; the two marked "resolved in round 29"
+      changed with the declaration.
 
       | item | alpha.3 | evidence | disposition |
       |---|---|---|---|
       | thin preset no-write include | broke: loader 1.0.7 persists via `EntryTree.commit(change)`, would write `disabled: true` into the shipped stock preset | `046402042` RED (real alpha.3 packages: stock changed) | fixed `bdeb8bfa0` (override `commit` too; rc.5 still `write`), preset-include 4/4 on both package sets |
-      | plugin manager install / boot | rejects the bundle: peers pin 0.2.1-rc.5 exactly | install 41840694149 failure | by design (DSH); CI grants `dsh plugin allow-version … --accept-risk` off-pin (`adb5ed80d`); users on alpha.3 would need the same exemption until peers change |
-      | doctor | exact-version pin FAILs (only that line) | 41841943616 A0 WARN `doctorPin=1` | expected off-pin; tolerated in CI only |
+      | plugin manager install / boot | rejects the bundle: peers pin 0.2.1-rc.5 exactly | install 41840694149 failure | **resolved in round 29** (`5d8d4f58e`): peers `0.2.1-rc.5 \|\| 0.2.2-alpha.3`, accepted with no exemption (install 41859553540, e2e 41859567651 / 41859577345) |
+      | doctor | exact-version pin FAILed (only that line) | 41841943616 A0 WARN `doctorPin=1` | **resolved in round 29**: `[ok] DSH version` on alpha.3 (41859553540 steps b/c, e2e U6 PASS strict) |
       | install → upgrade → disable → roll back | PASS | 41841943616 A1–A4 PASS | — |
       | real-model e2e (135 judged) | 132–133 PASS, **1 FAIL each (Y2)**, I1/I2/R10 PASS | 41842392546, 41842397847 vs rc.5 41839150646 / 41842386831 | Y2 已复现 2/2 on alpha.3, 0 on rc.5: the first step's busy probe catches the new process's own fresh lease 4 ms after it took over the dead one; takeover, noop passes, nothing left behind all correct. Check timing assumption; not relaxed — pending user. Every other check matches rc.5 (T3 PASS/WARN and E2 WARN vary on both) |
       | other e2e checks | same as rc.5 | same runs | no new FAIL other than Y2 |
@@ -1996,6 +2027,37 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     - **Unchanged by decision:** 90 % backstop, native summary for child
       sessions, sandbox inheritance for subagents; `/compact` queueing not
       implemented.
+
+24. **Round 29 (2026-11-04/05) — DSH 0.2.2-alpha.3 declared.**
+    - **Declaration.** Every `@deepseek-ai/dsh-*` peer is
+      `0.2.1-rc.5 || 0.2.2-alpha.3` (exact alternatives, no range; no
+      `engines.dsh`, which would make DSH ignore the peers). DSH's plugin manager
+      (`dsh-app-boot` `evaluatePluginCompatibility`, same code in both releases)
+      accepts it on both runtimes and still rejects 0.2.2-rc.1 / 0.2.2-alpha.2 /
+      0.2.2 (real packages, `evidence-round29/a2-*`). `doctor` / `setup` accept
+      exactly `DSH_COMPAT_SUPPORTED_VERSIONS`; devDependencies, the lockfile and
+      every default CI lane stay on 0.2.1-rc.5. `dsh-compat-declaration.test.ts`
+      keeps env and peers identical.
+    - **CI.** `scripts/e2e/dsh-declared.py` judges a package.json / tarball the
+      same way. `dsh-ci` (input `dsh_version`) and `dsh-install` grant DSH's
+      `allow-version --accept-risk` only for a package that does not declare the
+      running DSH; ci-check U6 is strict on a declared DSH. On alpha.3 the OLD
+      dsh.2 tarball (peers rc.5 only) still needs the exemption in
+      install-accept steps a/d; A0 = PASS (none), WARN (only dsh.2 steps),
+      **FAIL (a HEAD step needed one)**.
+    - **Results.** install rc.5 A0–A4 PASS, alpha.3 A0 WARN (dsh.2 only) A1–A4
+      PASS; e2e rc.5 133/0/2, alpha.3 131/2/2 (Y2, R11) and 133/1/1 (Y2); I1/I2/R10
+      PASS on all three. Y2 pending the user (above). R11 once: the real model
+      stopped after 2 of 8 reads right after the backstop deferral (model
+      behaviour; fold-note wording contribution 待验证), check unchanged.
+    - **Not verified:** DSH alpha.3 requires node ≥ 24.9.0 (`engines`); every
+      alpha.3 run here used node 22 (待验证 on node 24). The contract gate
+      (`compat-upgrade.test.ts`, `dsh-api.contract.ts`) still runs only against
+      the lockfile's rc.5 packages; alpha.3 is covered by the e2e / install runs
+      and the round 28b preset-include check, not by the type-level contracts.
+    - **Release:** no tag; `package.json` is still `0.49.35-dsh.4`, whose tag
+      (`dsh/0.49.35-dsh.4`) declares rc.5 only. Shipping the declaration needs
+      dsh.5 (user approval).
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
