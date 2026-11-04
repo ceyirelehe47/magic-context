@@ -133,7 +133,7 @@ describe("/compact with an unprocessed tail (round 26 P1-2, limitation 17)", () 
       // Round 26 (e2e 41771964169 T2): the summarize path wrote no telemetry,
       // so the deferral was only visible through compartments.
       const runs = db
-        .query("select status, chunk_start_ordinal, chunk_end_ordinal, unprocessed_from, compartments_produced from historian_runs where session_id = ?")
+        .prepare("select status, chunk_start_ordinal, chunk_end_ordinal, unprocessed_from, compartments_produced from historian_runs where session_id = ?")
         .all(SID) as Array<Record<string, number | string>>;
       expect(runs).toHaveLength(1);
       expect(runs[0]!.status).toBe("success");
