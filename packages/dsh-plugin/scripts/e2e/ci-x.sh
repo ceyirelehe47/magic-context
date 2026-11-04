@@ -256,14 +256,36 @@ echo "[ci-x] w: child=$WCID forced files: $(wc -l < "$OUT/w-forced-files.txt")"
 # leases, open outbox rows, file sizes). Checks S1–S6.
 SMARK="SSTRESS$$"
 declare -A SSID
+# Round 27c: e2e 41787740600 ST1 FAIL (sw-1-3, sw-2-3: rc=1 in 0.3s, "include
+# (required) ... config file must be a top-level array of entries:
+# profiles/test/cordis.yml") is DSH-native, not Magic: every dsh boot's
+# prepareProfile() (dsh/lib/profile-boot-*.js) rewrites <profile>/cordis.yml IN
+# PLACE with writeFileSync (truncate, then write) while a concurrent boot's
+# Include.read() (dsh-app-boot) can read the truncated empty file
+# (yaml.load('') -> undefined -> TypeError). Not fixed here (DSH-native; see
+# DSH-MAINTENANCE "不修"). Scenario S stresses Magic's shared DB / leases /
+# historian across 5 concurrent processes, not DSH's profile boot, so each S
+# session runs on its OWN copy of the test profile (same DSH_HOME, same
+# sessions dir, same DB, same plugin build, all five still launched at the same
+# instant). ST1 stays strict; DN1 (ci-check) still reports this signature
+# wherever it appears in any run log, so the DSH issue stays visible.
+declare -A SPROF
+: > "$OUT/s-profiles.txt"
+for si in 1 2 3 4 5; do
+  SPROF[$si]="test-s$si"
+  rm -rf "$DSH_HOME/profiles/${SPROF[$si]}"
+  cp -a "$DSH_HOME/profiles/${PROFILE:-test}" "$DSH_HOME/profiles/${SPROF[$si]}"
+  sed -i "s/dsh-profile-${PROFILE:-test}/dsh-profile-${SPROF[$si]}/" "$DSH_HOME/profiles/${SPROF[$si]}/package.json"
+  printf '%s\t%s\n' "$si" "${SPROF[$si]}" >> "$OUT/s-profiles.txt"
+done
 TIMEBIN="$(command -v /usr/bin/time || true)"
-srun() { # srun <name> <plan> <session-env> [sid]
-  local name="$1" plan="$2" sess="$3" sid="${4:-}"
+srun() { # srun <name> <plan> <session-env> [sid] [profile]
+  local name="$1" plan="$2" sess="$3" sid="${4:-}" prof="${5:-${PROFILE:-test}}"
   if [[ -n "$TIMEBIN" ]]; then
-    RUN_LOG="$E2E_ROOT/logs/run-$name.log" OPENCODE_SESSION="$sess" MC_HISTORIAN_THRESHOLD=35 "$TIMEBIN" -f '%M %e' -o "$OUT/$name.time" \
+    PROFILE="$prof" RUN_LOG="$E2E_ROOT/logs/run-$name.log" OPENCODE_SESSION="$sess" MC_HISTORIAN_THRESHOLD=35 "$TIMEBIN" -f '%M %e' -o "$OUT/$name.time" \
       bash -c "$(declare -f xrun session_of); HERE='$HERE' OUT='$OUT'; xrun '$name' 'Read the files as planned. [[MOCK:$plan]] $SMARK' '$sid'"
   else
-    RUN_LOG="$E2E_ROOT/logs/run-$name.log" OPENCODE_SESSION="$sess" MC_HISTORIAN_THRESHOLD=35 xrun "$name" "Read the files as planned. [[MOCK:$plan]] $SMARK" "$sid"
+    PROFILE="$prof" RUN_LOG="$E2E_ROOT/logs/run-$name.log" OPENCODE_SESSION="$sess" MC_HISTORIAN_THRESHOLD=35 xrun "$name" "Read the files as planned. [[MOCK:$plan]] $SMARK" "$sid"
   fi
 }
 # Round 25b: e2e 41693402758 ST5 FAIL — every historian pass of the five S
@@ -277,7 +299,7 @@ srun() { # srun <name> <plan> <session-env> [sid]
 for wk in 1 2 3 4 5; do
   SPIDS=()
   for si in 1 2 3 4 5; do
-    RUN_LOG="$E2E_ROOT/logs/run-sw-$si-$wk.log" OPENCODE_SESSION="mc-ci-s$si-$$" MC_HISTORIAN_THRESHOLD=35 \
+    PROFILE="${SPROF[$si]}" RUN_LOG="$E2E_ROOT/logs/run-sw-$si-$wk.log" OPENCODE_SESSION="mc-ci-s$si-$$" MC_HISTORIAN_THRESHOLD=35 \
       xrun "sw-$si-$wk" "Reply when done. [[MOCK:s${si}w$wk]] $SMARK" "${SSID[$si]:-}" &
     SPIDS+=($!)
   done
@@ -289,7 +311,7 @@ done
 for rj in 1 2 3 4; do
   SPIDS=()
   for si in 1 2 3 4 5; do
-    srun "s-$si-$rj" "s${si}r${rj}" "mc-ci-s$si-$$" "${SSID[$si]:-}" &
+    srun "s-$si-$rj" "s${si}r${rj}" "mc-ci-s$si-$$" "${SSID[$si]:-}" "${SPROF[$si]}" &
     SPIDS+=($!)
   done
   wait "${SPIDS[@]}"  # NOT a bare wait: the mock model is a background child too

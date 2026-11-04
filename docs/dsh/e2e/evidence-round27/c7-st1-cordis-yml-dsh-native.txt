@@ -1,0 +1,30 @@
+# C7 / ST1 — DSH-native cordis.yml boot race (round 27c)
+
+## Observed (e2e 41787740600 @374a7e978, artifact dsh-e2e-41787740600, sw-1-3.log; sw-2-3.log identical modulo diagnostics id)
+dsh: startup failed: 1 required plugin did not activate
+
+Failed plugins (1):
+  include (required)
+    Package: cordis:include
+    TypeError: config file must be a top-level array of entries: ~/work/_temp/e2e/home/profiles/test/cordis.yml
+        at Include.read (file://~/work/_temp/e2e/dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js:164:35)
+        at async [cordis.init] (file://~/work/_temp/e2e/dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js:177:4)
+        at file://~/work/_temp/e2e/home/profiles/test/#include
+
+
+## DSH source (installed @deepseek-ai/dsh 0.2.1-rc.5, lib/profile-boot-C14i-8IN.js)
+prepareProfile(): writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)  // every boot, IN PLACE (truncate+write), no tmp/rename
+composeProfile(): same writeFileSync when resolvedProfile is given
+dsh-app-boot lib/index.js Include.read(): readFile -> yaml.load -> if (!Array.isArray(data)) throw TypeError('config file must be a top-level array of entries')
+yaml.load('') === undefined, so a concurrent boot that reads the file between truncate and write dies at startup (rc=1, ~0.3s).
+
+Correction of round 27 note: the earlier inference 'shared cordis.yml.tmp' is NOT this path. Include._writeFile (Loader write-back) does use a fixed '<file>.tmp' name shared by all processes (a second, latent DSH race), but write-back only runs on a plugin self-dispose/config update; the per-boot rewrite is the in-place writeFileSync above. Local check: one boot left cordis.yml with the SAME inode and a new mtime (in-place write, not rename).
+
+## Mechanism repro (c7-cordis-yml-race-repro.mjs.txt: one process rewrites like prepareProfile, the other reads like Include.read, 3 s)
+reads=414754 not-a-top-level-array=163135 sample=""
+
+## Disposition
+- Not fixed (DSH-native; user rule: core/DSH-native issues are documented, not patched).
+- Scenario S (ci-x.sh) now runs each of its 5 sessions on its own copy of the test profile (test-s1..s5): same DSH_HOME, sessions dir, Magic DB and plugin build, still launched simultaneously. Reason: S targets Magic's cross-process DB/lease/historian behaviour, not DSH's profile boot. ST1 assertion unchanged (every run rc=0 and finishes its plan).
+- New ci-check DN1 scans every run log for the signature and reports WARN with the run names, so the DSH issue stays visible (offline on the 41787740600 artifact: DN1 WARN runs=[sw-1-3, sw-2-3]; check count 132 -> 133).
+- Residual risk: real users running several dsh processes on one profile at the same instant can still hit this at startup.

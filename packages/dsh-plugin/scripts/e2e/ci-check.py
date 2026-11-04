@@ -62,6 +62,9 @@ printed. Checks (ids are referenced from summary.md and DSH-MAINTENANCE.md):
   E1–E2 (round 26, scenario E, mock main model) exact-identifier ranking on
       scenario H's session A: bag-of-words mock vs a REAL embedding model
       (all-MiniLM-L6-v2); E2 WARN = the ranking issue holds with real vectors
+  DN1 (round 27c) no run hit the DSH-native cordis.yml boot race (WARN, not
+      Magic: dsh prepareProfile rewrites <profile>/cordis.yml in place; scenario S
+      runs each session on its own profile copy, ST1 stays strict)
   P1  no dsh process left after the runs
 """
 import hashlib
@@ -1432,8 +1435,9 @@ def check_s(c, out: Path, runs):
         same = wrc[0] and wrc[0] == runs.get(f"s-{n.split('-')[1]}-1", ("", ""))[0]
         if not wrc[1].startswith("rc=0") or f"DONE s{n.split('-')[1]}w{n.split('-')[2]}" not in fin[n] or not same:
             bad.append(n)
+    sprof = (out / "s-profiles.txt").read_text().split() if (out / "s-profiles.txt").exists() else []
     c.add("ST1", not bad, "all 20 runs (5 sessions x 4 parallel rounds, each a restart) and the 25 warm-up turns before them exit 0 and finish their plan",
-          {"bad": {n: (rc[n], fin[n][:60]) for n in bad}})
+          {"bad": {n: (rc[n], fin[n][:60]) for n in bad}, "profiles": sprof[1::2]})
     dumps = {j: load_json(out / f"s-db-r{j}.json") or {} for j in (1, 2, 3, 4)}
     last = dumps[4].get("sessions") or {}
     sids = [s for s in ((out / "s.sids").read_text().strip().split(",") if (out / "s.sids").exists() else []) if s]
@@ -1738,6 +1742,19 @@ def check(out: Path) -> int:
     check_t(c, out, runs)
     check_m(c, out, runs)
     check_e(c, out, runs)
+
+    # --- DN1 (round 27c): DSH-native startup race, reported wherever it shows.
+    # Every dsh boot rewrites <profile>/cordis.yml in place (prepareProfile,
+    # writeFileSync); a concurrent boot on the SAME profile can read it empty
+    # and die with "config file must be a top-level array of entries" (e2e
+    # 41787740600 sw-1-3/sw-2-3). Not Magic and not fixed here (DSH-MAINTENANCE
+    # "不修"). WARN with the runs that hit it; the affected scenario's own check
+    # (e.g. ST1) still FAILs on its own terms.
+    dn = sorted(f.stem for f in out.glob("*.log")
+                if "config file must be a top-level array of entries" in f.read_text(errors="replace"))
+    c.add("DN1", True if not dn else "warn",
+          "no run hit the DSH-native cordis.yml boot race (WARN = DSH prepareProfile in-place rewrite read empty by a concurrent boot on the same profile)",
+          {"runs": dn})
 
     # --- I1 (round 27 C1, limitation 21): the model writing Magic's folded tool
     # record as its own TEXT (old `[tool: read #call_N]` form, or the new
