@@ -1,0 +1,26 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/crash-recovery.test.ts:
+(pass) crash recovery (round 27 C4): SIGKILL between the tail tool result and the landed replace (Y4 window) > control: without the crash point the tail-fold run completes [1192.32ms]
+259 |         // Restart: the next user prompt absorbs the unreplaced tail fold.
+260 |         const prompt = createUserMessage({ content: [{ type: "text", text: "Reply when done." }], source: { kind: "user" } });
+261 |         session.append("user/message", prompt as never, { surfaceOp: "append" });
+262 |         await planeStep(createContextPlaneState(), planeDeps(db), session);
+263 |         const after = toolRows(db, key, "call-2");
+264 |         expect(after).toHaveLength(1);
+                            ^
+error: expect(received).toHaveLength(expected)
+
+Expected length: 1
+Received length: 2
+
+      at <anonymous> (<repo>/packages/dsh-plugin/src/agent/crash-recovery.test.ts:264:23)
+      at async withDir (<repo>/packages/dsh-plugin/src/agent/crash-recovery.test.ts:82:11)
+      at async <anonymous> (<repo>/packages/dsh-plugin/src/agent/crash-recovery.test.ts:237:11)
+(fail) crash recovery (round 27 C4): SIGKILL between the tail tool result and the landed replace (Y4 window) > SIGKILL at tail-fold-pending: tags written, no replace landed; the next prompt keeps the call's tag number (one row, re-owned) [1425.32ms]
+
+ 1 pass
+ 6 filtered out
+ 1 fail
+ 11 expect() calls
+Ran 2 tests across 1 file. [3.29s]

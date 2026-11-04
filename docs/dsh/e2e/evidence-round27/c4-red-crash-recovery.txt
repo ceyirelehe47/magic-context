@@ -1,0 +1,26 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/crash-recovery.test.ts:
+(pass) crash recovery (round 27 C4): SIGKILL between the tail tool result and the landed replace (Y4 window) > control: without the crash point the tail-fold run completes [1391.76ms]
+236 |   it("SIGKILL at tail-fold-pending: tags written, no replace landed; the next prompt keeps the call's tag number (one row, re-owned)", async () => {
+237 |     await withDir(async (dir) => {
+238 |       const sid = "sess-crash-tailfold";
+239 |       const key = keyOf(sid);
+240 |       const a = runChild("tailfold", dir, sid, "tail-fold-pending");
+241 |       expect(a.done).toBe(false);
+                           ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (<repo>/packages/dsh-plugin/src/agent/crash-recovery.test.ts:241:22)
+      at withDir (<repo>/packages/dsh-plugin/src/agent/crash-recovery.test.ts:82:11)
+      at <anonymous> (<repo>/packages/dsh-plugin/src/agent/crash-recovery.test.ts:237:11)
+(fail) crash recovery (round 27 C4): SIGKILL between the tail tool result and the landed replace (Y4 window) > SIGKILL at tail-fold-pending: tags written, no replace landed; the next prompt keeps the call's tag number (one row, re-owned) [1269.95ms]
+
+ 1 pass
+ 6 filtered out
+ 1 fail
+ 2 expect() calls
+Ran 2 tests across 1 file. [3.77s]

@@ -22,7 +22,7 @@ import type { Session } from "@deepseek-ai/dsh-session";
 import { acquireCompartmentLease, releaseCompartmentLease } from "@magic-context/core/features/magic-context/compartment-lease";
 import { getCompartments } from "@magic-context/core/features/magic-context/compartment-storage";
 import type { Database } from "@magic-context/core/shared/sqlite";
-import { deriveEventMessage, sessionEventAt } from "../compat/dsh-0.1/session";
+import { createUserMessage, deriveEventMessage, sessionEventAt } from "../compat/dsh-0.1/session";
 import { createTestDb } from "../test-utils";
 import { createContextPlaneState } from "./context-plane";
 import {
@@ -217,6 +217,61 @@ describe("crash recovery (round 23b P0-2): context-plane saga", () => {
       });
     }, 60_000);
   }
+});
+
+describe("crash recovery (round 27 C4): SIGKILL between the tail tool result and the landed replace (Y4 window)", () => {
+  function toolRows(db: Database, key: string, callId: string) {
+    return db
+      .prepare("SELECT tag_number, tool_owner_message_id FROM tags WHERE session_id = ? AND type = 'tool' AND message_id = ?")
+      .all(key, callId) as Array<{ tag_number: number; tool_owner_message_id: string | null }>;
+  }
+
+  it("control: without the crash point the tail-fold run completes", async () => {
+    await withDir(async (dir) => {
+      const a = runChild("tailfold", dir, "sess-tailfold-control", undefined);
+      expect(a.done).toBe(true);
+    });
+  }, 60_000);
+
+  it("SIGKILL at tail-fold-pending: tags written, no replace landed; the next prompt keeps the call's tag number (one row, re-owned)", async () => {
+    await withDir(async (dir) => {
+      const sid = "sess-crash-tailfold";
+      const key = keyOf(sid);
+      const a = runChild("tailfold", dir, sid, "tail-fold-pending");
+      expect(a.done).toBe(false);
+      expect(a.signal === "SIGKILL" || a.exitCode === 137 || a.exitCode === null).toBe(true);
+      expect(a.stderr).toContain("crash point tail-fold-pending");
+
+      const db = await createTestDb(join(dir, "context.db"));
+      initializeDshAdapterTables(db);
+      try {
+        expectIntegrity(db);
+        const { session, events } = restoreSession(sid, join(dir, `${sid}.events.jsonl`));
+        expectRawIntact(events, [1, 2]);
+        // In the window: the call is tagged under the synthetic tail owner, and
+        // the surface still ends in the raw tool result (no Magic copy of it).
+        const before = toolRows(db, key, "call-2");
+        expect(before).toHaveLength(1);
+        expect(before[0]!.tool_owner_message_id ?? "").toMatch(/^synth-user-/);
+        const lastSeq = session.surface.nodes[session.surface.nodes.length - 1]!;
+        expect(sessionEventAt(session, lastSeq)?.type).toBe("tool/result");
+
+        // Restart: the next user prompt absorbs the unreplaced tail fold.
+        const prompt = createUserMessage({ content: [{ type: "text", text: "Reply when done." }], source: { kind: "user" } });
+        session.append("user/message", prompt as never, { surfaceOp: "append" });
+        await planeStep(createContextPlaneState(), planeDeps(db), session);
+        const after = toolRows(db, key, "call-2");
+        expect(after).toHaveLength(1);
+        expect(after[0]!.tag_number).toBe(before[0]!.tag_number);
+        expect(after[0]!.tool_owner_message_id).toBe(prompt.id);
+        expectTagIdentity(db, key);
+        const surface = expectSurfaceTags(db, session, key);
+        expect(surface).toContain(before[0]!.tag_number);
+      } finally {
+        db.close();
+      }
+    });
+  }, 60_000);
 });
 
 async function recoverHistorian(dir: string, sid: string) {

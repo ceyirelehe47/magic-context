@@ -56,6 +56,7 @@ import type { RawMessageProvider } from "@magic-context/core/hooks/magic-context
 import type { Database } from "@magic-context/core/shared/sqlite";
 import type { ProtectedTokensTierOverrides } from "@magic-context/core/config/project-security";
 import { resolveDshProtectionFloor, type DshProtectionOptions } from "./protection";
+import { e2eCrashPoint } from "./e2e-hooks";
 
 /** The host-service slice the context plane needs (structural view). */
 export interface ContextPlaneHostView {
@@ -770,6 +771,9 @@ export async function runContextPlaneStep(
           deps.config?.pressureTruncation === false ? undefined : pressureTruncationInputFor(deps, agent),
         log: deps.log,
       } satisfies PlanContext);
+      // Round 27 C4 (e2e only, inert in production): the Y4 window — tool
+      // result in the log, its tags written, the replace not landed.
+      if (plan !== null && endsInPendingFold(view)) e2eCrashPoint("tail-fold-pending");
       if (plan !== null) {
         surfaceRewritten = true;
         agentDropsApplied = plan.ops.some((op) => op.kind === "drops");

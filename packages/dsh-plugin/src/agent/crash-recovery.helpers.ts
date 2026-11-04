@@ -72,6 +72,28 @@ export function toolTurn(session: Session, i: number, size: number): void {
   session.append("assistant/message", { turn: i, step: 2, stream: [], message: reply } as never, { surfaceOp: "append" });
 }
 
+/** A user question, an assistant tool call and its result — no reply (the turn is still running). */
+export function tailToolCall(session: Session, i: number, size: number): void {
+  session.append(
+    "user/message",
+    createUserMessage({ content: [{ type: "text", text: `question ${i}` }], source: { kind: "user" } }) as never,
+    { surfaceOp: "append" },
+  );
+  const call = createAssistantMessage({
+    content: [{ type: "text", text: `reading ${i}` }, { type: "tool-call", id: `call-${i}` as never, name: "read", arguments: "{}" }],
+    provider: "d",
+    model: "m",
+    source: { kind: "model", provider: "d", model: "m" } as never,
+  } as never);
+  session.append("assistant/message", { turn: i, step: 1, stream: [], message: call } as never, { surfaceOp: "append" });
+  const result = createToolResultMessage({
+    callId: `call-${i}` as never,
+    content: [{ type: "text", text: `BODY${i} `.repeat(size) }],
+    isError: false,
+  });
+  session.append("tool/result", { turn: i, step: 1, message: result } as never, { surfaceOp: "append" });
+}
+
 export function planeDeps(db: Database, log?: (m: string) => void): ContextPlaneDeps {
   return {
     host: {

@@ -42,7 +42,10 @@
  *       row written, surface not replaced), surface-applied (surface replaced,
  *       saga not acknowledged), historian-leased (lease taken, nothing
  *       published), historian-publish (inside the publish transaction, before
- *       COMMIT), historian-published (after COMMIT, before the lease release).
+ *       COMMIT), historian-published (after COMMIT, before the lease release),
+ *       tail-fold-pending (round 27: the view ends in an unreplaced tail fold —
+ *       a tool result with no reply — and its tags are written, the surface
+ *       replace not yet enqueued: the round 26 Y4 window, deterministic).
  *
  * All output also goes to stderr as `[magic-context] e2e: …` lines (headless
  * prints console.error, not ctx.logger).
@@ -78,7 +81,8 @@ export type E2eCrashPoint =
   | "surface-applied"
   | "historian-leased"
   | "historian-publish"
-  | "historian-published";
+  | "historian-published"
+  | "tail-fold-pending";
 
 /**
  * Round 23b (P0-2) fault injection: SIGKILL the process at `point` when the

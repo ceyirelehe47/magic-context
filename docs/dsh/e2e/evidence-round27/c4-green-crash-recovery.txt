@@ -1,0 +1,16 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/crash-recovery.test.ts:
+(pass) crash recovery (round 23b P0-2): context-plane saga > SIGKILL at outbox-pending: the next process settles the saga row, keeps tag identity, and continues [1840.79ms]
+(pass) crash recovery (round 23b P0-2): context-plane saga > SIGKILL at surface-applied: the next process settles the saga row, keeps tag identity, and continues [1579.31ms]
+(pass) crash recovery (round 27 C4): SIGKILL between the tail tool result and the landed replace (Y4 window) > control: without the crash point the tail-fold run completes [1383.96ms]
+(pass) crash recovery (round 27 C4): SIGKILL between the tail tool result and the landed replace (Y4 window) > SIGKILL at tail-fold-pending: tags written, no replace landed; the next prompt keeps the call's tag number (one row, re-owned) [1367.04ms]
+(pass) crash recovery (round 23b P0-2): historian lease and publication > SIGKILL after taking the lease: the dead owner's lease neither blocks nor reads as a running pass; the rerun publishes once [1027.74ms]
+(pass) crash recovery (round 23b P0-2): historian lease and publication > SIGKILL inside the publish transaction (before COMMIT): nothing half-published; the rerun publishes exactly once [1238.62ms]
+(pass) crash recovery (round 23b P0-2): historian lease and publication > SIGKILL after COMMIT, before the lease release: published once, the stale lease/flag do not block, no duplicate on rerun [1342.92ms]
+(pass) crash recovery (round 23b P0-2): two sessions, two processes, one shared DB > process A dies mid-publish on session A while process B works on session B: B completes untouched; A recovers [1764.51ms]
+
+ 8 pass
+ 0 fail
+ 124 expect() calls
+Ran 8 tests across 1 file. [12.28s]
