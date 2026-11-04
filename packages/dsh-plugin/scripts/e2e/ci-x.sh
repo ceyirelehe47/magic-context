@@ -107,7 +107,7 @@ json.dump(plans, open(plans_out, "w"), ensure_ascii=False)
 PY
 TOKROOT="$(ls -d "$REPO"/node_modules/.bun/ai-tokenizer@*/node_modules | head -n 1)"
 : > "$OUT/x-requests.jsonl"
-MOCK_LOG_TAG_NEEDLES="MOCKSTEP:f1:1,MOCKSTEP:f1:2" MOCK_TOKENIZER_ROOT="$TOKROOT" node "$HERE/mock-llm.mjs" "$MOCK_LLM_PORT" "$OUT/x-plans.json" "$OUT/x-requests.jsonl" > "$OUT/x-mock.log" 2>&1 &
+MOCK_LOG_TAG_NEEDLES="MOCKSTEP:f1:1,MOCKSTEP:f1:2,no result was durably recorded" MOCK_TOKENIZER_ROOT="$TOKROOT" node "$HERE/mock-llm.mjs" "$MOCK_LLM_PORT" "$OUT/x-plans.json" "$OUT/x-requests.jsonl" > "$OUT/x-mock.log" 2>&1 &
 MOCK_PID=$!
 for i in $(seq 1 40); do grep -q listening "$OUT/x-mock.log" 2>/dev/null && break; sleep 0.25; done
 echo "[ci-x] mock: $(cat "$OUT/x-mock.log")"

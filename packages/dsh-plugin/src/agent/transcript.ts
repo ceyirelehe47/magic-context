@@ -1874,8 +1874,10 @@ function planReasoningReplay(
  * and core assigned a second tag to the same call (the model saw §4§ for the
  * result it had been shown as §3§; the old tag stayed active, orphaned).
  * Re-own such a tag to the absorbing user message before tagging. Only a
- * synthetic owner that is no longer in the view moves, only to a non-synthetic
- * user message holding that call, and only when that owner has no tag yet.
+ * synthetic owner that is no longer in the view moves, only to a user-role
+ * message of the current view holding that call (a real message, or — round
+ * 27b — the new synthetic tail owner DSH's restore produces), and only when
+ * that owner has no tag yet.
  */
 export function reownAbsorbedTailToolTags(db: Database, sessionId: string, messages: readonly RawMessage[]): number {
   let moved = 0;
@@ -1888,7 +1890,14 @@ export function reownAbsorbedTailToolTags(db: Database, sessionId: string, messa
       "UPDATE tags SET tool_owner_message_id = ? WHERE session_id = ? AND type = 'tool' AND message_id = ? AND tool_owner_message_id = ?",
     );
     for (const m of messages) {
-      if (m.role !== "user" || m.id.startsWith(SYNTH_USER_ID_PREFIX)) continue;
+      // Round 27b (e2e 41784617324 F1–F3): the absorbing owner may itself be
+      // synthetic — real DSH restores an undurable result as
+      // `interrupted-tool-result-<call>-<seq>` and the restarted turn's first
+      // pre-step runs before its user message is in the view, so the tail is
+      // re-walked as `synth-user-interrupted-tool-result-…`. Any user-role
+      // owner in the current view qualifies; the stale owner must still be a
+      // synthetic one that has left the view.
+      if (m.role !== "user") continue;
       for (const part of m.parts) {
         if (!isRecord(part) || part.type !== "tool" || typeof part.callID !== "string") continue;
         const owners = (find.all(sessionId, part.callID) as Array<{ owner: string }>).map((r) => r.owner);

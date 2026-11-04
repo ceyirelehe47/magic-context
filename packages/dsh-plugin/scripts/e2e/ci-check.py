@@ -935,35 +935,60 @@ def check_f(c, out: Path, runs):
     tools1 = [t for t in (d1.get("tags") or []) if t.get("type") == "tool"]
     sess = (out / "f-session.jsonl").read_text(errors="replace") if (out / "f-session.jsonl").exists() else ""
     # the raw tool/result event carries the file whole (its first AND last marker line)
+    # Round 27b (e2e 41784617324): at this kill point real DSH may not have made
+    # the result durable yet; its restore then records the call explicitly as
+    # TOOL_OUTCOME_UNKNOWN (interrupted-tool-result-<call>-<seq>), exactly as Y6
+    # accepts. Either outcome is a legitimate raw log; a PARTIAL result or a
+    # call with no result at all is not.
     whole = False
+    unknown_id = None
+    results = 0
     for e in events(out / "f-session.jsonl"):
         if e.get("type") == "tool/result":
-            msg = (e.get("data") or {}).get("message") or {}
+            dat = e.get("data") or {}
+            msg = dat.get("message") or {}
             text = "".join(b.get("text", "") for b in (msg.get("content") or []) if isinstance(b, dict))
+            if "MOCKSTEP:f1:1" in text or (dat.get("error") or {}).get("code") == "TOOL_OUTCOME_UNKNOWN":
+                results += 1
             whole = whole or text.count("MOCKSTEP:f1:1") >= 2
+            if (dat.get("error") or {}).get("code") == "TOOL_OUTCOME_UNKNOWN":
+                unknown_id = msg.get("id")
+    raw_ok = results == 1 and (whole or unknown_id is not None)
     # F1 — the kill landed in the window: crash line, no completion, the first
     # call tagged under the synthetic tail owner, the second call never made
     c.add("F1", "crash point tail-fold-pending" in log1 and not rc["f-1"].startswith("rc=0")
           and len(tools1) == 1 and str(tools1[0].get("tool_owner_message_id") or "").startswith("synth-user-")
-          and whole and "MOCKSTEP:f1:2" not in sess.split("[[MOCK:f2]]")[0],
-          "f-1: SIGKILL at tail-fold-pending — the first tool result is whole in the DSH log, its tag is written under the synthetic tail owner, the replace never landed, step 2 never ran",
-          {"rc": rc["f-1"], "crashLine": "crash point tail-fold-pending" in log1, "toolTags": tools1, "resultWhole": whole})
+          and raw_ok and "MOCKSTEP:f1:2" not in sess.split("[[MOCK:f2]]")[0],
+          "f-1: SIGKILL at tail-fold-pending — its tag is written under the synthetic tail owner, the replace never landed, step 2 never ran; the DSH log holds exactly one result for the call: whole, or DSH's explicit TOOL_OUTCOME_UNKNOWN (result not yet durable at the kill)",
+          {"rc": rc["f-1"], "crashLine": "crash point tail-fold-pending" in log1, "toolTags": tools1, "resultWhole": whole,
+           "outcomeUnknown(DSH)": unknown_id, "resultsForCall": results})
     # F2 — restart: the absorbing user message re-owns the call's tag; one row, same number
     call = tools1[0].get("message_id") if tools1 else None
     rows2 = [t for t in (d2.get("tags") or []) if t.get("type") == "tool" and t.get("message_id") == call]
     t2 = {t["tag_number"]: t["message_id"] for t in (d2.get("tags") or [])}
     ok_ids = sorted(t2) == list(range(1, len(t2) + 1)) and len(set(t2.values())) == len(t2)
     n1 = tools1[0].get("tag_number") if tools1 else None
+    owner1 = str(tools1[0].get("tool_owner_message_id") or "") if tools1 else ""
+    owner2 = str(rows2[0].get("tool_owner_message_id") or "") if len(rows2) == 1 else ""
+    # The new owner is the message that now holds the call: the absorbing real
+    # user message (result durable), or — result restored as
+    # TOOL_OUTCOME_UNKNOWN — the tail re-walked from DSH's restored result
+    # (synth-user-<that result id>). Never the vanished pre-kill owner.
+    owner_ok = owner2 != "" and owner2 != owner1 and (
+        not owner2.startswith("synth-user-") or (unknown_id is not None and owner2 == f"synth-user-{unknown_id}"))
     c.add("F2", rc["f-2"].startswith("rc=0") and call is not None and len(rows2) == 1 and rows2[0].get("tag_number") == n1
-          and not str(rows2[0].get("tool_owner_message_id") or "").startswith("synth-user-") and ok_ids,
-          "f-2 (new process, new user message absorbs the unreplaced fold): the call keeps ONE tag row with its pre-kill number, re-owned by a real message; tag numbers unique + contiguous",
-          {"rc": rc["f-2"], "call": call, "before": n1, "after": rows2, "tags": len(t2), "uniqueContiguous": ok_ids})
+          and owner_ok and ok_ids,
+          "f-2 (new process continues the session): the call keeps ONE tag row with its pre-kill number, re-owned from the vanished synthetic owner to the message now holding it; tag numbers unique + contiguous",
+          {"rc": rc["f-2"], "call": call, "before": n1, "ownerBefore": owner1, "after": rows2, "tags": len(t2), "uniqueContiguous": ok_ids})
     # F3 — what the model is shown after the restart: the result under that same §N§ only
     reqs = [r for r in x_requests(out) if r.get("plan") == "f2" and isinstance(r.get("tagged"), dict)]
-    shown = sorted({n for r in reqs for n in (r["tagged"].get("MOCKSTEP:f1:1") or [])})
-    c.add("F3", bool(reqs) and n1 is not None and shown == [n1],
-          "f-2 requests show the first tool result under its pre-kill §N§ and no other number (round 26 Y4: the model saw §4§ for a §3§ result)",
-          {"requests": len(reqs), "shownTags": shown, "expected": n1})
+    needle = "MOCKSTEP:f1:1" if whole else "no result was durably recorded"
+    reqs = [r for r in x_requests(out) if r.get("plan") == "f2"]
+    shown = sorted({n for r in reqs for n in ((r.get("tagged") or {}).get(needle) or [])})
+    carried = all(needle in (r.get("tagged") or {}) for r in reqs)
+    c.add("F3", bool(reqs) and carried and n1 is not None and shown == [n1],
+          "f-2 requests show the call's result (whole, or DSH's TOOL_OUTCOME_UNKNOWN record) under its pre-kill §N§ and no other number (round 26 Y4: the model saw §4§ for a §3§ result)",
+          {"requests": len(reqs), "needle": needle, "carriedInEvery": carried, "shownTags": shown, "expected": n1})
 
 
 def k_rows(out: Path):
@@ -1488,12 +1513,20 @@ def check_t(c, out: Path, runs):
            "error": (out / "t-tail.err").read_text(errors="replace")[-300:] if (out / "t-tail.err").exists() else ""})
     cps = [x for x in (t.get("compactions") or []) if isinstance(x, dict)]
     tail = (cps[-1].get("tail") if cps else None) or {}
-    leaks = [h for h in (t.get("surfaceHits") or []) if isinstance(h, dict) and not h.get("summary")]
+    hits = [h for h in (t.get("surfaceHits") or []) if isinstance(h, dict) and not h.get("summary")]
+    # Round 27b (e2e 41784617324): the real model's OWN reasoning in the live
+    # (unshadowed) tail restated the rule ("There's a standing rule at §8§ …
+    # OTTER-LANTERN-6152"). Magic / user copies stay a FAIL; a model-authored
+    # restatement is not something the adapter wrote or could withhold, so it
+    # is a WARN (it weakens T4's attribution to the summary) and is reported.
+    leaks = [h for h in hits if h.get("role") != "assistant"]
+    model_restated = [h for h in hits if h.get("role") == "assistant"]
     ok3 = bool(cps) and bool(tail) and tail.get("carriesCodeword") is True and s_ord is not None \
         and (tail.get("from") or 0) <= s_ord <= (tail.get("to") or -1) and cons.get("originalOnSurface") is False and not leaks
-    c.add("T3", ok3,
-          "the checkpoint shadows the constraint and its summary carries it in <unsummarized_tail> (no other surface copy)",
-          {"compactions": cps[-2:], "originalOnSurface": cons.get("originalOnSurface"), "otherSurfaceHits": leaks[:3]})
+    c.add("T3", ("warn" if model_restated else True) if ok3 else False,
+          "the checkpoint shadows the constraint and its summary carries it in <unsummarized_tail> (no other Magic/user surface copy; WARN = the model's own live-tail text restated it)",
+          {"compactions": cps[-2:], "originalOnSurface": cons.get("originalOnSurface"), "otherSurfaceHits": leaks[:3],
+           "modelRestated": model_restated[:2]})
     final4 = final_text(out / "t-4.log") or ""
     calls4 = [ev.get("tool") for ev in events(out / "t-4.log") if ev.get("type") == "tool_call"]
     # Anything injected into t-4's own turn that carries the codeword (a
