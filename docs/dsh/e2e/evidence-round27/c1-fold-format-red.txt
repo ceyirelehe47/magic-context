@@ -1,0 +1,39 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/fold-format.test.ts:
+107 |       const session = buildFoldSession();
+108 |       await landFold(session, db, dir);
+109 |       const folded = surfaceTexts(session).find((t) => t.includes("CHECKSUM 4411"));
+110 |       expect(folded).toBeDefined();
+111 |       // Old format (imitated by the model in e2e 41769676548 R9/R11).
+112 |       expect(folded!).not.toMatch(/^\[tool( result)?: /m);
+                                ^
+error: expect(received).not.toMatch(expected)
+
+Expected substring or pattern: not /^\[tool( result)?: /m
+Received: "§2§ Reading it.\n\n[tool: read #call_7]\ninput: {\"filePath\":\"/w/p19.txt\"}\n\n[tool result: read #call_7]\noutput:\n§3§ willow orchard cobalt prism\nCHECKSUM 4411\n\n§4§ now p20.txt"
+
+      at <anonymous> (<repo>/packages/dsh-plugin/src/agent/fold-format.test.ts:112:27)
+      at async withDb (<repo>/packages/dsh-plugin/src/agent/fold-format.test.ts:35:11)
+      at async <anonymous> (<repo>/packages/dsh-plugin/src/agent/fold-format.test.ts:106:11)
+(fail) folded tool calls render as a framed, non-callable history record (round 27, limitation 21) > the landed copy no longer carries the imitable `[tool: …]` / `[tool result: …]` syntax [655.42ms]
+132 |   it("the renderer is pure and frames call + result in one record", () => {
+133 |     const text = renderToolRecord([
+134 |       { kind: "call", toolName: "read", callId: "call_1", input: { filePath: "/a" } },
+135 |       { kind: "result", toolName: "read", callId: "call_1", input: { filePath: "/a" }, output: "\u00a73\u00a7 body" },
+136 |     ]);
+137 |     expect(text.startsWith("<recorded-tool-activity")).toBe(true);
+                                                             ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (<repo>/packages/dsh-plugin/src/agent/fold-format.test.ts:137:56)
+(fail) folded tool calls render as a framed, non-callable history record (round 27, limitation 21) > the renderer is pure and frames call + result in one record [0.83ms]
+(pass) folded tool calls render as a framed, non-callable history record (round 27, limitation 21) > historian / FTS input is unchanged by the fold format: raw messages before and after the landed replace are identical [252.05ms]
+
+ 1 pass
+ 2 fail
+ 12 expect() calls
+Ran 3 tests across 1 file. [1.72s]

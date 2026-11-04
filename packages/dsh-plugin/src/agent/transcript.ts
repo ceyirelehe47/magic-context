@@ -1371,20 +1371,52 @@ export class RecordingPart implements TranscriptPart {
     return true;
   }
 
-  /** Deterministic text rendering of this part's CURRENT state. */
-  render(): string | null {
+  /**
+   * Deterministic rendering of this part's CURRENT state: plain text, or a
+   * tool record item (framed by {@link RecordingMessage.render} through
+   * {@link renderToolRecord}), or null (thinking / image / empty).
+   */
+  render(): string | ToolRecordItem | null {
     if (this.kind === "thinking" || this.kind === "image") return null;
     const payload = this.payload ?? "";
     if (this.kind === "text" || this.kind === "unknown") return payload.length > 0 ? payload : null;
     if (DROPPED_SENTINEL_PATTERN.test(payload)) return payload.length > 0 ? payload : null;
-    const head = this.kind === "tool_use" ? "tool" : "tool result";
-    const lines = [
-      `[${head}: ${this.toolName ?? "tool"}${this.callId ? ` #${this.callId}` : ""}]`,
-    ];
-    if (this.input) lines.push(`input: ${JSON.stringify(this.input)}`);
-    if (this.kind === "tool_result" && payload.length > 0) lines.push(`output:\n${payload}`);
-    return lines.join("\n");
+    const item: ToolRecordItem = {
+      kind: this.kind === "tool_use" ? "call" : "result",
+      toolName: this.toolName ?? "tool",
+      callId: this.callId,
+      input: this.input,
+    };
+    if (this.kind === "tool_result") item.output = payload;
+    return item;
   }
+}
+
+/** One folded tool part (a call or its result) inside a rendered tool record. */
+export interface ToolRecordItem {
+  kind: "call" | "result";
+  toolName: string;
+  callId?: string | undefined;
+  input?: Record<string, unknown> | null | undefined;
+  output?: string | undefined;
+}
+
+/**
+ * Text form of a run of folded tool parts (DSH surface replacement moves a
+ * tool-call assistant and its results into the following user message as
+ * text, limitation 1). Pure and deterministic: every pass re-renders the same
+ * bytes (the coordinator's "copy already current" check depends on it).
+ */
+export function renderToolRecord(items: readonly ToolRecordItem[]): string {
+  return items
+    .map((item) => {
+      const head = item.kind === "call" ? "tool" : "tool result";
+      const lines = [`[${head}: ${item.toolName}${item.callId ? ` #${item.callId}` : ""}]`];
+      if (item.input) lines.push(`input: ${JSON.stringify(item.input)}`);
+      if (item.kind === "result" && item.output !== undefined && item.output.length > 0) lines.push(`output:\n${item.output}`);
+      return lines.join("\n");
+    })
+    .join("\n\n");
 }
 
 /**
@@ -1456,9 +1488,20 @@ export class RecordingMessage implements TranscriptMessage {
   render(): string {
     const out: string[] = [];
     const sentinels = new Set<string>();
+    let record: ToolRecordItem[] = [];
+    const flush = () => {
+      if (record.length > 0) out.push(renderToolRecord(record));
+      record = [];
+    };
     for (const part of this.parts) {
       const value = part.render();
-      if (value === null || value.length === 0) continue;
+      if (value === null) continue;
+      if (typeof value !== "string") {
+        record.push(value);
+        continue;
+      }
+      if (value.length === 0) continue;
+      flush();
       // A dropped tool arc puts the same `[dropped §N§]` sentinel on its call
       // AND its result part (DSH folds both into one copy): render it once.
       // The parts need not be adjacent: a parallel-call step folds as
@@ -1470,6 +1513,7 @@ export class RecordingMessage implements TranscriptMessage {
       }
       out.push(value);
     }
+    flush();
     return out.join("\n\n");
   }
 }
