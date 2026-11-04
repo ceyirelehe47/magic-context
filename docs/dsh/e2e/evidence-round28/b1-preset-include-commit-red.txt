@@ -1,0 +1,17 @@
+# B1 RED — preset-include on DSH 0.2.2-alpha.3 (local, real npm packages)
+
+## Real-package repro (b1-preset-include-commit-repro.mjs.txt): a stock file mounted through the include class, one plugin self-disposes
+rc.5 set   (cordis 4.0.5, loader 1.0.6, include 1.0.10):        raw Include -> stock file changed: true ; write()-only (cc96eb02e class) -> changed: false
+alpha.3 set (cordis 4.0.6-alpha.2, loader 1.0.7-alpha.2, include 1.0.11-alpha.2): raw Include -> changed: true ; write()-only (cc96eb02e class) -> changed: TRUE (self1 gets 'disabled: true' written into the stock file) ; write()+commit() -> changed: false
+
+## Why: loader 1.0.7 persists through EntryTree.commit(change) (loader.create/remove/update, internal/commit, internal/plugin self-unload -> disabled: true); Include 1.0.11 commit -> journal -> _write -> tmp+rename over the source file. write() is no longer called. DSH's own PresetTree (dsh-agent-preset-registry) changed write() {} -> commit(_change) {} in 0.2.2-alpha.3.
+
+## Unit RED (bun test src/entries/preset-include.test.ts @ RED commit)
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/entries/preset-include.test.ts:44:24)
+(fail) magic preset-include entry (no-write include) > also overrides commit(change) with a no-op (DSH 0.2.2-alpha.3: cordis-plugin-loader 1.0.7 persists through EntryTree.commit, write() is never called) [5.16ms]
+(pass) magic preset-include entry (no-write include) > inherits the loader's tree-carrier marker statically [0.21ms]
+
+ 3 pass
+ 1 fail
+ 9 expect() calls
+Ran 4 tests across 1 file. [1235.00ms]

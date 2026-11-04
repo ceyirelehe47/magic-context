@@ -1,0 +1,20 @@
+import { Context } from "@deepseek-ai/cordis";
+import Loader from "@deepseek-ai/cordis-plugin-loader";
+import { readFileSync, writeFileSync, copyFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+const which = process.argv[2];
+const dir = process.cwd() + "/w";
+const stock = `${dir}/stock-${which}.yml`;
+writeFileSync(stock, `- id: child1\n  name: ${pathToFileURL(dir + "/child.mjs").href}\n  config:\n    a: 1\n- id: self1\n  name: ${pathToFileURL(dir + "/selfunload.mjs").href}\n`);
+const before = readFileSync(stock, "utf8");
+const ctx = new Context();
+await ctx.plugin(Loader);
+const id = await ctx.loader.create({ id: "magic-include-standard", name: pathToFileURL(`${dir}/nowrite-${which}.mjs`).href, config: { path: pathToFileURL(stock).href } });
+await ctx.loader.await?.();
+await new Promise((r) => setTimeout(r, 300));     // selfunload disposes itself
+try { await ctx.loader.update("child1", { config: { a: 2 } }); } catch (e) { console.log("update err", e.message); }
+await new Promise((r) => setTimeout(r, 300));
+const after = readFileSync(stock, "utf8");
+console.log(which, "stock file changed:", before !== after);
+if (before !== after) console.log(after);
+process.exit(0);

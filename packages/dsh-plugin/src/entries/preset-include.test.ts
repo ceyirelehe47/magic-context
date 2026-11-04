@@ -31,6 +31,24 @@ describe("magic preset-include entry (no-write include)", () => {
     ).toBeUndefined();
   });
 
+  it("also overrides commit(change) with a no-op (DSH 0.2.2-alpha.3: cordis-plugin-loader 1.0.7 persists through EntryTree.commit, write() is never called)", () => {
+    // Round 28b: DSH 0.2.2-alpha.3 (cordis-plugin-loader 1.0.7-alpha.2,
+    // cordis-plugin-include 1.0.11-alpha.2) replaced the loader's
+    // `tree.write()` with `tree.commit(change)`; Include.commit journals the
+    // change and renames the new YAML over the source file. DSH moved its own
+    // PresetTree from `write() {}` to `commit(_change) {}` in the same release.
+    // With only write() overridden, a plugin that self-disposes inside the
+    // shipped stock preset gets `disabled: true` written into the SHIPPED file
+    // (real alpha.3 packages: evidence-round28/b1-preset-include-commit-*).
+    const descriptor = Object.getOwnPropertyDescriptor(MagicPresetInclude.prototype, "commit");
+    expect(descriptor).toBeDefined();
+    expect(typeof descriptor!.value).toBe("function");
+    const change = { id: "self1", group: {}, options: { id: "self1", disabled: true } };
+    expect(descriptor!.value!.call({} as never, change)).toBeUndefined();
+    // and write() stays overridden for DSH 0.2.1 (cordis-plugin-loader 1.0.6)
+    expect(Object.getOwnPropertyDescriptor(MagicPresetInclude.prototype, "write")).toBeDefined();
+  });
+
   it("inherits the loader's tree-carrier marker statically", () => {
     // Include declares `static readonly [EntryGroup.key] = true`; static class
     // fields are inherited, so the loader's carrier check still passes on the
