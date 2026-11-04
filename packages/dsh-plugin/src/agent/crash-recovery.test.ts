@@ -15,14 +15,14 @@
  * other session sharing the DB untouched, the raw DSH log intact.
  */
 import { describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Session } from "@deepseek-ai/dsh-session";
 import { acquireCompartmentLease, releaseCompartmentLease } from "@magic-context/core/features/magic-context/compartment-lease";
 import { getCompartments } from "@magic-context/core/features/magic-context/compartment-storage";
 import type { Database } from "@magic-context/core/shared/sqlite";
-import { createUserMessage, deriveEventMessage, sessionEventAt } from "../compat/dsh-0.1/session";
+import { createToolResultMessage, createUserMessage, deriveEventMessage, sessionEventAt } from "../compat/dsh-0.1/session";
 import { createTestDb } from "../test-utils";
 import { createContextPlaneState } from "./context-plane";
 import {
@@ -264,6 +264,67 @@ describe("crash recovery (round 27 C4): SIGKILL between the tail tool result and
         expect(after).toHaveLength(1);
         expect(after[0]!.tag_number).toBe(before[0]!.tag_number);
         expect(after[0]!.tool_owner_message_id).toBe(prompt.id);
+        expectTagIdentity(db, key);
+        const surface = expectSurfaceTags(db, session, key);
+        expect(surface).toContain(before[0]!.tag_number);
+      } finally {
+        db.close();
+      }
+    });
+  }, 60_000);
+});
+
+describe("crash recovery (round 27b, e2e 41784617324 F1–F3): the killed tool result was NOT durable — DSH restores it as TOOL_OUTCOME_UNKNOWN", () => {
+  // Real DSH (e2e 41784617324, scenario F): at the tail-fold-pending kill the
+  // tool result existed only in memory; on restart DSH's restore appended
+  // `interrupted-tool-result-<call>-<seq>` (isError, TOOL_OUTCOME_UNKNOWN) for
+  // the same callId, and the next pre-step ran BEFORE the new user message was
+  // in the view. The view's tail owner is therefore a NEW synthetic owner
+  // (synth-user-interrupted-tool-result-…), not a real user message, and
+  // reownAbsorbedTailToolTags (real-user targets only) did not apply: core
+  // tagged the call a second time (§3§; the pre-kill §2§ row stayed active,
+  // orphaned under the vanished owner). Same window, real-DSH log shape.
+  it("restart over DSH's restored interrupted result keeps ONE tag row for the call with its pre-kill number", async () => {
+    await withDir(async (dir) => {
+      const sid = "sess-crash-tailfold-unknown";
+      const key = keyOf(sid);
+      const a = runChild("tailfold", dir, sid, "tail-fold-pending");
+      expect(a.done).toBe(false);
+      const eventsPath = join(dir, `${sid}.events.jsonl`);
+      // Drop the in-memory-only tool result (DSH never made it durable).
+      const lines = readFileSync(eventsPath, "utf8").split("\n").filter((l) => l.trim() !== "");
+      const lastResult = lines.map((l) => JSON.parse(l) as { type?: string }).map((e) => e.type).lastIndexOf("tool/result");
+      writeFileSync(eventsPath, `${lines.filter((_, i) => i !== lastResult).join("\n")}\n`);
+      const db = await createTestDb(join(dir, "context.db"));
+      initializeDshAdapterTables(db);
+      try {
+        const before = db
+          .prepare("SELECT tag_number, tool_owner_message_id FROM tags WHERE session_id = ? AND type = 'tool' AND message_id = 'call-2'")
+          .all(key) as Array<{ tag_number: number; tool_owner_message_id: string | null }>;
+        expect(before).toHaveLength(1);
+        expect(before[0]!.tool_owner_message_id ?? "").toMatch(/^synth-user-/);
+        const { session } = restoreSession(sid, eventsPath);
+        // DSH's restore: the interrupted result for the same call, new message id.
+        const restored = {
+          ...createToolResultMessage({
+            callId: "call-2" as never,
+            content: [{ type: "text", text: "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown." }],
+            isError: true,
+          }),
+          id: `interrupted-tool-result-call-2-${session.surface.nodes.length}`,
+        };
+        session.append("tool/result", { turn: 2, step: 1, message: restored, error: { name: "ToolOutcomeUnknownError", code: "TOOL_OUTCOME_UNKNOWN" } } as never, { surfaceOp: "append" });
+        // The restarted turn's first pre-step runs before its user message is in the view.
+        await planeStep(createContextPlaneState(), planeDeps(db), session);
+        const prompt = createUserMessage({ content: [{ type: "text", text: "Reply when done." }], source: { kind: "user" } });
+        session.append("user/message", prompt as never, { surfaceOp: "append" });
+        await planeStep(createContextPlaneState(), planeDeps(db), session);
+        const after = db
+          .prepare("SELECT tag_number, tool_owner_message_id FROM tags WHERE session_id = ? AND type = 'tool' AND message_id = 'call-2'")
+          .all(key) as Array<{ tag_number: number; tool_owner_message_id: string | null }>;
+        expect(after).toHaveLength(1);
+        expect(after[0]!.tag_number).toBe(before[0]!.tag_number);
+        expect(after[0]!.tool_owner_message_id).not.toBe(before[0]!.tool_owner_message_id);
         expectTagIdentity(db, key);
         const surface = expectSurfaceTags(db, session, key);
         expect(surface).toContain(before[0]!.tag_number);
