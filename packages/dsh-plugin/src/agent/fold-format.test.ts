@@ -10,6 +10,12 @@ import { createContextPlaneState, runContextPlaneStep, type ContextPlaneDeps } f
 import { readDshTranscript, renderToolRecord } from "./transcript";
 
 /**
+ * Round 28 (limitations 21/22): the round 27 framed record still carried a
+ * `- called read (id call_N) with input {…}` / `returned:` template and was
+ * copied verbatim (e2e 41792968900 h-a4). The fold now shows ONE past-tense
+ * prose line ("earlier in this session 3 files were read …, use ctx_expand")
+ * followed by the tagged result text; no call, id or input lines.
+ *
  * Round 27 (limitation 21, e2e 41769676548 R9/R11): the DSH adapter folds a
  * tool-call assistant + its tool results into the following user message
  * (limitation 1) and rendered them as `[tool: read #call_N]\ninput: …\n\n
@@ -101,47 +107,75 @@ async function landFold(session: Session, db: Database, dir: string): Promise<vo
   );
 }
 
-describe("folded tool calls render as a framed, non-callable history record (round 27, limitation 21)", () => {
-  it("the landed copy no longer carries the imitable `[tool: …]` / `[tool result: …]` syntax", async () => {
+describe("folded tool calls render as one past-tense prose summary, no call / id / input lines (round 28, limitations 21/22)", () => {
+  it("the landed copy carries no imitable call template: no `[tool: …]`, no framed record, no call id, no input", async () => {
     await withDb(async (db, dir) => {
       const session = buildFoldSession();
       await landFold(session, db, dir);
       const folded = surfaceTexts(session).find((t) => t.includes("CHECKSUM 4411"));
       expect(folded).toBeDefined();
-      // Old format (imitated by the model in e2e 41769676548 R9/R11).
+      // Round 26 form (imitated in e2e 41769676548 R9/R11, 41777488761).
       expect(folded!).not.toMatch(/^\[tool( result)?: /m);
       expect(folded!).not.toMatch(/^input: \{/m);
-      // New: one framed record that names itself history, not a callable format.
-      expect(folded!).toContain("<recorded-tool-activity");
-      expect(folded!).toContain("</recorded-tool-activity>");
-      expect(folded!).toMatch(/already executed/);
-      expect(folded!).toMatch(/not a (tool-call|callable) (syntax|format)/);
-      // Content kept: tool name, call id, input, the tagged output.
-      expect(folded!).toContain("read");
-      expect(folded!).toContain("call_7");
-      expect(folded!).toContain('"filePath":"/w/p19.txt"');
+      // Round 27 form (imitated verbatim in e2e 41792968900 h-a4).
+      expect(folded!).not.toContain("recorded-tool-activity");
+      expect(folded!).not.toMatch(/^\s*- called /m);
+      expect(folded!).not.toMatch(/returned:/);
+      // No structured call lines at all: no call id, no input JSON.
+      expect(folded!).not.toContain("call_7");
+      expect(folded!).not.toContain('"filePath"');
+      expect(folded!).not.toContain("/w/p19.txt");
+      // One past-tense prose summary that points at ctx_expand.
+      expect(folded!).toMatch(/earlier in this session 1 file was read\b/);
+      expect(folded!).toContain("ctx_expand");
+      expect(folded!.match(/Magic Context note/g)!.length).toBe(1);
+      // The tagged result text is kept (the model still needs what it read), §N§ first.
       expect(folded!).toMatch(/\u00a7\d+\u00a7 willow orchard cobalt prism\nCHECKSUM 4411/);
-      // The assistant's own text and the user's text stay outside the record.
-      const open = folded!.indexOf("<recorded-tool-activity");
-      const close = folded!.indexOf("</recorded-tool-activity>");
-      expect(folded!.indexOf("Reading it.")).toBeLessThan(open);
-      expect(folded!.indexOf("now p20.txt")).toBeGreaterThan(close);
+      // The assistant's own text and the user's text stay outside the note.
+      const note = folded!.indexOf("Magic Context note");
+      expect(folded!.indexOf("Reading it.")).toBeLessThan(note);
+      expect(folded!.indexOf("now p20.txt")).toBeGreaterThan(folded!.indexOf("CHECKSUM 4411"));
     });
   });
 
-  it("the renderer is pure and frames call + result in one record", () => {
-    const text = renderToolRecord([
-      { kind: "call", toolName: "read", callId: "call_1", input: { filePath: "/a" } },
-      { kind: "result", toolName: "read", callId: "call_1", input: { filePath: "/a" }, output: "\u00a73\u00a7 body" },
-    ]);
-    expect(text.startsWith("<recorded-tool-activity")).toBe(true);
-    expect(text.endsWith("</recorded-tool-activity>")).toBe(true);
-    expect(text.match(/<recorded-tool-activity/g)!.length).toBe(1);
-    expect(text).toContain("\u00a73\u00a7 body");
-    expect(text).not.toMatch(/^\[tool/m);
+  it("the renderer is pure: one summary line counting calls by kind, results verbatim, no ids or inputs", () => {
+    const items = [
+      { kind: "call" as const, toolName: "read", callId: "call_1", input: { filePath: "/a" } },
+      { kind: "call" as const, toolName: "read", callId: "call_2", input: { filePath: "/b" } },
+      { kind: "call" as const, toolName: "read", callId: "call_3", input: { filePath: "/c" } },
+      { kind: "call" as const, toolName: "bash", callId: "call_4", input: { command: "ls" } },
+      { kind: "result" as const, toolName: "read", callId: "call_1", input: { filePath: "/a" }, output: "\u00a73\u00a7 body a" },
+      { kind: "result" as const, toolName: "read", callId: "call_2", input: { filePath: "/b" }, output: "\u00a74\u00a7 body b" },
+      { kind: "result" as const, toolName: "read", callId: "call_3", input: { filePath: "/c" }, output: "" },
+      { kind: "result" as const, toolName: "bash", callId: "call_4", input: { command: "ls" }, output: "\u00a76\u00a7 x.txt" },
+    ];
+    const text = renderToolRecord(items);
+    expect(renderToolRecord(items)).toBe(text);
+    const first = text.split("\n")[0]!;
+    expect(first).toMatch(/^Magic Context note: earlier in this session 3 files were read and 1 command was run\./);
+    expect(first).toContain("ctx_expand");
+    expect(text.match(/Magic Context note/g)!.length).toBe(1);
+    for (const out of ["\u00a73\u00a7 body a", "\u00a74\u00a7 body b", "\u00a76\u00a7 x.txt"]) expect(text).toContain(out);
+    for (const id of ["call_1", "call_2", "call_3", "call_4"]) expect(text).not.toContain(id);
+    expect(text).not.toContain("/a");
+    expect(text).not.toContain('"command"');
+    expect(text).not.toMatch(/^\[tool|recorded-tool-activity|- called|returned/m);
   });
 
-  it("historian / FTS input is unchanged by the fold format: raw messages before and after the landed replace are identical", async () => {
+  it("other tools and calls without a result are counted in plain words", () => {
+    expect(renderToolRecord([{ kind: "call", toolName: "grep", callId: "c1", input: { pattern: "x" } }]).split("\n")[0]).toMatch(
+      /earlier in this session 1 search was run\./,
+    );
+    expect(
+      renderToolRecord([
+        { kind: "call", toolName: "edit", callId: "c1", input: {} },
+        { kind: "call", toolName: "write", callId: "c2", input: {} },
+        { kind: "call", toolName: "ctx_note", callId: "c3", input: {} },
+      ]).split("\n")[0],
+    ).toMatch(/earlier in this session 2 files were edited and the ctx_note tool was used once\./);
+  });
+
+  it("historian / FTS / ctx_expand input is unchanged by the fold format: raw messages before and after the landed replace are identical (call id + input included)", async () => {
     await withDb(async (db, dir) => {
       const session = buildFoldSession();
       const before = viewOf(session).messages;
@@ -155,8 +189,11 @@ describe("folded tool calls render as a framed, non-callable history record (rou
         expect(JSON.stringify(after[i]!.parts)).toBe(JSON.stringify(before[i]!.parts));
       }
       const all = JSON.stringify(after);
-      expect(all).not.toContain("recorded-tool-activity");
+      expect(all).not.toContain("Magic Context note");
       expect(all).toContain("willow orchard cobalt prism");
+      // The details the folded copy no longer shows are still in the raw view.
+      expect(all).toContain("call_7");
+      expect(all).toContain("/w/p19.txt");
     });
   });
 });
