@@ -1,0 +1,11 @@
+(pass) DSH version declaration (round 29) > env exports the supported list; the pinned default stays 0.2.1-rc.5 [0.25ms]
+(pass) DSH version declaration (round 29) > every DSH peer is exactly the supported list as '||'-joined exact versions [0.44ms]
+(pass) DSH version declaration (round 29) > DSH's own rule accepts 0.2.1-rc.5 and 0.2.2-alpha.3 [0.34ms]
+(pass) DSH version declaration (round 29) > DSH's own rule rejects every untested DSH version [0.24ms]
+(pass) DSH version declaration (round 29) > devDependencies (lockfile, default CI path) stay pinned to 0.2.1-rc.5 [0.07ms]
+ 5 pass
+ 0 fail
+(pass) dsh-magic-context doctor (Phase 2 slice C) > accepts DSH 0.2.2-alpha.3 as a declared version (round 29) [78.29ms]
+(pass) dsh-magic-context doctor (Phase 2 slice C) > still fails an untested DSH such as 0.2.2-rc.1 (round 29) [10.17ms]
+ 2 pass
+ 0 fail

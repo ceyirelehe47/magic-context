@@ -35,6 +35,8 @@ import {
 } from "../compat/dsh-0.1/profile-patch";
 import {
   DSH_COMPAT_EXPECTED_VERSION,
+  DSH_COMPAT_SUPPORTED_LABEL,
+  isSupportedDshVersion,
   MAGIC_CONTEXT_PACKAGE,
   errorMessage,
   listFlag,
@@ -167,19 +169,19 @@ export async function runDshSetup(
       title: "DSH install",
       detail:
         `Could not locate the @deepseek-ai/dsh launcher package ` +
-        `(${DSH_COMPAT_EXPECTED_VERSION} expected). Probed:\n` +
+        `(${DSH_COMPAT_SUPPORTED_LABEL} expected). Probed:\n` +
         located.tried.map((candidate) => `  - ${candidate}`).join("\n") +
         `\nFix: install DSH ${DSH_COMPAT_EXPECTED_VERSION}, put \`dsh\` on PATH, or pass --dsh-install <dir>.`,
     });
     failed = true;
   } else {
-    const versionOk = located.version === DSH_COMPAT_EXPECTED_VERSION;
+    const versionOk = isSupportedDshVersion(located.version);
     steps.push({
       status: versionOk ? "ok" : "warn",
       title: "DSH install",
       detail:
         `${located.dshInstallDir} (${located.version ?? "unknown version"}, found via ${located.source})` +
-        (versionOk ? "" : ` — the adapter pins ${DSH_COMPAT_EXPECTED_VERSION}; the contract scan below decides.`),
+        (versionOk ? "" : ` — the adapter declares ${DSH_COMPAT_SUPPORTED_LABEL}; the contract scan below decides.`),
     });
   }
 
@@ -212,7 +214,7 @@ export async function runDshSetup(
         title: "Stock layout contract scan",
         detail:
           `${plan.scannedFile ?? plan.profileDir}: ${plan.issue ?? "no wiring derived"}. ` +
-          `Refusing to write the profile patch (fail closed). Fix: check that the DSH install matches ${DSH_COMPAT_EXPECTED_VERSION}.`,
+          `Refusing to write the profile patch (fail closed). Fix: check that the DSH install is ${DSH_COMPAT_SUPPORTED_LABEL}.`,
       });
       failed = true;
     } else {

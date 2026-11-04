@@ -13,7 +13,9 @@ the composer.
 > official Magic Context or DeepSeek projects. Maintainer notes:
 > `docs/DSH-MAINTENANCE.md`.
 
-Compatibility baseline: DSH **0.2.1-rc.5** (exact; `doctor` checks it), Magic
+Compatibility: DSH **0.2.1-rc.5** (default) and **0.2.2-alpha.3** — exactly
+these two releases (peer dependencies `0.2.1-rc.5 || 0.2.2-alpha.3`; DSH's
+plugin manager and `doctor` refuse any other version, e.g. 0.2.2-rc.1), Magic
 Context core **0.49.35** (shared schema; see `docs/dsh/FEATURES.md`).
 
 ## Install

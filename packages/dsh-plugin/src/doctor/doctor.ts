@@ -2,7 +2,7 @@
  * doctor/doctor — `dsh-magic-context doctor` (Phase 2 slice C).
  *
  * Checklist (each item reports ok/warn/fail + a fix hint):
- *   1. DSH version vs the compatibility expectation (exact rc 0.2.1-rc.5);
+ *   1. DSH version vs the declared releases (exact 0.2.1-rc.5 or 0.2.2-alpha.3);
  *   2. bundle install state (profile package.json `dsh.profile.bundles`);
  *   3. profile patch layer (DSH 0.2): the setup-managed block in each Magic
  *      profile's cordis.patch.yml matches the rows derived from the current
@@ -31,6 +31,8 @@ import type { Database } from "@magic-context/core/shared/sqlite";
 import type { RpcPortFileRecord } from "../compat/dsh-0.1/liveness";
 import {
   DSH_COMPAT_EXPECTED_VERSION,
+  DSH_COMPAT_SUPPORTED_LABEL,
+  isSupportedDshVersion,
   DSH_PACKAGE,
   MAGIC_CONTEXT_PACKAGE,
   errorMessage,
@@ -287,7 +289,7 @@ export async function runDshDoctor(
       title: "DSH version",
       status: "fail",
       detail:
-        `Could not locate the DSH install (expected ${DSH_COMPAT_EXPECTED_VERSION}). Probed:\n` +
+        `Could not locate the DSH install (expected ${DSH_COMPAT_SUPPORTED_LABEL}). Probed:\n` +
         located.tried.map((candidate) => `  - ${candidate}`).join("\n"),
       fix: `Install DSH ${DSH_COMPAT_EXPECTED_VERSION} or pass --dsh-install <dir>.`,
     });
@@ -308,12 +310,12 @@ export async function runDshDoctor(
       installedVersion = undefined;
     }
     if (installedVersion !== undefined) {
-      if (installedVersion === DSH_COMPAT_EXPECTED_VERSION) {
+      if (isSupportedDshVersion(installedVersion)) {
         checks.push({
           id: "dsh-version",
           title: "DSH version",
           status: "ok",
-          detail: `${located.dshInstallDir} (via ${located.source}) → ${installedVersion} (matches the compat contract ${DSH_COMPAT_EXPECTED_VERSION}).`,
+          detail: `${located.dshInstallDir} (via ${located.source}) → ${installedVersion} (a declared DSH release: ${DSH_COMPAT_SUPPORTED_LABEL}).`,
         });
       } else {
         checks.push({
@@ -321,9 +323,9 @@ export async function runDshDoctor(
           title: "DSH version",
           status: "fail",
           detail:
-            `installed ${installedVersion} at ${located.dshInstallDir}; the adapter pins ` +
-            `exact-rc ${DSH_COMPAT_EXPECTED_VERSION} (compat/dsh-0.1).`,
-          fix: `Install the exact release: ${DSH_PACKAGE}@${DSH_COMPAT_EXPECTED_VERSION}.`,
+            `installed ${installedVersion} at ${located.dshInstallDir}; the adapter declares only the exact ` +
+            `releases ${DSH_COMPAT_SUPPORTED_LABEL} (compat/dsh-0.1).`,
+          fix: `Install a declared release, e.g. ${DSH_PACKAGE}@${DSH_COMPAT_EXPECTED_VERSION}.`,
         });
       }
     }

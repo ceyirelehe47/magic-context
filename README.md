@@ -162,7 +162,7 @@ Run `npx @cortexkit/magic-context@latest doctor` any time to re-check and auto-f
 <details>
 <summary><b>DeepSeek Harness (DSH) — <code>dsh-integration</code> branch of this fork</b></summary>
 
-`packages/dsh-plugin` (`dsh-magic-context`, DSH 0.2.1-rc.5) runs the same core
+`packages/dsh-plugin` (`dsh-magic-context`, DSH 0.2.1-rc.5 / 0.2.2-alpha.3) runs the same core
 on DeepSeek Harness, sharing the SQLite store with OpenCode/Pi.
 
 ```sh

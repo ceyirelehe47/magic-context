@@ -11,8 +11,9 @@ historian/dreamer 调度、Magic 压缩，以及 **DSH 设置页中的 Magic Con
 > 分支。与官方 Magic Context 或 DeepSeek 无隶属关系。维护说明见
 > `docs/DSH-MAINTENANCE.md`。
 
-兼容基线：DSH **0.2.1-rc.5**（精确匹配，`doctor` 会检查），Magic Context
-core **0.49.35**（共享 schema，见 `docs/dsh/FEATURES.md`）。
+兼容版本：DSH **0.2.1-rc.5**（默认）和 **0.2.2-alpha.3**，仅限这两个精确版本
+（peer 依赖为 `0.2.1-rc.5 || 0.2.2-alpha.3`；DSH 插件管理器和 `doctor` 会拒绝其他版本，
+例如 0.2.2-rc.1），Magic Context core **0.49.35**（共享 schema，见 `docs/dsh/FEATURES.md`）。
 
 ## 安装
 

@@ -1,0 +1,11 @@
+# real @deepseek-ai/dsh-app-boot evaluatePluginCompatibility, manifest = packages/dsh-plugin/package.json AFTER the round 29 fix (peers '0.2.1-rc.5 || 0.2.2-alpha.3')
+app-boot 0.2.1-rc.5 | dsh-magic-context@0.49.35-dsh.4 on dsh 0.2.1-rc.5 (this runtime): ACCEPTED
+app-boot 0.2.1-rc.5 | dsh-magic-context@0.49.35-dsh.4 on dsh 0.2.2-alpha.3: ACCEPTED
+app-boot 0.2.1-rc.5 | dsh-magic-context@0.49.35-dsh.4 on dsh 0.2.2-rc.1: REJECTED 9 unmet
+app-boot 0.2.1-rc.5 | dsh-magic-context@0.49.35-dsh.4 on dsh 0.2.2-alpha.2: REJECTED 9 unmet
+app-boot 0.2.1-rc.5 | dsh-magic-context@0.49.35-dsh.4 on dsh 0.2.2: REJECTED 9 unmet
+app-boot 0.2.2-alpha.3 | dsh-magic-context@0.49.35-dsh.4 on dsh 0.2.2-alpha.3 (this runtime): ACCEPTED
+app-boot 0.2.2-alpha.3 | dsh-magic-context@0.49.35-dsh.4 on dsh 0.2.1-rc.5: ACCEPTED
+app-boot 0.2.2-alpha.3 | dsh-magic-context@0.49.35-dsh.4 on dsh 0.2.2-rc.1: REJECTED 9 unmet
+app-boot 0.2.2-alpha.3 | dsh-magic-context@0.49.35-dsh.4 on dsh 0.2.2-alpha.2: REJECTED 9 unmet
+app-boot 0.2.2-alpha.3 | dsh-magic-context@0.49.35-dsh.4 on dsh 0.2.2: REJECTED 9 unmet

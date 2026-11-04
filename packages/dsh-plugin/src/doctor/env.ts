@@ -32,8 +32,29 @@ import { randomBytes } from "node:crypto";
 /** npm package identity of this adapter (checked against profile bundles). */
 export const MAGIC_CONTEXT_PACKAGE = "dsh-magic-context";
 
-/** The exact DSH release this adapter's compat layer (compat/dsh-0.1) pins. */
+/**
+ * The default DSH release: the lockfile / devDependencies and the default CI
+ * lane run on it (compat/dsh-0.1 was written against it).
+ */
 export const DSH_COMPAT_EXPECTED_VERSION = "0.2.1-rc.5";
+
+/**
+ * Every DSH release this adapter declares support for (round 29, approved by
+ * the user 2026-11-04): an explicit list of exact versions, never a range, so
+ * an untested DSH (e.g. 0.2.2-rc.1) is still refused. package.json's
+ * `@deepseek-ai/dsh-*` peers carry the same list joined by `||`, which is the
+ * form DSH's plugin manager judges (dsh-app-boot evaluatePluginCompatibility);
+ * src/doctor/dsh-compat-declaration.test.ts keeps the two identical.
+ */
+export const DSH_COMPAT_SUPPORTED_VERSIONS: readonly string[] = ["0.2.1-rc.5", "0.2.2-alpha.3"];
+
+/** Whether `version` is exactly one of the declared DSH releases. */
+export function isSupportedDshVersion(version: string | undefined): boolean {
+  return version !== undefined && DSH_COMPAT_SUPPORTED_VERSIONS.includes(version);
+}
+
+/** Human-readable list of the declared DSH releases ("0.2.1-rc.5 or 0.2.2-alpha.3"). */
+export const DSH_COMPAT_SUPPORTED_LABEL = DSH_COMPAT_SUPPORTED_VERSIONS.join(" or ");
 
 /** Installed-package identity of the DSH runtime. */
 export const DSH_PACKAGE = "@deepseek-ai/dsh";
