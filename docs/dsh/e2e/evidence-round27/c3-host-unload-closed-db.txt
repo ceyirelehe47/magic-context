@@ -1,0 +1,24 @@
+# C3 host-unload-release 'Cannot use a closed database' (checks 41775611238)
+
+Repro (single file, fixed order, not committed): src/zz-repro-c3.test.ts =
+  import "./settings/magic-settings.test"; import "./host/host-unload-release.test";
+
+Before fix: 10/10 runs '1 fail' (RangeError: Cannot use a closed database at openDatabaseAsync → enforceSchemaFence on core's cached default-path handle).
+After fix: 50/50 runs 20 pass 0 fail; host-unload-release alone 50/50 2 pass 0 fail.
+
+CI file order: 41775611238 ran magic-settings 2nd, host-unload-release 19th (fail); 41777488761 ran host-unload-release 7th, magic-settings 64th (green).
+
+--- red (one run) ---
+(pass) DSH settings overlay schema (real schemastery) > rejects out-of-range overlay values at the schema (Loader refuses the write) [10.24ms]
+RangeError: Cannot use a closed database
+      at prepare (bun:sqlite:366:37)
+      at value (<repo>/packages/plugin/src/shared/sqlite.ts:633:31)
+      at value (<repo>/packages/plugin/src/shared/sqlite.ts:782:58)
+      at getPersistedSchemaVersion (<repo>/packages/plugin/src/features/magic-context/storage-db.ts:340:10)
+      at enforceSchemaFence (<repo>/packages/plugin/src/features/magic-context/storage-db.ts:387:30)
+      at openDatabaseAsync (<repo>/packages/plugin/src/features/magic-context/storage-db.ts:2776:26)
+      at bootstrapDshStorage (<repo>/packages/dsh-plugin/src/host/bootstrap.ts:123:18)
+      at async <anonymous> (<repo>/packages/dsh-plugin/src/host/host-unload-release.test.ts:66:32)
+(fail) host unload releases the liveness marker (round 15) > the host entry registers a disposer that releases the marker [5.90ms]
+ 19 pass
+ 1 fail

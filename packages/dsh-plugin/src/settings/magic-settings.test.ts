@@ -11,6 +11,7 @@ import {
 import { applySettingsUpdate, buildSettingsView, resetJsoncCache, type SettingsFormsView } from "../host/remote";
 import { createLiveSettings } from "../agent/index";
 import * as hostEntry from "../index";
+import { closeDatabase } from "@magic-context/core/features/magic-context/storage-db";
 import type { MagicContextHostService } from "../index";
 
 describe("DSH settings overlay schema (real schemastery)", () => {
@@ -295,7 +296,17 @@ describe("agent plane live settings", () => {
     // apply() starts the storage bootstrap in the background. Settle it inside
     // the test and close the DB: left dangling, a late open failure surfaced as
     // an "Unhandled error between tests" in a later file (round 13, loaded sandbox).
-    const outcome = (await service.ready) as { kind: string; db?: { close(): void } };
-    if (outcome.kind === "ok") outcome.db?.close();
+    //
+    // Round 27 C3: close through core's closeDatabase(), never db.close().
+    // This boot uses the DEFAULT DB path, whose handle core caches per path; a
+    // bare db.close() left the closed handle in that cache, so the next file
+    // that booted the default path in the same bun process (host-unload-release,
+    // when bun ordered it after this file: checks 41775611238) got
+    // "RangeError: Cannot use a closed database" from openDatabaseAsync.
+    const outcome = (await service.ready) as { kind: string; release?: () => void };
+    if (outcome.kind === "ok") {
+      outcome.release?.();
+      await closeDatabase();
+    }
   });
 });
