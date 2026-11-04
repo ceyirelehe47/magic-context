@@ -71,6 +71,11 @@ plans["y3"] = [{"text": "DONE y3"}]
 for _k in ("y2b", "y2c", "y2d"):
     plans[_k] = [{"text": f"DONE {_k}"}]
 plans["xr"] = [{"text": "DONE xr"}]
+# round 27 scenario F (C4): deterministic SIGKILL in the Y4 window
+for k in range(1, 3):
+    write(f"f1-zh{k}.txt", f"MOCKSTEP:f1:{k}", zh_lines(2000, f"f{k}", ZH2 if k % 2 else ZH))
+plans["f1"] = [read("f1-zh1.txt"), read("f1-zh2.txt"), {"text": "DONE f1"}]
+plans["f2"] = [{"text": "DONE f2"}]
 # round 25 scenario W (P1-3): the worker CHILD is made to force calls to tools
 # outside its allowlist; the bash/write args carry their own step marker, so
 # each forced call is emitted once (whether or not it runs)
@@ -102,7 +107,7 @@ json.dump(plans, open(plans_out, "w"), ensure_ascii=False)
 PY
 TOKROOT="$(ls -d "$REPO"/node_modules/.bun/ai-tokenizer@*/node_modules | head -n 1)"
 : > "$OUT/x-requests.jsonl"
-MOCK_TOKENIZER_ROOT="$TOKROOT" node "$HERE/mock-llm.mjs" "$MOCK_LLM_PORT" "$OUT/x-plans.json" "$OUT/x-requests.jsonl" > "$OUT/x-mock.log" 2>&1 &
+MOCK_LOG_TAG_NEEDLES="MOCKSTEP:f1:1,MOCKSTEP:f1:2" MOCK_TOKENIZER_ROOT="$TOKROOT" node "$HERE/mock-llm.mjs" "$MOCK_LLM_PORT" "$OUT/x-plans.json" "$OUT/x-requests.jsonl" > "$OUT/x-mock.log" 2>&1 &
 MOCK_PID=$!
 for i in $(seq 1 40); do grep -q listening "$OUT/x-mock.log" 2>/dev/null && break; sleep 0.25; done
 echo "[ci-x] mock: $(cat "$OUT/x-mock.log")"
@@ -201,6 +206,28 @@ if [[ -n "$YSID" ]]; then
   f="$(ls "$DSH_HOME"/sessions/*/"$YSID"/session.v4.jsonl.zstd 2>/dev/null | head -n 1)"
   [[ -n "$f" ]] && zstd -qdc "$f" > "$OUT/y-session.jsonl" 2>/dev/null
 fi
+
+# --- Scenario F (round 27, C4): the round 26 Y4 window made deterministic. The
+# e2e-only crash point tail-fold-pending SIGKILLs the DSH process in the
+# pre-step right after the first tool result: the call's tag is written under
+# the synthetic tail owner and the surface replace never lands. A new process
+# then continues the SAME session with a new user message, which absorbs the
+# unreplaced fold. Checks F1–F3 (ci-check.py check_f).
+#   f-1  two reads planned; killed before step 2 (crash point logged)
+#   f-2  restart, one turn
+export OPENCODE_SESSION="mc-ci-f-$(date +%s)"
+MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_CRASH_AT=tail-fold-pending MC_HISTORIAN_THRESHOLD=95 RUN_TIMEOUT=120 \
+  xrun f-1 "Read the two files as planned. [[MOCK:f1]]"
+FSID="$(session_of "$OUT/f-1.log")"
+echo "$FSID" > "$OUT/f.sid"
+if [[ -n "$FSID" ]]; then
+  xdb "$FSID" f-1k
+  MC_HISTORIAN_THRESHOLD=95 xrun f-2 "Reply when done. [[MOCK:f2]]" "$FSID"
+  xdb "$FSID" f-2
+  f="$(ls "$DSH_HOME"/sessions/*/"$FSID"/session.v4.jsonl.zstd 2>/dev/null | head -n 1)"
+  [[ -n "$f" ]] && zstd -qdc "$f" > "$OUT/f-session.jsonl" 2>/dev/null
+fi
+echo "[ci-x] f: sid=$FSID"
 
 # --- Scenario W (round 25, P1-3): the worker self-test on the mock model; the
 # worker's CHILD (allowlist read/grep/glob) is made to call bash and write

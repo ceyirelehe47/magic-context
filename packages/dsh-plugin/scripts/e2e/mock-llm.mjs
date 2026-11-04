@@ -224,6 +224,17 @@ const server = createServer((req, res) => {
       tools: (Array.isArray(body.tools) ? body.tools : []).map((t) => t?.function?.name ?? t?.name).filter(Boolean),
     };
     // round 26 (scenario M): which of MOCK_LOG_NEEDLES (comma list) the request carried
+    // round 27 (scenario F): for each MOCK_LOG_TAG_NEEDLES marker, the §N§ tag
+    // numbers the request shows closest before it (within 400 chars, no other tag between)
+    if (process.env.MOCK_LOG_TAG_NEEDLES) {
+      const tagged = {};
+      for (const needle of process.env.MOCK_LOG_TAG_NEEDLES.split(",").filter(Boolean)) {
+        const esc = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const hits = [...serialized.matchAll(new RegExp(`\u00a7(\\d+)\u00a7[^\u00a7]{0,400}?${esc}`, "g"))].map((m) => Number(m[1]));
+        if (serialized.includes(needle)) tagged[needle] = hits;
+      }
+      if (Object.keys(tagged).length > 0) row.tagged = tagged;
+    }
     if (process.env.MOCK_LOG_NEEDLES) row.needles = process.env.MOCK_LOG_NEEDLES.split(",").filter((x) => x && serialized.includes(x));
     if (promptTokens > window) {
       row.outcome = "context_length_exceeded";

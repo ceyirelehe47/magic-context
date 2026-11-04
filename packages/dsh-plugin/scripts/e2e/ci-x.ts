@@ -21,7 +21,7 @@ const out: Record<string, unknown> = { sid };
 out.truncations = has("dsh_pressure_truncations")
   ? q("select tag_number, head_chars, tail_chars, original_chars, original_sha, basis_usage_seq, created_at from dsh_pressure_truncations where session_id like ? order by tag_number", like)
   : [];
-out.tags = q("select tag_number, message_id, type, status from tags where session_id like ? order by tag_number", like);
+out.tags = q("select tag_number, message_id, type, status, tool_owner_message_id from tags where session_id like ? order by tag_number", like);
 out.outbox = has("dsh_context_outbox") ? q("select status, count(*) n from dsh_context_outbox where session_id like ? group by status", like) : [];
 out.pendingOps = has("pending_ops") ? q("select operation, count(*) n from pending_ops where session_id like ? group by operation", like) : [];
 out.compartments = has("compartments") ? q("select id, start_message, end_message from compartments where session_id like ? order by start_message", like) : [];
