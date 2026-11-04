@@ -531,6 +531,33 @@ def check_r19(c, out: Path, runs):
           "main-session native compaction completed through the MC summarize hook (no compaction/end error)",
           {"compactionEnds": len(ends), "errors": errs[:3], "unresolvableInLogs": unresolvable})
     c.add("R5", not nobudget, "no TargetPressureConfigError ('leaving no pressure budget') in any run log", nobudget or "clean")
+    # R10 (round 28b, diagnostic) the model calling ctx_reduce in scenario P
+    # although every batch prompt forbids it: pnew before MC's first fire, pold
+    # at any time. It cost the pressure the scenario needs (41832534523 pnew
+    # 43 % -> 20 % twice -> R2; 41832514940 pold-02 25 % -> 19 % -> R4/R7); the
+    # scenario now adds batches instead, so the drop itself is reported here.
+    # Rounds 21-28 v1 (26 runs): 0 pnew pre-fire drops; round 28 v2: 1 of 5.
+    # WARN = model behaviour, never FAIL.
+    selfdrops = []
+    for names, until_fire in ((pnew, True), (pold, False)):
+        fired = False
+        for n in names:
+            p_ = out / f"{n}.log"
+            if not p_.exists():
+                continue
+            for line in p_.read_text(errors="replace").splitlines():
+                m = TRIGGER.search(line)
+                if m and m.group(5) == "true":
+                    fired = True
+                if '"tool":"ctx_reduce"' in line and not (until_fire and fired):
+                    try:
+                        drop = (json.loads(line).get("input") or {}).get("drop")
+                    except ValueError:
+                        drop = "?"
+                    selfdrops.append({"run": n, "drop": drop})
+    c.add("R10", True if not selfdrops else "warn",
+          "scenario P: the model did not call ctx_reduce against the prompt (pnew before MC fired, pold at all)",
+          selfdrops or "none")
     # R8 (round 21) a historian pass holding the compartment lease must never
     # turn a native compaction into an error: the 90 % backstop defers while the
     # lease is held and /compact waits for it. No compaction/end error and no
