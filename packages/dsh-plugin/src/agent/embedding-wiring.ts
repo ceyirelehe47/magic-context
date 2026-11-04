@@ -127,3 +127,16 @@ export function semanticUnavailableNote(
   }
   return `Note: semantic search unavailable (embedding provider ${provider}: ${reason}); the results above are full-text (FTS) matches only — summarized history (compartments) is not searched semantically. Check the embedding settings or run /ctx-embed.`;
 }
+
+/* Round 27b C5 RED stubs (implemented in the following commit). */
+export const EMBED_DEFERRAL_DIAGNOSTIC_AFTER = 10;
+export interface EmbedDeferralRecord {
+  readonly count: number;
+  readonly indexed: number;
+  readonly compartmentEnd: number;
+  readonly firstAt: number;
+  readonly at: number;
+}
+export function readEmbedDeferral(_db: Database, _sessionKey: string): EmbedDeferralRecord | null {
+  return null;
+}

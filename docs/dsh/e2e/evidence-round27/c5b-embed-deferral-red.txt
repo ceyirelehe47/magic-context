@@ -1,0 +1,12 @@
+113 |       scheduleDshAutoEmbed(db, KEY, agent, projectDir, log); // N-th
+114 |       expect(deferralLogs()).toHaveLength(1);
+                                   ^
+error: expect(received).toHaveLength(expected)
+Expected length: 1
+Received length: 0
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/embed-deferral.test.ts:114:30)
+(fail) auto-embed deferral diagnostic (round 27b C5) > logs once after N consecutive deferrals, shows it in /ctx-status, clears on catch-up [307.84ms]
+ 0 pass
+ 1 fail
+ 3 expect() calls
+Ran 1 test across 1 file. [1159.00ms]
