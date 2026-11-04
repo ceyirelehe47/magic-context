@@ -42,7 +42,64 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 26, 2026-11-04, DSH 0.2.1-rc.5, core v0.49.35; release tags
+Baseline (round 27, 2026-11-04, DSH 0.2.1-rc.5, core v0.49.35; release tags
+unchanged; HEAD `605a8f7a4` — code head `fc928cbb4`, `605a8f7a4` changes only the
+e2e scenario S launcher + ci-check): `typecheck:dsh` **0 errors**, test-file
+typecheck 0, `dsh-plugin` **610 pass** (+19 over round 26's 591), `adapter-api`
+**15**, `contracts:dsh` **104**, 0 fail (push 41788039793 @ `fc928cbb4`,
+41792847109 @ `605a8f7a4`); real-model `e2e` **132 judged** @ `fc928cbb4` (round 26's
+128 + scenario F F1–F3 + I1), **133** from `605a8f7a4` (+ DN1). Install acceptance
+41784636699 A1–A4 PASS. Evidence: `docs/dsh/e2e/evidence-round27/` (run table in
+its README).
+
+| run id | kind | head | PASS / FAIL / WARN | FAIL classification | I1 |
+|---|---|---|---|---|---|
+| 41784617324 | e2e | 0cf582631 | 127 / 4 / 1 (E2) | F1–F3 + T3: adapter (re-own to a synthetic owner) → fixed `374a7e978` | PASS |
+| 41787740600 | e2e (+checks) | 374a7e978 | 128 / 2 / 2 (E2, T3) | R0 pi-ai clamp (upstream); ST1 sw-1-3/sw-2-3 DSH-native cordis.yml boot race | PASS |
+| 41788066023 | e2e (+checks) | fc928cbb4 | 130 / 1 / 1 (E2) | R0 pnew-05 pi-ai clamp (1 output token → max-tokens; upstream) | PASS |
+| 41790564442 | e2e (+checks) | fc928cbb4 | 131 / 0 / 1 (E2) | — | PASS |
+| 41792968900 | e2e (+checks) | 605a8f7a4 | 131 / 0 / 2 (E2, I1) — 133 judged | — (DN1 PASS; ST1 PASS on profiles test-s1…s5) | **WARN** (h-a4) |
+
+"Two consecutive green" for round 27 means: no FAIL other than the known won't-fix
+upstream / DSH-native items (R0 pi-ai clamp, DN1/ST1 cordis.yml boot race).
+Met at `fc928cbb4`: 41788066023 (R0 only) then 41790564442 (0 FAIL). The
+following run at `605a8f7a4` (41792968900) also has 0 FAIL, but I1 is WARN there
+(see limitation 22).
+
+Round 27 fixes (adapter / scenarios / scripts only, no core change; red test first):
+- `8cba71367` / `e7e31f2a3` C1: folded tool arcs render as one framed
+  `<recorded-tool-activity>` past-tense record instead of the imitable
+  `[tool: read #call_N]` text (limitation 21; rate lowered, not solved — see
+  limitation 22).
+- `db54471ff` / `72beaaa19` C2: `doctor` after a full `setup --disable-preset`
+  reports "Magic disabled in every preset" as a warn and exits 0.
+- `3aa422ccf` C3: `host-unload-release` flake was test isolation — tests close the
+  cached default DB through `closeDatabase`, not `db.close()`.
+- `5bddc27df` / `0cf582631` C4: e2e-only crash point `tail-fold-pending`; e2e
+  scenario F (F1–F3) and the I1 imitation detector.
+- `e0297f5ce` / `b679849f2` C5: open-lock — two races that let two processes hold
+  the first-open lock fixed (stale takeover serialised through `<lock>.takeover`;
+  the lock record is hard-linked into place instead of exposed empty);
+  open-lock-race 0/384 overlaps (before 4/48).
+- `4751d7521` / `7c0a50ff9`: auto-embed deferred by FTS coverage now logs one
+  diagnostic after 10 consecutive deferrals (was silent forever).
+- `edca11500`: message-index per-step cost measured (O(N) view read off the step,
+  writes only new rows) — no code change.
+- `989b16147` / `31e92d398`: `migrate-legacy` concurrent `--apply` refuses a stale
+  plan ("changed since the scan") instead of re-archiving.
+- `77581e2df` / `8c2ef3c26`: `<unsummarized_tail>` size kept incrementally
+  (O(n²) → linear; 30 000 msgs 4.1 s → 0.16 s) and the clip never splits a
+  surrogate pair.
+- `fa16f0217` / `374a7e978` F: tail tool tags also re-own to a synthetic owner
+  (real DSH restores an undurable result as `interrupted-tool-result-…`); ci-check
+  F1–F3 accept DSH's `TOOL_OUTCOME_UNKNOWN`, T3 is WARN when only the real model's
+  own reasoning restated the codeword.
+- `fc928cbb4`: embed-deferral test typechecks under `tsconfig.test.json`.
+- `605a8f7a4` (27c): e2e scenario S runs each of its five sessions on its own copy
+  of the test profile; ci-check DN1 reports the DSH-native cordis.yml boot race
+  as WARN wherever it appears (see limitation 22).
+
+Previous baseline (round 26, 2026-11-04, DSH 0.2.1-rc.5, core v0.49.35; release tags
 unchanged; run 41777488761 @ `47125f480`, checks + e2e in one dispatch):
 `typecheck:dsh` **0 errors**, test-file typecheck 0, `dsh-plugin` **591 pass** (+15
 over round 25's 576: migrate-legacy 9, compact-unprocessed-tail 5, new-input-fold-tags
@@ -1758,6 +1815,81 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       no Magic rows" with a re-run-setup hint) — misleading, not fixed.
     - **Flaky (pending verification):** `host-unload-release` "Cannot use a closed
       database" once on checks 41775611238 (same code green on 41775057793).
+
+22. **Round 27 (2026-11-04) — status (27 / 27b / 27c).**
+    - **Limitation 21 (model imitates the folded tool format) — format changed,
+      NOT solved (still open, P1).** C1 (`e7e31f2a3`): the DSH adapter (only
+      place that renders the fold, `agent/transcript.ts`) writes one framed
+      `<recorded-tool-activity note="already executed … not a tool-call syntax …">`
+      record in past-tense prose; historian/FTS input is unchanged. Before: 2 of 4
+      e2e runs (lock-a only, old `[tool: …]` form;
+      `evidence-round27/c1-imitation-baseline.md`). After: I1 clean on 41784617324,
+      41787740600, 41788066023, 41790564442, then **WARN on 41792968900**: scenario
+      H run `h-a4` wrote an 8 124-char assistant TEXT copying the NEW record
+      verbatim (note included) with a made-up `bash` result; the turn completed
+      and H's own checks passed (`evidence-round27/c8-i1-recurrence-41792968900.md`).
+      So 1 of 5 runs after vs 2 of 4 before, on a different route: the framing
+      lowers the rate but the model still continues a transcript that contains
+      tool records as text. Not changed in 27c (the next step is a design choice,
+      not a wording tweak). Options for a later round: keep folded tool records
+      out of the model-visible assistant/user text altogether (fold only into a
+      one-line count, e.g. "3 earlier tool calls, results summarised by Magic",
+      and rely on `ctx_expand` for detail); or render only the result summary
+      without the call/id/input lines the model copies; measure each with I1 over
+      ≥ 5 e2e runs. I1 stays in every e2e as a WARN with the text.
+    - **不修（上游 / DSH 原生行为）— won't fix, documented only:**
+      - **R0 — pi-ai `max_tokens` clamp (limitation 17, round 23 analysis).**
+        Seen again: 41787740600 `pnew-03`, 41788066023 `pnew-05` (1 output token →
+        `max-tokens`, rc 1; the native backstop correctly deferred while the
+        historian ran). `@earendil-works/pi-ai` + `dsh-llm-pi-ai`, not Magic.
+      - **DN1 / ST1 — DSH boot rewrites `<profile>/cordis.yml` in place
+        (DSH-native).** 41787740600 sw-1-3 / sw-2-3: rc 1 in 0.3 s, "include
+        (required) … config file must be a top-level array of entries:
+        profiles/test/cordis.yml". Root cause (corrects round 27's "shared
+        `.tmp`" inference): every boot's `prepareProfile()`
+        (`dsh/lib/profile-boot-*.js`) does `writeFileSync(<profile>/cordis.yml,
+        PROFILE_ROOT_CONFIG)` — truncate then write, no temp+rename — and a
+        concurrent boot's `Include.read()` (`dsh-app-boot`) can read the empty
+        file (`yaml.load('')` → `undefined` → TypeError). Locally: a boot leaves
+        the file with the same inode and a new mtime; mechanism repro 163 135 of
+        414 754 reads not an array in 3 s
+        (`evidence-round27/c7-st1-cordis-yml-dsh-native.txt`,
+        `c7-cordis-yml-race-repro.mjs.txt`). `Include._writeFile`'s fixed
+        `<file>.tmp` name is a second, latent DSH race (Loader write-back only).
+        **User impact:** several `dsh` processes started at the same instant on
+        ONE profile can fail at startup; a retry works. **Scenario mitigation
+        (`605a8f7a4`), and why:** scenario S tests Magic across five concurrent
+        processes (shared DB, leases, open lock, historian), not DSH's profile
+        boot, so each S session now runs on its own copy of the test profile
+        (`test-s1`…`test-s5`, same DSH_HOME / sessions / DB / plugin build, all
+        five still launched together). ST1 is unchanged; ci-check **DN1**
+        scans every run log for the signature and reports WARN with the run
+        names, so the DSH issue stays visible (offline on 41787740600: DN1 WARN
+        sw-1-3, sw-2-3). Other scenarios still share profile `test`.
+    - **不修（core）— won't fix, documented only (user rule: core and DSH-native
+      issues are recorded, not patched):**
+      - **P1-3 exact-identifier ranking under RRF** (scenario E, WARN-only E2):
+        real MiniLM ranks for the four codes — 41788066023: 3/8, 8/8, 2/8, 1/8;
+        41790564442: 1/3, 2/3, 1/3, 1/3; 41792968900: 4/9, 9/9, 1/9, 3/9.
+        Core's `mergeMessageAndCompartmentResults` fusion, same in OpenCode/Pi.
+      - **Core v95 first-migration race** (limitation 18 (g)): mitigated by the
+        adapter's open lock (`41e74f26d`, hardened in C5 `b679849f2`); core's
+        `migration-v95-perf-indexes.ts` is unchanged.
+      - **Already-written data** (old compartments / FTS rows with injected
+        text): repair is `migrate-legacy` (round 26) or `/ctx-recomp`; core does
+        not re-check old rows.
+    - **Fixed this round (adapter):** C2 doctor after a full disable (round 26
+      finding (d)); C3 `host-unload-release` flake (test isolation); C5 open-lock
+      races; auto-embed deferral diagnostic; `migrate-legacy` stale concurrent
+      plan; `<unsummarized_tail>` O(n²) + surrogate split; scenario F tag
+      re-own to a synthetic owner. One sentence each in the round 27 baseline
+      block at the top of this file.
+    - **Soak 41775904921 (12 h, 4 × 180 min @ `901fb7874`, i.e. round 26 code,
+      none of the round 27 fixes):** segment 1 of 4 finished 2026-11-04 15:54 CST,
+      K1–K9 PASS (3310/3310 mock runs, residue 0 of 3316, RSS 303 156 → 309 692 KB
+      1.02×, wall 3.06 → 3.05 s, WAL max 0, DB 1.1 → 48 MB with flat growth per
+      run, 0 historian failures of 16 958, real samples 6/6). Segments 2–4 still
+      running (3 × ~3.3 h, ETA ≈ 02:00 CST 2026-11-05); the final K1–K9 over the whole CSV is pending.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
