@@ -123,6 +123,26 @@ describe("/compact with an unprocessed tail (round 26 P1-2, limitation 17)", () 
     });
   });
 
+  it("the /compact mini-historian records one historian_runs row (unprocessed_from = first uncovered ordinal)", async () => {
+    await withDb(async (db) => {
+      const agent = agentOf(buildSession(8, CONSTRAINT));
+      const provider = historyContentProvider(agent, SID);
+      const messages = provider.readMessages();
+      const hook = createMagicSummarizeHook({ db, sessionId: SID, ctx: {}, provider, summarize: partialHistorian(12) as never, leaseHolderId: "r26-tail-tel" });
+      await hook({ messages: messages.map((m) => ({ id: m.id, role: m.role, content: [] })) as never }, agent);
+      // Round 26 (e2e 41771964169 T2): the summarize path wrote no telemetry,
+      // so the deferral was only visible through compartments.
+      const runs = db
+        .query("select status, chunk_start_ordinal, chunk_end_ordinal, unprocessed_from, compartments_produced from historian_runs where session_id = ?")
+        .all(SID) as Array<Record<string, number | string>>;
+      expect(runs).toHaveLength(1);
+      expect(runs[0]!.status).toBe("success");
+      expect(runs[0]!.unprocessed_from).toBe(13);
+      expect(Number(runs[0]!.chunk_end_ordinal)).toBeGreaterThanOrEqual(13);
+      expect(Number(runs[0]!.compartments_produced)).toBeGreaterThan(0);
+    });
+  });
+
   it("a fully covered region renders compartments only (no tail block)", async () => {
     await withDb(async (db) => {
       const agent = agentOf(buildSession(8, CONSTRAINT));

@@ -1162,6 +1162,10 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
       }
       if (!covered && lease !== null) {
         // Mini-historian: one synchronous pass over [lastCompartmentEnd+1, lastOrdinal].
+        // Round 26 (e2e 41771964169 T2): this path wrote no historian_runs
+        // row, so a /compact deferral (`<unprocessed_from>`) was invisible in
+        // telemetry. One row per attempt, like the background pass.
+        const miniTel: Partial<HistorianRunInput> = { runKind: "incremental", status: "failed" };
         try {
           const result = await runHistorianPassCore({
             db: deps.db,
@@ -1176,7 +1180,11 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
             eligibleEndOrdinalOverride: lastOrdinal + 1,
             keepLastCompartment: true,
           });
+          miniTel.chunkStartOrdinal = result.chunk?.startIndex ?? null;
+          miniTel.chunkEndOrdinal = result.chunk?.endIndex ?? null;
           if (!result.ok) {
+            miniTel.status = result.status === "noop" ? "noop" : "failed";
+            miniTel.failureReason = `summarize: ${result.reason ?? "unknown"}`;
             throw new Error(
               `magic-context: summarize mini-historian failed: ${result.reason ?? "unknown"}`,
             );
@@ -1193,12 +1201,34 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
             log,
           });
           if (!publish.ok) {
+            miniTel.failureReason = "summarize: publish failed (lease lost or transaction error)";
             throw new Error(
               "magic-context: summarize mini-historian publish failed (lease lost or transaction error)",
             );
           }
+          miniTel.status = "success";
+          miniTel.unprocessedFrom = result.lastNewEnd! + 1;
+          miniTel.compartmentsProduced = result.newCompartments!.length;
           rawOutput = result.llmText ?? undefined;
+        } catch (error) {
+          if (miniTel.failureReason == null) miniTel.failureReason = `summarize: ${describeError(error).brief}`;
+          throw error;
         } finally {
+          try {
+            recordHistorianRun(deps.db, {
+              sessionId,
+              harness: "dsh",
+              runKind: "incremental",
+              status: miniTel.status ?? "failed",
+              failureReason: miniTel.failureReason ?? null,
+              chunkStartOrdinal: miniTel.chunkStartOrdinal ?? null,
+              chunkEndOrdinal: miniTel.chunkEndOrdinal ?? null,
+              unprocessedFrom: miniTel.unprocessedFrom ?? null,
+              compartmentsProduced: miniTel.compartmentsProduced ?? 0,
+            } as HistorianRunInput);
+          } catch {
+            // telemetry must never break compaction
+          }
           try {
             releaseCompartmentLease(deps.db, sessionId, holderId);
           } catch (error) {
