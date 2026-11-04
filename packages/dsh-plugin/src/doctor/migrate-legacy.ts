@@ -838,7 +838,9 @@ export async function runMigrateLegacy(argv: readonly string[], io: MigrateCliIo
   }
 
   const readonly = mode === "scan" || mode === "dry-run";
-  const db = new SqliteDatabase(dbPath, readonly ? { readonly: true } : {});
+  // Never pass `{}`: bun ≤ 1.4.2 turns an options object without readonly/create
+  // into open flags 0 → SQLITE_MISUSE (CI run 41769676548); 1.4.4 defaults it.
+  const db = readonly ? new SqliteDatabase(dbPath, { readonly: true }) : new SqliteDatabase(dbPath);
   try {
     if (!readonly) db.exec("PRAGMA busy_timeout = 5000");
     if (mode === "backup") {
