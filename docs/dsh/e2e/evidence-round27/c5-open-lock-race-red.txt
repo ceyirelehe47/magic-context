@@ -1,0 +1,30 @@
+bun test v1.4.4 (38afee6c8)
+
+src/host/open-lock-race.test.ts:
+39 |         );
+40 |         await Promise.all(children.map((child) => child.exited));
+41 |       }
+42 |       const lines = readFileSync(out, "utf8").trim().split("\n").filter(Boolean);
+43 |       expect(lines.length).toBe(ROUNDS * PROCS);
+44 |       expect(lines.filter((line) => line.endsWith("OVERLAP"))).toEqual([]);
+                                                                    ^
+error: expect(received).toEqual(expected)
+
+- []
++ [
++   "7147 OVERLAP",
++   "7272 OVERLAP",
++   "7275 OVERLAP",
++   "7336 OVERLAP",
++ ]
+
+- Expected  - 1
++ Received  + 6
+
+      at <anonymous> (<repo>/packages/dsh-plugin/src/host/open-lock-race.test.ts:44:64)
+(fail) dsh open lock: stale-lock takeover race (round 27 C5) > 8 processes taking over the same dead holder's lock never hold it at the same time [11337.81ms]
+
+ 0 pass
+ 1 fail
+ 2 expect() calls
+Ran 1 test across 1 file. [11.59s]
