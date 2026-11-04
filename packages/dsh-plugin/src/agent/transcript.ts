@@ -1803,6 +1803,47 @@ function planReasoningReplay(
 }
 
 /**
+ * Round 26 (e2e 41771964169 Y4): a session that ends in tool results with no
+ * closing assistant/user message is walked as a synthetic tail user
+ * (`synth-user-<first result id>`), and core keys the tool tags under that
+ * owner. Normally the landed replace materializes the fold; when it never
+ * lands (process killed right after an interrupted tool result, a stale
+ * generation) the NEXT user message absorbs those results, the owner changes
+ * and core assigned a second tag to the same call (the model saw §4§ for the
+ * result it had been shown as §3§; the old tag stayed active, orphaned).
+ * Re-own such a tag to the absorbing user message before tagging. Only a
+ * synthetic owner that is no longer in the view moves, only to a non-synthetic
+ * user message holding that call, and only when that owner has no tag yet.
+ */
+export function reownAbsorbedTailToolTags(db: Database, sessionId: string, messages: readonly RawMessage[]): number {
+  let moved = 0;
+  try {
+    const ids = new Set(messages.map((m) => m.id));
+    const find = db.prepare(
+      "SELECT tool_owner_message_id AS owner FROM tags WHERE session_id = ? AND type = 'tool' AND message_id = ? AND tool_owner_message_id IS NOT NULL",
+    );
+    const update = db.prepare(
+      "UPDATE tags SET tool_owner_message_id = ? WHERE session_id = ? AND type = 'tool' AND message_id = ? AND tool_owner_message_id = ?",
+    );
+    for (const m of messages) {
+      if (m.role !== "user" || m.id.startsWith(SYNTH_USER_ID_PREFIX)) continue;
+      for (const part of m.parts) {
+        if (!isRecord(part) || part.type !== "tool" || typeof part.callID !== "string") continue;
+        const owners = (find.all(sessionId, part.callID) as Array<{ owner: string }>).map((r) => r.owner);
+        if (owners.length === 0 || owners.includes(m.id)) continue;
+        const stale = owners.filter((o) => o.startsWith(SYNTH_USER_ID_PREFIX) && !ids.has(o));
+        if (stale.length !== 1 || owners.length !== 1) continue;
+        update.run(m.id, sessionId, part.callID, stale[0]);
+        moved += 1;
+      }
+    }
+  } catch {
+    // identity repair must never break the pass
+  }
+  return moved;
+}
+
+/**
  * Derive a MutationPlan from the view + shared DB state (design §3).
  *
  * Pipeline (this slice: stages 1-5 of §9.10, all through the recording
@@ -1825,6 +1866,7 @@ export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): M
 
   const { transcript, byMessageId, rawByRecording } = buildRecordingTranscript(view);
   if (transcript.messages.length > 0) {
+    reownAbsorbedTailToolTags(db, sessionId, view.messages);
     const tagger = createTagger();
     tagger.initFromDb(sessionId, db);
     const tagged = tagTranscript(sessionId, transcript, tagger, db);

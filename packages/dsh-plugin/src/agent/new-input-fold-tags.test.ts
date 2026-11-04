@@ -159,3 +159,34 @@ describe("new input after a pending fold is pre-tagged under core's exact :pN ke
     });
   });
 });
+
+describe("tool tags of an unreplaced session-tail fold keep their number when the next user message absorbs them (round 26 Y4)", () => {
+  it("kill between the tail tool result and the landed replace: the absorbing user message re-owns the synthetic tail's tool tag", async () => {
+    await withDb(async (db) => {
+      const session = Session.create(SessionId(SESSION));
+      const first = createUserMessage({ content: [{ type: "text", text: "hello" }], source: { kind: "user" } });
+      session.append("user/message", first as never, { surfaceOp: "append" });
+      const call = toolCall("checking", "call-34");
+      session.append("assistant/message", { turn: 1, step: 1, message: call } as never, { surfaceOp: "append" });
+      const result = createToolResultMessage({ callId: "call-34" as never, content: [{ type: "text", text: "interrupted" }], isError: true });
+      session.append("tool/result", { turn: 1, step: 1, message: result } as never, { surfaceOp: "append" });
+      deriveMutationPlan(viewOf(session), { db });
+      const toolRows = () =>
+        db.prepare("SELECT tag_number, tool_owner_message_id FROM tags WHERE session_id = ? AND type = 'tool' AND message_id = 'call-34'").all(KEY) as Array<{
+          tag_number: number;
+          tool_owner_message_id: string | null;
+        }>;
+      const before = toolRows();
+      expect(before).toHaveLength(1);
+      // (process killed here: the replace never landed) — restart, next prompt.
+      const prompt = createUserMessage({ content: [{ type: "text", text: "Reply when done." }], source: { kind: "user" } });
+      session.append("user/message", prompt as never, { surfaceOp: "append" });
+      deriveMutationPlan(viewOf(session), { db });
+      const after = toolRows();
+      // e2e 41771964169 Y4: a second tag (3 -> 4) for the same call; the model saw §4§ for a §3§ result.
+      expect(after).toHaveLength(1);
+      expect(after[0]!.tag_number).toBe(before[0]!.tag_number);
+      expect(after[0]!.tool_owner_message_id).toBe(prompt.id);
+    });
+  });
+});
