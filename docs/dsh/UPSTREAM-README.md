@@ -1,7 +1,7 @@
 > **归档文档（只作出处记录）**：这是导入前社区移植（DSH 0.1.0-rc.6 / Magic Context 0.36.1）
 > 的原 README，其中的版本号、安装方式和链接都已过时，请勿按此安装。当前安装说明见
 > [`packages/dsh-plugin/README.zh.md`](../../packages/dsh-plugin/README.zh.md)（英文：
-> [`README.md`](../../packages/dsh-plugin/README.md)），基线为 DSH 0.2.1-rc.5 / Magic Context 0.49.34，
+> [`README.md`](../../packages/dsh-plugin/README.md)），基线为 DSH 0.2.1-rc.5 / Magic Context 0.49.35，
 > 来源分支为 https://github.com/ceyirelehe47/magic-context 的 `dsh-integration`。
 
 # Magic Context for DSH

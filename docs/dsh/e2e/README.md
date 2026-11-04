@@ -1,6 +1,6 @@
 > **Historical (DSH 0.1.0-rc.6 era, Windows).** This page documents the original
 > 0.1 scratch harness and is kept for the evidence folders it explains. The
-> current harness targets DSH **0.2.1-rc.5** / Magic Context **0.49.34** and lives in
+> current harness targets DSH **0.2.1-rc.5** / Magic Context **0.49.35** and lives in
 > `packages/dsh-plugin/scripts/e2e/` (`env.sh`, `bootstrap.sh`, `install-profile.sh`,
 > `run-headless.sh`, `inspect-db.ts`); newer evidence is in `evidence-0.2.1-rc.5/`
 > and `evidence-round*/`.

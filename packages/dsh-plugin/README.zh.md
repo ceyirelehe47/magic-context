@@ -12,7 +12,7 @@ historian/dreamer 调度、Magic 压缩，以及 **DSH 设置页中的 Magic Con
 > `docs/DSH-MAINTENANCE.md`。
 
 兼容基线：DSH **0.2.1-rc.5**（精确匹配，`doctor` 会检查），Magic Context
-core **0.49.34**（共享 schema，见 `docs/dsh/FEATURES.md`）。
+core **0.49.35**（共享 schema，见 `docs/dsh/FEATURES.md`）。
 
 ## 安装
 
