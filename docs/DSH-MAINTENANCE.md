@@ -42,7 +42,49 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 27, 2026-11-04, DSH 0.2.1-rc.5, core v0.49.35; release tags
+Baseline (round 28 / 28b / 28c, 2026-11-04, DSH 0.2.1-rc.5 pinned, core v0.49.35;
+release tags unchanged; HEAD `adb5ed80d`): `typecheck:dsh` **0 errors**, test-file
+typecheck 0, `dsh-plugin` **624 pass** (+14 over round 27's 610), `adapter-api`
+**15**, `contracts:dsh` **105**, 0 fail (push 41841941636 @ `adb5ed80d`); real-model
+`e2e` **135 judged** from `f6ce05a22` (round 27's 133 + I2 + R10 scenario-P; I2 and
+both R10 lines WARN-only). Install acceptance A0–A4 (A0 new in 28b: exemption
+report). Evidence: `docs/dsh/e2e/evidence-round28/` (run table in its README).
+
+| run id | kind | DSH | head | PASS / FAIL / WARN | FAIL classification | I1 | I2 | R10 (P) |
+|---|---|---|---|---|---|---|---|---|
+| 41828791422 | e2e | rc.5 | 2a2e9b592 (fold v1) | 130 / 2 | T1/T2: model re-read p32.txt ×8 → pi-ai clamp — regression of fold v1 (adapter) → `cc96eb02e` | PASS | (n/a) | (n/a) |
+| 41828796915 | e2e | rc.5 | 2a2e9b592 (fold v1) | 128 / 4 | T1/U7/U8/U10: re-reads ×5 (same cause) | PASS | (n/a) | (n/a) |
+| 41832514940 | e2e | rc.5 | cc96eb02e (fold v2) | 131 / 2 | R4/R7: model's own ctx_reduce in pold (prompt forbids) → room `f6ce05a22` | PASS | PASS | (offline WARN) |
+| 41832520000 | e2e | rc.5 | cc96eb02e | 133 / 0 | — | PASS | PASS | (offline PASS) |
+| 41832524393 | e2e | rc.5 | cc96eb02e | 132 / 0 | — | PASS | PASS | — |
+| 41832529681 | e2e | rc.5 | cc96eb02e | 132 / 0 / T3 WARN | — | PASS | PASS | — |
+| 41832534523 | e2e | rc.5 | cc96eb02e | 132 / 1 | R2: model's own ctx_reduce in pnew before MC fired | PASS | PASS | (offline WARN) |
+| 41839150646 | e2e #0 | rc.5 | f6ce05a22 | 133 / 0 / 2 (E2, T3) — 135 judged | — | PASS | PASS | PASS |
+| 41840699540 | install | rc.5 | 21985b4ef | A0–A4 PASS | — | | | |
+| 41840694149 | install | alpha.3 | 21985b4ef | failure | DSH plugin manager rejects the bundle (peer pin 0.2.1-rc.5) → exemption lane `adb5ed80d` | | | |
+| 41841943616 | install | alpha.3 (+allow-version) | adb5ed80d | A0 WARN, A1–A4 PASS | — (A0 WARN = pin-only doctor FAIL + exemption needed, by design) | | | |
+| 41841941636 | push checks | rc.5 | adb5ed80d | success | dsh-plugin 624/0 | | | |
+| R28C_RUNS |
+
+Round 28 commits (adapter / scenarios / scripts / CI only, no core change; red test first):
+- `92c8f5127` RED: folded tool record must be one past-tense prose summary (fold-format).
+- `77a6c3b2f` fold v1: the folded tool arc is one prose note + tagged result text (limitations 21/22).
+- `2a2e9b592` CI: `dsh-ci` dispatch `slot` input, so repeated e2e runs go in parallel.
+- `1a23d6827` RED: open-lock crash residues left by a SIGKILL inside createExclusive / takeover.
+- `bb86b923c` open lock sweeps stale createExclusive temps and `.takeover` at acquire; never touches the live lock.
+- `9ba465adc` RED: re-own with ≥ 2 stale synthetic owners mints a third tag number.
+- `8ea0321a8` re-own folds every stale owner into one (core `adoptPiFallbackToolOwnerTag`) in one transaction.
+- `cb3f31368` RED: context plane's historian trigger / pressure persistence swallow errors silently.
+- `952a3970a` those stay fail-open but log once per distinct message.
+- `cc96eb02e` fold v2: the prose names each call and its target in order (v1 caused 5–8× re-reads); ci-check I1 sees the new note, new WARN-only I2.
+- `f6ce05a22` (28b) scenario P gets room (pnew ≤ 8 batches, pold until native compaction); new WARN-only R10 lists forbidden ctx_reduce calls.
+- `046402042` (28b) RED: alpha.3 loader persists via `EntryTree.commit`, the no-write preset include only overrode `write()`.
+- `bdeb8bfa0` (28b) preset include also overrides `commit()` as a no-op (alpha.3); `write()` kept for rc.5.
+- `21985b4ef` (28b) CI: optional `dsh_version` input for dsh-ci / dsh-install (default rc.5); pin-only doctor FAIL tolerated off-pin.
+- `5b3ae0917` (28b) open-lock-residue test flake: touch the lock before ageing residues (assertions unchanged).
+- `adb5ed80d` (28b) off-pin lanes grant DSH's `plugin allow-version … --accept-risk` exemption; A0 WARN / U6 accept pin-only FAIL there.
+
+Previous baseline (round 27, 2026-11-04, DSH 0.2.1-rc.5, core v0.49.35; release tags
 unchanged; HEAD `605a8f7a4` — code head `fc928cbb4`, `605a8f7a4` changes only the
 e2e scenario S launcher + ci-check): `typecheck:dsh` **0 errors**, test-file
 typecheck 0, `dsh-plugin` **610 pass** (+19 over round 26's 591), `adapter-api`
@@ -1890,6 +1932,55 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       1.02×, wall 3.06 → 3.05 s, WAL max 0, DB 1.1 → 48 MB with flat growth per
       run, 0 historian failures of 16 958, real samples 6/6). Segments 2–4 still
       running (3 × ~3.3 h, ETA ≈ 02:00 CST 2026-11-05); the final K1–K9 over the whole CSV is pending.
+
+23. **Round 28 (2026-11-04) — status (28 / 28b / 28c).**
+    - **Limitations 21/22 (model imitates the folded tool record).**
+      - **v1 (`77a6c3b2f`): count-only prose** ("1 file was read …", no targets).
+        I1 clean, but the real model could not tell its own read had finished and
+        re-read one file 5–8× per turn (41828791422 t-1 p32.txt ×8 → pi-ai clamp →
+        T1/T2 FAIL; 41828796915 every pnew-02 file ×5). Reverted in v2.
+      - **v2 (`cc96eb02e`): one prose sentence naming each call and its target in
+        order**, results verbatim, no call id / input JSON / per-call header.
+        **I1 0/5** on 41832514940…41832534523 (and PASS on every later run); I2
+        (one file read ≥ 4× in a run, WARN-only) not triggered. Rate on v2 so far:
+        0 imitation copies; still an observation, not a proof (limitation stays
+        open at low priority; I1/I2 stay in every e2e).
+      - **Side effect seen on v2: the model calls `ctx_reduce` on its own reads
+        against the scenario-P prompt** (41832534523 R2, 41832514940 R4/R7;
+        0/26 such runs rounds 21–28 on v1-era formats vs 2/5 on v2, p≈0.02 —
+        statistical inference, not reproduced deterministically; wording
+        suspected, not changed because v2 holds I1/I2). Not a Magic bug (the tool
+        is exposed and allowed in production), but it breaks the scenario's
+        preconditions. `f6ce05a22` gives scenario P room (more batches) instead of
+        looser checks; R1–R4/R7 unchanged; **R10 (WARN-only) lists every forbidden
+        ctx_reduce** so the rate stays observable
+        (`evidence-round28/c5-r2-r4-r7-model-selfdrop.md`).
+    - **T3 — 待用户确认 (pending user confirmation).** Since round 27, T3 is WARN
+      (not FAIL) when the constraint is shadowed by the checkpoint and carried in
+      `<unsummarized_tail>`, and the only other copy is the real model's own
+      live-tail text restating it. Seen as WARN on 41832529681 and 41839150646.
+      Whether this WARN classification is acceptable, or T3 should FAIL there, is
+      the user's call; the check is unchanged until then.
+    - **DSH 0.2.2-alpha.3 compatibility (evaluation lane only; 是否声明支持
+      alpha.3 待用户决定 — whether to declare alpha.3 support is the user's
+      decision).** Peer dependencies stay pinned to `@deepseek-ai/dsh-* 0.2.1-rc.5`
+      and `DSH_COMPAT_EXPECTED_VERSION` is unchanged (release decision, not
+      changed here).
+
+      | item | alpha.3 | evidence | disposition |
+      |---|---|---|---|
+      | thin preset no-write include | broke: loader 1.0.7 persists via `EntryTree.commit(change)`, would write `disabled: true` into the shipped stock preset | `046402042` RED (real alpha.3 packages: stock changed) | fixed `bdeb8bfa0` (override `commit` too; rc.5 still `write`), preset-include 4/4 on both package sets |
+      | plugin manager install / boot | rejects the bundle: peers pin 0.2.1-rc.5 exactly | install 41840694149 failure | by design (DSH); CI grants `dsh plugin allow-version … --accept-risk` off-pin (`adb5ed80d`); users on alpha.3 would need the same exemption until peers change |
+      | doctor | exact-version pin FAILs (only that line) | 41841943616 A0 WARN `doctorPin=1` | expected off-pin; tolerated in CI only |
+      | install → upgrade → disable → roll back | PASS | 41841943616 A1–A4 PASS | — |
+      | real-model e2e | A3_E2E_RESULT | A3_E2E_RUNS | A3_E2E_DISPO |
+    - **Fixed this round (adapter):** open-lock crash residues (`bb86b923c`);
+      re-own with ≥ 2 stale owners (`8ea0321a8`); silent catch in context plane
+      (`952a3970a`); alpha.3 preset include (`bdeb8bfa0`); test flake
+      `5b3ae0917`. One sentence each in the round 28 baseline block.
+    - **Unchanged by decision:** 90 % backstop, native summary for child
+      sessions, sandbox inheritance for subagents; `/compact` queueing not
+      implemented.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
