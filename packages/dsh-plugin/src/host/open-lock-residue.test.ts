@@ -60,9 +60,15 @@ describe("dsh open lock: crash residues are swept at acquire (round 28)", () => 
       }
       // Reproduced: the crash left at least one residue file behind.
       expect(left.length).toBeGreaterThan(0);
-      // The holder is dead; age everything past the sweep threshold.
-      for (const f of left) age(join(e.dir, f), 10 * 60_000);
+      // The holder is dead; age everything past the sweep threshold. The lock
+      // is touched FIRST: a kill between createExclusive's link and its rm
+      // leaves the temp hard-linked to the lock (one inode, one mtime), so
+      // touching the lock last reset that temp to age 0 and it survived this
+      // acquire (push CI 41840580191: `….lock.3083.1lwg3eahl0c.tmp` left; the
+      // next acquire, > 1 s later with the writer dead, sweeps it — test order
+      // bug, not a product one).
       if (existsSync(lock)) age(lock, 0);
+      for (const f of left) age(join(e.dir, f), 10 * 60_000);
       const release = await acquireDshOpenLock(e.db, () => {});
       release();
       expect(residues(e.dir, lock)).toEqual([]);
