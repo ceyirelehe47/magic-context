@@ -1,0 +1,22 @@
+252 |       expect(JSON.parse(metaA).dshLegacyMigration.previousStatus).toBe("active");
+253 |       expect(() => applyLegacyMigration(f.db, planB, { runId: "run-B" })).toThrow(/changed since the scan/);
+                                                                                ^
+error: expect(received).toThrow(expected)
+
+Expected pattern: /changed since the scan/
+
+Received function did not throw
+Received value: {
+  runId: "run-B",
+  applied: {
+    "memory-move": 0,
+    "memory-move-archived": 0,
+    "memory-archive-duplicate": 2,
+    "memory-archive-polluted": 1,
+    "fts-strip": 1,
+    "compartment-flag": 0,
+  },
+  ops: [
+    {
+ 9 pass
+ 1 fail

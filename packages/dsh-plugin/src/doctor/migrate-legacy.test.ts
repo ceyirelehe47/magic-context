@@ -232,6 +232,34 @@ describe("migrate-legacy (round 26 P0-1)", () => {
     }
   });
 
+  it("round 27b C6: two concurrent applies planned from the same scan — the second (stale) plan is refused and changes nothing", async () => {
+    // The CLI scans OUTSIDE the IMMEDIATE transaction (the backup's VACUUM INTO
+    // cannot run inside one), so two `--apply` runs started together both plan
+    // from the pre-migration state and the second applies after the first
+    // committed. Deterministic interleaving of exactly that window. Only the
+    // archive ops (a DB whose orphans are all duplicates / polluted rows — no
+    // move whose project_path check would trip) and a partial FTS strip.
+    const f = await legacyFixture();
+    try {
+      const archiveOnly = (ops: ReturnType<typeof planLegacyMigration>) =>
+        ops.filter((op) => op.kind === "memory-archive-duplicate" || op.kind === "memory-archive-polluted" || (op.kind === "fts-strip" && !op.removed));
+      const planA = archiveOnly(planLegacyMigration(scanLegacyData(f.db, { resolveIdentity: f.resolve })));
+      const planB = archiveOnly(planLegacyMigration(scanLegacyData(f.db, { resolveIdentity: f.resolve })));
+      expect(planA.length).toBeGreaterThanOrEqual(3);
+      applyLegacyMigration(f.db, planA, { runId: "run-A" });
+      const afterA = databaseDigest(f.db).digest;
+      const metaA = (f.db.prepare("SELECT metadata_json FROM memories WHERE id = ?").get(f.ids.rawDuplicate) as { metadata_json: string }).metadata_json;
+      expect(JSON.parse(metaA).dshLegacyMigration.previousStatus).toBe("active");
+      expect(() => applyLegacyMigration(f.db, planB, { runId: "run-B" })).toThrow(/changed since the scan/);
+      // nothing of run B landed: the original previousStatus and the journal are intact
+      expect(databaseDigest(f.db).digest).toBe(afterA);
+      const n = f.db.prepare("SELECT COUNT(*) AS n FROM dsh_legacy_migration_log WHERE run_id = 'run-B'").get() as { n: number };
+      expect(n.n).toBe(0);
+    } finally {
+      cleanup(f);
+    }
+  });
+
   it("an aborted apply rolls back completely (single transaction)", async () => {
     const f = await legacyFixture();
     try {
