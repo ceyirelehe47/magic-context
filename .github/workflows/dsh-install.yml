@@ -90,7 +90,8 @@ jobs:
           cd "$RUNNER_TEMP/e2e/dsh"
           echo '{"name":"dsh-accept","private":true}' > package.json
           timeout 300 npm install --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION"
-          npm i -g pnpm@9 >/dev/null 2>&1 || true
+          npm i -g pnpm@latest >/dev/null 2>&1
+          echo "pnpm $(pnpm --version)"
           node node_modules/@deepseek-ai/dsh/lib/bin.js --version || true
           ls -la "$RUNNER_TEMP/tgz"
       - name: install → upgrade → disable → roll back
@@ -100,6 +101,7 @@ jobs:
           bash packages/dsh-plugin/scripts/e2e/install-accept.sh "$RUNNER_TEMP/tgz/dsh2.tgz" "$RUNNER_TEMP/tgz/head.tgz"
       - name: Check
         run: |
+          set -o pipefail
           python3 packages/dsh-plugin/scripts/e2e/install-accept-check.py "$CI_OUT" | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
