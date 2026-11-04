@@ -1732,7 +1732,7 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       same run: 5/6 for ARCH-KESTREL-4127). Session A is written by the real main
       model, so the candidate set differs per run. An exact identifier is not reliably
       first: the fix belongs to core's RRF fusion (exact-token / FTS-match boost) —
-      **not changed here; core change pending a decision**.
+      **won't fix in DSH (user decision 2026-11-04): upstream core behaviour, left as-is; scenario E stays as a WARN-only observation**.
     - **New: the model imitates the folded tool format (P1 candidate).** e2e
       41769676548 R9/R11 (lock-a): instead of calling `read`, the real model wrote an
       8 314-char assistant TEXT imitating Magic's folded `[tool: read #call_N]` /
