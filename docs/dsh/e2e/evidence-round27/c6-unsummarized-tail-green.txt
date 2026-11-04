@@ -1,0 +1,7 @@
+(pass) unsummarized tail edge cases (round 27b C6) > a huge tail renders in linear time and stays under the cap, newest user line kept [131.85ms]
+(pass) unsummarized tail edge cases (round 27b C6) > clipping never splits a surrogate pair (emoji at the 2000 / 600 / 400 boundaries) [1.03ms]
+(pass) unsummarized tail edge cases (round 27b C6) > CJK tail is kept verbatim at the start of each line and bounded [0.47ms]
+(pass) unsummarized tail edge cases (round 27b C6) > plain text output is unchanged by the rewrite (golden: small tail, no cap) [0.15ms]
+ 4 pass
+ 0 fail
+golden: 300 random capped/uncapped tails rendered before/after the rewrite: 0 diffs (155 non-empty)

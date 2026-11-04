@@ -1305,7 +1305,13 @@ const TAIL_USER_MAX_CHARS = 2_000;
 const TAIL_ASSISTANT_MAX_CHARS = 600;
 
 function clip(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  if (text.length <= max) return text;
+  let end = max - 1;
+  // Round 27b (C6): never cut between the halves of a surrogate pair (emoji,
+  // astral CJK) — a lone surrogate is not well-formed text for the provider.
+  const code = text.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+  return `${text.slice(0, end)}…`;
 }
 
 /**
@@ -1342,19 +1348,35 @@ export function renderUnsummarizedTail(
   }
   const header = `<unsummarized_tail from="${from}" to="${to}">\nMessages ${from}-${to} were compacted before the historian summarized them. Their text follows (tool output omitted); the full messages stay recoverable with ctx_expand ${from}-${to}. Instructions and constraints the user gave here still apply.`;
   const footer = "</unsummarized_tail>";
-  const size = () => header.length + footer.length + lines.reduce((n, l) => n + l.text.length + 12, 0);
+  // Round 27b (C6): the running size is kept incrementally (the previous
+  // loops recomputed it per dropped line: O(n²), 11.5 s for a 40 000-message
+  // tail). Same policy, same output.
+  let size = header.length + footer.length + lines.reduce((n, l) => n + l.text.length + 12, 0);
   // Over the cap: drop the oldest assistant lines first, then clip user lines.
-  while (size() > maxChars) {
-    const idx = lines.findIndex((l) => l.role === "assistant");
-    if (idx < 0) break;
-    lines.splice(idx, 1);
+  let kept: Array<{ ordinal: number; role: string; text: string }> = lines;
+  if (size > maxChars) {
+    kept = [];
+    for (const line of lines) {
+      if (size > maxChars && line.role === "assistant") {
+        size -= line.text.length + 12;
+        continue;
+      }
+      kept.push(line);
+    }
   }
-  for (let i = 0; i < lines.length && size() > maxChars; i += 1) {
-    lines[i] = { ...lines[i]!, text: clip(lines[i]!.text, 400) };
+  for (let i = 0; i < kept.length && size > maxChars; i += 1) {
+    const clipped = clip(kept[i]!.text, 400);
+    size -= kept[i]!.text.length - clipped.length;
+    kept[i] = { ...kept[i]!, text: clipped };
   }
-  while (size() > maxChars && lines.length > 1) lines.shift();
-  if (lines.length === 0 || size() > maxChars) return "";
-  return [header, ...lines.map((l) => `[${l.ordinal}] ${l.role}: ${l.text}`), footer].join("\n");
+  let first = 0;
+  while (size > maxChars && kept.length - first > 1) {
+    size -= kept[first]!.text.length + 12;
+    first += 1;
+  }
+  if (first > 0) kept = kept.slice(first);
+  if (kept.length === 0 || size > maxChars) return "";
+  return [header, ...kept.map((l) => `[${l.ordinal}] ${l.role}: ${l.text}`), footer].join("\n");
 }
 
 /**
