@@ -65,7 +65,7 @@ import type { DshStorageBootstrap } from "../host/bootstrap";
 import { resolveSessionProjectIdentity, trackSessionProjectOnce, sessionProjectPath } from "./session-track";
 import { maybeRunAutoSearchHint, type AutoSearchConfig } from "./auto-search";
 import { isMagicChildSession } from "./worker";
-import { renderToolRecord } from "./transcript";
+import { TOOL_RECORD_NOTE_PREFIX } from "./transcript";
 
 /** The host-service slice the gate needs (structural view). */
 export interface KnowledgeGateHostView {
@@ -424,14 +424,11 @@ export async function maybeInjectKnowledge(
       if (part !== null) {
         const todoWatermark = `mc-todo:${sha256Hex(todoState).slice(0, 16)}`;
         if (!isMagicWatermarkOnSurface(agent.session, todoWatermark)) {
-          const callId = part.callID;
-          // Same framed, non-callable record as a folded tool arc (round 27,
-          // limitation 21: the old `[tool: …]` text was imitated by the model).
-          const todoInput = part.state.input as Record<string, unknown>;
-          const todoText = renderToolRecord([
-            { kind: "call", toolName: "todowrite", callId, input: todoInput },
-            { kind: "result", toolName: "todowrite", callId, output: String(part.state.output) },
-          ]);
+          // Round 28 (limitations 21/22): a prose note, never a call / id /
+          // input / result template (the round 26 `[tool: …]` and round 27
+          // `- called todowrite (id …)` records were both imitated by the
+          // model). The todo JSON itself is the content the model needs.
+          const todoText = `${TOOL_RECORD_NOTE_PREFIX}the todo list was set with todowrite. It is restored here after a context fold as reference text (still current); update it by calling todowrite normally.\n\n${String(part.state.output)}`;
           const todoSource: MagicMessageSource = {
             kind: "magic-context",
             plugin: "magic-context",

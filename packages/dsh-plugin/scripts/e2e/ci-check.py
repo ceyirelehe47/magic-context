@@ -1760,7 +1760,10 @@ def check(out: Path) -> int:
     # record as its own TEXT (old `[tool: read #call_N]` form, or the new
     # framed record). Model behaviour: WARN with the hits (the run that shows
     # it also fails its own scenario check, e.g. R9/R11 in 41769676548).
-    imit = re.compile(r"(?m)^\s*\[tool( result)?: [\w.-]+ #|<recorded-tool-activity|^\s*- called [\w.-]+ \(id ")
+    # Round 28: the fold is one prose note ("Magic Context note: earlier in this
+    # session …") + tagged result text; a model TEXT carrying that note is the
+    # same imitation, so it is detected too (all three generations stay detected).
+    imit = re.compile(r"(?m)^\s*\[tool( result)?: [\w.-]+ #|<recorded-tool-activity|^\s*- called [\w.-]+ \(id |Magic Context note: earlier in this session")
     hits = []
     for p in sorted(out.glob("*.log")):
         for t in visible_texts(p):

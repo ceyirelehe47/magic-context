@@ -1401,10 +1401,49 @@ export interface ToolRecordItem {
   output?: string | undefined;
 }
 
-/** Opening line of a folded tool record: names it history, not a callable syntax. */
-export const TOOL_RECORD_OPEN =
-  '<recorded-tool-activity note="already executed earlier in this session; a history record only, not a tool-call syntax: never write this yourself, call tools natively">';
-export const TOOL_RECORD_CLOSE = "</recorded-tool-activity>";
+/** Fixed start of the one-line prose note that replaces a folded tool arc. */
+export const TOOL_RECORD_NOTE_PREFIX = "Magic Context note: earlier in this session ";
+
+const FILE_READ_TOOLS = new Set(["read", "view", "cat", "read_file"]);
+const FILE_EDIT_TOOLS = new Set(["edit", "write", "multiedit", "patch", "apply_patch", "write_file", "edit_file"]);
+const SEARCH_TOOLS = new Set(["grep", "glob", "find", "fs_search", "search", "ls", "list"]);
+const COMMAND_TOOLS = new Set(["bash", "shell", "exec", "run", "command"]);
+const FETCH_TOOLS = new Set(["webfetch", "web_fetch", "fetch", "websearch", "web_search"]);
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** Past-tense phrase for `n` calls of one tool class ("3 files were read"). */
+function activityPhrase(tool: string, n: number): string {
+  const t = tool.toLowerCase();
+  const was = n === 1 ? "was" : "were";
+  if (FILE_READ_TOOLS.has(t)) return `${plural(n, "file", "files")} ${was} read`;
+  if (FILE_EDIT_TOOLS.has(t)) return `${plural(n, "file", "files")} ${was} edited`;
+  if (SEARCH_TOOLS.has(t)) return `${plural(n, "search", "searches")} ${was} run`;
+  if (COMMAND_TOOLS.has(t)) return `${plural(n, "command", "commands")} ${was} run`;
+  if (FETCH_TOOLS.has(t)) return `${plural(n, "web lookup", "web lookups")} ${was} made`;
+  if (t === "todowrite" || t === "todoread") return n === 1 ? "the todo list was updated" : `the todo list was updated ${n} times`;
+  return `the ${tool} tool was used ${n === 1 ? "once" : `${n} times`}`;
+}
+
+/** Class key so `edit` + `write` count together as "files edited". */
+function activityClass(tool: string): string {
+  const t = tool.toLowerCase();
+  if (FILE_READ_TOOLS.has(t)) return "read";
+  if (FILE_EDIT_TOOLS.has(t)) return "edit";
+  if (SEARCH_TOOLS.has(t)) return "search";
+  if (COMMAND_TOOLS.has(t)) return "bash";
+  if (FETCH_TOOLS.has(t)) return "fetch";
+  if (t === "todowrite" || t === "todoread") return "todowrite";
+  return tool;
+}
+
+function joinPhrases(phrases: readonly string[]): string {
+  if (phrases.length <= 1) return phrases[0] ?? "";
+  if (phrases.length === 2) return `${phrases[0]} and ${phrases[1]}`;
+  return `${phrases.slice(0, -1).join(", ")} and ${phrases[phrases.length - 1]}`;
+}
 
 /**
  * Text form of a run of folded tool parts (DSH surface replacement moves a
@@ -1412,29 +1451,51 @@ export const TOOL_RECORD_CLOSE = "</recorded-tool-activity>";
  * text, limitation 1). Pure and deterministic: every pass re-renders the same
  * bytes (the coordinator's "copy already current" check depends on it).
  *
- * Round 27 (limitation 21): the old `[tool: read #call_N]\ninput: …\n\n[tool
- * result: read #call_N]\noutput:\n…` form read like a transcript the model
- * should continue — the real model wrote it as plain assistant TEXT with a
- * fabricated file body (e2e 41769676548 R9/R11). The record is now one framed
- * block that names itself executed history, in past-tense prose rather than a
- * bracketed call header. Historian / FTS never read this text (the surface
- * walk expands op copies back to their source events).
+ * Round 28 (limitations 21/22): any rendering with a call header, a call id,
+ * the input and a result block gave the model a template it continued as
+ * plain assistant TEXT with an invented result — the round 26 `[tool: read
+ * #call_N]` form (e2e 41769676548, 41777488761) and the round 27 framed
+ * `<recorded-tool-activity>` / `- called read (id …) with input {…}` /
+ * `returned:` form (41792968900 h-a4, copied verbatim, note included). The
+ * fold now shows ONE past-tense prose line counting what was done ("earlier in
+ * this session 3 files were read and 1 command was run …, use ctx_expand"),
+ * then each result's text exactly as Magic holds it (its §N§ tag first, so
+ * tags / ctx_reduce / pressure truncation are unchanged). No call, id or input
+ * is rendered; those stay in the DSH event log, which historian, FTS and
+ * ctx_expand read through the surface walk (op copies expand back to their
+ * source events), so none of them lose anything.
  */
 export function renderToolRecord(items: readonly ToolRecordItem[]): string {
-  const lines: string[] = [TOOL_RECORD_OPEN];
+  // Count calls per activity class, once per call id (a call and its result
+  // are two items); items without an id count individually.
+  const counts = new Map<string, { tool: string; ids: Set<string>; anonymous: number }>();
+  const outputs: string[] = [];
   for (const item of items) {
-    const who = `${item.toolName}${item.callId ? ` (id ${item.callId})` : ""}`;
-    const input = item.input ? ` with input ${JSON.stringify(item.input)}` : "";
-    if (item.kind === "call") {
-      lines.push(`- called ${who}${input}`);
-    } else if (item.output !== undefined && item.output.length > 0) {
-      lines.push(`- ${who}${input} returned:`, item.output);
-    } else {
-      lines.push(`- ${who}${input} returned no output`);
+    const cls = activityClass(item.toolName);
+    let entry = counts.get(cls);
+    if (entry === undefined) {
+      entry = { tool: item.toolName, ids: new Set(), anonymous: 0 };
+      counts.set(cls, entry);
     }
+    if (item.callId) entry.ids.add(item.callId);
+    else if (item.kind === "call") entry.anonymous += 1;
+    else if (!items.some((other) => other !== item && other.kind === "call" && !other.callId && activityClass(other.toolName) === cls)) {
+      entry.anonymous += 1;
+    }
+    if (item.kind === "result" && item.output !== undefined && item.output.length > 0) outputs.push(item.output);
   }
-  lines.push(TOOL_RECORD_CLOSE);
-  return lines.join("\n");
+  const phrases: string[] = [];
+  for (const [, entry] of counts) {
+    const n = entry.ids.size + entry.anonymous;
+    if (n > 0) phrases.push(activityPhrase(entry.tool, n));
+  }
+  const did = phrases.length > 0 ? joinPhrases(phrases) : "some tools were used";
+  const merged =
+    outputs.length > 0
+      ? "those tool calls already finished and their results were merged into this context as the reference text below"
+      : "those tool calls already finished and their results were merged into this context";
+  const note = `${TOOL_RECORD_NOTE_PREFIX}${did}. ${merged[0]!.toUpperCase()}${merged.slice(1)}. ctx_expand shows the original calls and full results; call tools normally for any new work.`;
+  return [note, ...outputs].join("\n\n");
 }
 
 /**
