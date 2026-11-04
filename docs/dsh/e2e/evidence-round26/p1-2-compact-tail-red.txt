@@ -1,0 +1,41 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/compact-unprocessed-tail.test.ts:
+113 |       const compartments = getCompartments(db, SID);
+114 |       expect(compartments.at(-1)!.endMessage).toBe(12); // historian left 13..16
+115 |       const text = summaryText(result);
+116 |       expect(text).toContain("Walked through the build steps 1-12.");
+117 |       // Before round 26 the tail (13..16, the constraint at 15) had no text at all.
+118 |       expect(text).toContain("OTTER-LANTERN-6152");
+                         ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "OTTER-LANTERN-6152"
+Received: "<compartment start=\"1\" end=\"12\" title=\"Build steps\">\nWalked through the build steps 1-12.\n</compartment>"
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/compact-unprocessed-tail.test.ts:118:20)
+      at async withDb (/workspace/work/magic-context/packages/dsh-plugin/src/agent/compact-unprocessed-tail.test.ts:92:18)
+      at async <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/compact-unprocessed-tail.test.ts:105:11)
+(fail) /compact with an unprocessed tail (round 26 P1-2, limitation 17) > the checkpoint summary carries the uncovered tail (the user constraint verbatim) until the historian covers it [680.21ms]
+(pass) /compact with an unprocessed tail (round 26 P1-2, limitation 17) > a fully covered region renders compartments only (no tail block) [223.70ms]
+150 |       const agent = agentOf(session);
+151 |       const provider = historyContentProvider(agent, SID);
+152 |       const messages = provider.readMessages();
+153 |       const hook = createMagicSummarizeHook({ db, sessionId: SID, ctx: {}, provider, summarize: partialHistorian(6) as never, leaseHolderId: "r26-cap" });
+154 |       const text = summaryText(await hook({ messages: messages.map((m) => ({ id: m.id, role: m.role, content: [] })) as never }, agent));
+155 |       expect(text).toContain(CONSTRAINT);
+                         ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "From now on every reply must end with the line 'ack OTTER-LANTERN-6152' and never use bullet lists."
+Received: "<compartment start=\"1\" end=\"6\" title=\"Build steps\">\nWalked through the build steps 1-6.\n</compartment>"
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/compact-unprocessed-tail.test.ts:155:20)
+      at async withDb (/workspace/work/magic-context/packages/dsh-plugin/src/agent/compact-unprocessed-tail.test.ts:92:18)
+      at async <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/agent/compact-unprocessed-tail.test.ts:140:11)
+(fail) /compact with an unprocessed tail (round 26 P1-2, limitation 17) > a long tail is bounded: user text kept first, the block stays under its cap [259.87ms]
+
+ 1 pass
+ 2 fail
+ 8 expect() calls
+Ran 3 tests across 1 file. [2.22s]
