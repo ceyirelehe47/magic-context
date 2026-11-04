@@ -29,12 +29,16 @@ on:
         description: "Also run the real-model DSH e2e job (uses OPENCODE_API_KEY quota)"
         type: boolean
         default: false
+      slot:
+        description: "Optional concurrency slot: dispatches with different slots run in parallel instead of queueing (round 28, repeated e2e for I1 statistics)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: dsh-ci-${{ github.ref }}-${{ github.event_name }}
+  group: dsh-ci-${{ github.ref }}-${{ github.event_name }}${{ inputs.slot && format('-{0}', inputs.slot) || '' }}
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 env:
