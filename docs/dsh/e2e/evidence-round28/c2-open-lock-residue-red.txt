@@ -1,0 +1,13 @@
+# mechanism repro (old code, tight acquire/release loop, SIGKILL at random 20-60 ms): see last line
+- Expected  - 1
++ Received  + 3
+(fail) dsh open lock: crash residues are swept at acquire (round 28) > repro: SIGKILL during acquire/release loops leaves .tmp / .takeover files, and the next acquire removes them [85.56ms]
+- Expected  - 1
++ Received  + 5
+(fail) dsh open lock: crash residues are swept at acquire (round 28) > dead-writer temp files and a dead holder's .takeover are removed; the lock is acquired [1.56ms]
+Expected: false
+Received: true
+(fail) dsh open lock: crash residues are swept at acquire (round 28) > never removes a live writer's fresh temp, a live .takeover, or a live lock [904.72ms]
+ 0 pass
+ 3 fail
+kills=30 runs_with_residue=21 tmp_files=11 takeover_files=13
