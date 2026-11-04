@@ -71,6 +71,7 @@ import {
   getTagsBySession,
 } from "@magic-context/core/features/magic-context/storage";
 import { createTagger } from "@magic-context/core/features/magic-context/tagger";
+import { adoptPiFallbackToolOwnerTag } from "@magic-context/core/features/magic-context/storage-tags";
 import { tagTranscript } from "@magic-context/core/shared/tag-transcript";
 import type {
   Transcript,
@@ -1945,7 +1946,7 @@ export function reownAbsorbedTailToolTags(db: Database, sessionId: string, messa
   try {
     const ids = new Set(messages.map((m) => m.id));
     const find = db.prepare(
-      "SELECT tool_owner_message_id AS owner FROM tags WHERE session_id = ? AND type = 'tool' AND message_id = ? AND tool_owner_message_id IS NOT NULL",
+      "SELECT tool_owner_message_id AS owner, tag_number AS n FROM tags WHERE session_id = ? AND type = 'tool' AND message_id = ? AND tool_owner_message_id IS NOT NULL",
     );
     const update = db.prepare(
       "UPDATE tags SET tool_owner_message_id = ? WHERE session_id = ? AND type = 'tool' AND message_id = ? AND tool_owner_message_id = ?",
@@ -1961,11 +1962,39 @@ export function reownAbsorbedTailToolTags(db: Database, sessionId: string, messa
       if (m.role !== "user") continue;
       for (const part of m.parts) {
         if (!isRecord(part) || part.type !== "tool" || typeof part.callID !== "string") continue;
-        const owners = (find.all(sessionId, part.callID) as Array<{ owner: string }>).map((r) => r.owner);
-        if (owners.length === 0 || owners.includes(m.id)) continue;
-        const stale = owners.filter((o) => o.startsWith(SYNTH_USER_ID_PREFIX) && !ids.has(o));
-        if (stale.length !== 1 || owners.length !== 1) continue;
-        update.run(m.id, sessionId, part.callID, stale[0]);
+        const callId = part.callID;
+        const rows = find.all(sessionId, callId) as Array<{ owner: string; n: number }>;
+        if (rows.length === 0) continue;
+        const stale = rows
+          .filter((r) => r.owner.startsWith(SYNTH_USER_ID_PREFIX) && !ids.has(r.owner))
+          .sort((a, b) => a.n - b.n);
+        if (stale.length === 0) continue;
+        const current = rows.find((r) => r.owner === m.id);
+        // Rows that are neither stale-synthetic nor the absorbing owner's (a
+        // real owner, or a synthetic one still in the view): ambiguous, leave all.
+        if (rows.some((r) => r.owner !== m.id && !stale.includes(r))) continue;
+        if (current === undefined && stale.length === 1) {
+          update.run(m.id, sessionId, callId, stale[0]!.owner);
+          moved += 1;
+          continue;
+        }
+        // Round 28 (task 2): two or more rows for one call — what the
+        // pre-374a7e978 re-own left over a double tail crash (or an old
+        // duplicate next to the absorbing owner's own row). Keep ONE number:
+        // the absorbing owner's own (it is on the surface) or else the lowest
+        // stale one (the first the call ever had, the pre-kill number); fold
+        // every other stale row into it with core's adoption (sizes merged,
+        // queued ops re-targeted, duplicate deleted). One transaction.
+        const survivor = current ?? stale[0]!;
+        db.transaction(() => {
+          if (current === undefined) {
+            adoptPiFallbackToolOwnerTag(db, sessionId, survivor.n, callId, survivor.owner, m.id);
+          }
+          for (const row of stale) {
+            if (row === survivor) continue;
+            adoptPiFallbackToolOwnerTag(db, sessionId, row.n, callId, row.owner, m.id, new Set(), survivor.n);
+          }
+        })();
         moved += 1;
       }
     }

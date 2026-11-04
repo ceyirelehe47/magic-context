@@ -1,0 +1,5 @@
+src/agent/crash-recovery.test.ts  9 pass  0 fail 
+src/agent/transcript.test.ts  15 pass  0 fail 
+src/agent/identity-regression.test.ts  6 pass  0 fail 
+src/agent/new-input-fold-tags.test.ts  4 pass  0 fail 
+src/agent/reown-multi-owner.test.ts  6 pass  0 fail 

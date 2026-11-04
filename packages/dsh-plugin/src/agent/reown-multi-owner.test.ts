@@ -171,7 +171,7 @@ describe("reownAbsorbedTailToolTags: one call with two or more stale owners (rou
         .map((seq) => sessionEventAt(session, seq))
         .map((e) => (e ? deriveEventMessage(e) : undefined))
         .filter(Boolean)
-        .map((m) => (m as { content: Array<{ type: string; text?: string }> }).content.map((p) => p.text ?? "").join("\n"))
+        .map((m) => (m as unknown as { content: Array<{ type: string; text?: string }> }).content.map((p) => p.text ?? "").join("\n"))
         .join("\n");
       expect(texts).toMatch(/\u00a750\u00a7 willow orchard/);
       expect(texts).not.toMatch(/\u00a75[1-9]\u00a7 willow orchard/);
