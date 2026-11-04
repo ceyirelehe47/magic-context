@@ -1,0 +1,16 @@
+bun test v1.4.4 (38afee6c8)
+
+src/doctor/migrate-legacy.test.ts:
+(pass) migrate-legacy (round 26 P0-1) > scan is read-only and classifies every legacy row exactly [267.47ms]
+(pass) migrate-legacy (round 26 P0-1) > apply: one transaction, nothing deleted, unique facts injectable, cancelled fact stays cancelled, FTS re-indexed, compartments flagged [204.39ms]
+(pass) migrate-legacy (round 26 P0-1) > apply is idempotent [204.36ms]
+(pass) migrate-legacy (round 26 P0-1) > an aborted apply rolls back completely (single transaction) [208.52ms]
+(pass) migrate-legacy (round 26 P0-1) > backup → apply → restore reproduces the pre-migration DB [270.44ms]
+(pass) migrate-legacy (round 26 P0-1) > empty DB and missing DB: no error, nothing to do [222.08ms]
+(pass) migrate-legacy (round 26 P0-1) > CLI: scan/dry-run write nothing; --apply backs up, migrates and prints the rollback; --restore verifies [296.23ms]
+(pass) migrate-legacy (round 26 P0-1) > stripInjectedBlocks keeps real text and drops unclosed blocks to the end [0.17ms]
+
+ 8 pass
+ 0 fail
+ 67 expect() calls
+Ran 8 tests across 1 file. [1.98s]

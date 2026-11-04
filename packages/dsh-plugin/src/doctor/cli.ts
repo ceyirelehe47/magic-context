@@ -6,6 +6,8 @@
  *   setup    locate DSH + generate the magic-standard thin preset + bootstrap
  *            the user config (see ./setup)
  *   doctor   run the adapter checklist (see ./doctor)
+ *   migrate-legacy  scan / back up / dry-run / apply / restore the repair of
+ *            data written by earlier dsh builds (see ./migrate-legacy)
  *   --version / -v
  *
  * Built to dist/cli.js by `bun run build` and wired as package.json bin
@@ -15,6 +17,7 @@
 import { runDshSetup, type SetupReport } from "./setup";
 import { runDshDoctor, type DoctorReport } from "./doctor";
 import { MAGIC_CONTEXT_PACKAGE } from "./env";
+import { runMigrateLegacy, setLegacyIdentityResolver } from "./migrate-legacy";
 // Single source of truth: the package version (bundled into dist/cli.js by
 // `bun build`), never a hand-kept copy that drifts on a release bump.
 import packageJson from "../../package.json";
@@ -59,6 +62,9 @@ function usage(): void {
       "  or `magic-standard` (generated clone of standard; the default when no preset flag was ever given).",
       "  Flat (headless/tui) profiles have one pseudo-preset: `root`. The selection is recorded in the",
       "  managed block, so later runs add/remove relative to it; an empty selection removes the block.",
+      "  dsh-magic-context migrate-legacy [--db <context.db>] [--storage-dir <dir>] [--json]",
+      "                            (default: read-only scan) | --backup | --dry-run | --apply [--keep-similar-active]",
+      "                            | --restore <backup.db>   [--force: ignore live DSH/OpenCode/Pi processes]",
       "  dsh-magic-context --version",
       "",
     ].join("\n"),
@@ -78,6 +84,14 @@ export async function main(argv: string[]): Promise<number> {
       const report = await runDshDoctor(rest);
       printDoctorReport(report);
       return report.exitCode;
+    }
+    case "migrate-legacy": {
+      const [{ resolveProjectIdentityForSession }, { getMagicContextStorageDir }] = await Promise.all([
+        import("@magic-context/core/features/magic-context/memory/project-identity"),
+        import("@magic-context/core/shared/data-path"),
+      ]);
+      setLegacyIdentityResolver((raw) => resolveProjectIdentityForSession(raw));
+      return runMigrateLegacy(rest, { out: (line) => console.log(line), storageDir: getMagicContextStorageDir });
     }
     case "--version":
     case "-v":
