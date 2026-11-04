@@ -73,6 +73,14 @@ doctor_rc() { # doctor_rc <log> <rc>  -> sets DRC and PIN_ONLY (no subshell)
 }
 
 install_tgz() { # install_tgz <tgz> <step>
+  # Round 28b compatibility lane: on a non-pinned DSH the plugin manager rejects
+  # the package (its peers pin the exact DSH) unless the profile holds DSH's
+  # exact-version exemption; grant it for this tarball's version first (the
+  # step records exempt=1, A0 reports it). Pinned DSH: unchanged.
+  if [[ -n "${DSH_PINNED:-}" && "${DSH_VERSION:-}" != "$DSH_PINNED" ]]; then
+    local v; v="$(tar -xzOf "$1" package/package.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+    (cd "$OUT" && timeout 60 node "$DSH_BIN" plugin --profile $P allow-version "dsh-magic-context@$v" --dsh-version "$DSH_VERSION" --accept-risk) > "$OUT/allow-$2.log" 2>&1
+  fi
   (cd "$OUT" && timeout 300 node "$DSH_BIN" plugin --profile $P add "$1") > "$OUT/install-$2.log" 2>&1
   echo $?
 }

@@ -385,7 +385,14 @@ def check_r17(c, out: Path, runs):
     else:
         c.add("U5", False, "/ctx-status text agrees with the DB and the live host", st)
     doc = (out / "doctor-after.txt").read_text(errors="replace") if (out / "doctor-after.txt").exists() else ""
-    c.add("U6", "rc=0" in doc and "FAIL" not in doc, "doctor after all runs: rc 0, no FAIL", doc[-300:])
+    # Round 28b compatibility lane: on a DSH other than the pinned one, doctor's
+    # exact-version pin check FAILs by design (rc 1). U6 then requires that this
+    # is the ONLY FAIL line; on the pinned DSH it is unchanged (rc 0, no FAIL).
+    pinned, running = os.environ.get("DSH_PINNED", ""), os.environ.get("DSH_VERSION", "")
+    fails = [l for l in doc.splitlines() if l.startswith("[FAIL]")]
+    pin_only = bool(pinned) and running != pinned and fails == ["[FAIL] DSH version"] and "rc=1" in doc
+    c.add("U6", ("rc=0" in doc and "FAIL" not in doc) or pin_only,
+          "doctor after all runs: rc 0, no FAIL" + (f" (DSH {running}: only the version pin FAILs)" if pin_only else ""), doc[-300:])
 
 
 def check_r17_child(c, out: Path, runs):

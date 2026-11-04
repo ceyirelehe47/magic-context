@@ -162,6 +162,16 @@ jobs:
           bun run build
           bash scripts/e2e/install-profile.sh test headless
           source scripts/e2e/env.sh
+          # Round 28b compatibility lane: the plugin's peers pin the exact DSH
+          # (0.2.1-rc.5), so another DSH skips the bundle at boot ("incompatible
+          # with dsh …") unless the profile holds DSH's own exact-version
+          # exemption. Grant it only on a non-pinned DSH (explicit risk
+          # acceptance, DSH's documented route); the pinned lane is unchanged.
+          if [ "$DSH_VERSION" != "$DSH_PINNED" ]; then
+            ver=$(node -p "require('./package.json').version")
+            node "$DSH_BIN" plugin --profile test allow-version "dsh-magic-context@$ver" --dsh-version "$DSH_VERSION" --accept-risk
+            echo "::warning::DSH $DSH_VERSION: exact-version exemption granted for dsh-magic-context@$ver (peers pin $DSH_PINNED)"
+          fi
           node dist/cli.js setup --profile test
           # Round 28b: on the pinned DSH doctor must exit 0 (unchanged). On an
           # evaluated other version (input dsh_version) its exact-version pin

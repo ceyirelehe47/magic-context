@@ -37,7 +37,10 @@ add("A4", True if ok_d else ("warn" if fenced else False),
 # FAIL in these steps (install-accept.sh counted their doctor rc as 0). Never on
 # the pinned DSH; WARN = the adapter is not certified for this DSH version.
 pin = [k for k in "abcd" if I(k, "doctorPin") == 1]
-add("A0", True if not pin else "warn", "doctor passed every check except (on a non-pinned DSH) its exact version pin", {"pinOnlySteps": pin})
+exempt = sorted(p.name for p in out.glob("allow-*.log"))
+add("A0", True if not pin and not exempt else "warn",
+    "pinned DSH: no exemption, doctor clean; other DSH: only doctor's version pin failed and the install needed DSH's exact-version exemption",
+    {"pinOnlySteps": pin, "exemptions": exempt})
 print("| id | result | check | detail |\n|---|---|---|---|")
 for r in rows:
     print("| %s | %s | %s | %s |" % r)
