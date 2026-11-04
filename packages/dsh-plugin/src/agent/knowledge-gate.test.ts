@@ -485,7 +485,9 @@ describe("synthetic todowrite replay (Magic todo-view parity)", () => {
       });
       expect(todoMessages.length).toBe(1);
       const text = todoMessages[0].content[0].type === "text" ? todoMessages[0].content[0].text : "";
-      expect(text).toContain("[tool: todowrite #mc_synthetic_todo_");
+      expect(text).toContain("<recorded-tool-activity");
+      expect(text).toContain("called todowrite (id mc_synthetic_todo_");
+      expect(text).not.toMatch(/^\[tool( result)?: /m);
       expect(text).toContain("write report");
       expect(text).toContain("fix bug");
     } finally {

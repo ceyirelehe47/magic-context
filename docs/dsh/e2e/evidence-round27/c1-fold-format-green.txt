@@ -1,0 +1,11 @@
+bun test v1.4.4 (38afee6c8)
+
+src/agent/fold-format.test.ts:
+(pass) folded tool calls render as a framed, non-callable history record (round 27, limitation 21) > the landed copy no longer carries the imitable `[tool: …]` / `[tool result: …]` syntax [2392.48ms]
+(pass) folded tool calls render as a framed, non-callable history record (round 27, limitation 21) > the renderer is pure and frames call + result in one record [0.28ms]
+(pass) folded tool calls render as a framed, non-callable history record (round 27, limitation 21) > historian / FTS input is unchanged by the fold format: raw messages before and after the landed replace are identical [939.74ms]
+
+ 3 pass
+ 0 fail
+ 27 expect() calls
+Ran 3 tests across 1 file. [9.15s]

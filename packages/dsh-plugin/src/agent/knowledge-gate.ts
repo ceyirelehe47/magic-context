@@ -65,6 +65,7 @@ import type { DshStorageBootstrap } from "../host/bootstrap";
 import { resolveSessionProjectIdentity, trackSessionProjectOnce, sessionProjectPath } from "./session-track";
 import { maybeRunAutoSearchHint, type AutoSearchConfig } from "./auto-search";
 import { isMagicChildSession } from "./worker";
+import { renderToolRecord } from "./transcript";
 
 /** The host-service slice the gate needs (structural view). */
 export interface KnowledgeGateHostView {
@@ -424,10 +425,13 @@ export async function maybeInjectKnowledge(
         const todoWatermark = `mc-todo:${sha256Hex(todoState).slice(0, 16)}`;
         if (!isMagicWatermarkOnSurface(agent.session, todoWatermark)) {
           const callId = part.callID;
-          const inputText = JSON.stringify(part.state.input);
-          const todoText =
-            `[tool: todowrite #${callId}]\ninput: ${inputText}\n\n` +
-            `[tool result: todowrite #${callId}]\noutput: ${part.state.output}`;
+          // Same framed, non-callable record as a folded tool arc (round 27,
+          // limitation 21: the old `[tool: …]` text was imitated by the model).
+          const todoInput = part.state.input as Record<string, unknown>;
+          const todoText = renderToolRecord([
+            { kind: "call", toolName: "todowrite", callId, input: todoInput },
+            { kind: "result", toolName: "todowrite", callId, output: String(part.state.output) },
+          ]);
           const todoSource: MagicMessageSource = {
             kind: "magic-context",
             plugin: "magic-context",

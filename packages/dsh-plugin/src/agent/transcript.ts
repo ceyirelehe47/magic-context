@@ -1401,22 +1401,40 @@ export interface ToolRecordItem {
   output?: string | undefined;
 }
 
+/** Opening line of a folded tool record: names it history, not a callable syntax. */
+export const TOOL_RECORD_OPEN =
+  '<recorded-tool-activity note="already executed earlier in this session; a history record only, not a tool-call syntax: never write this yourself, call tools natively">';
+export const TOOL_RECORD_CLOSE = "</recorded-tool-activity>";
+
 /**
  * Text form of a run of folded tool parts (DSH surface replacement moves a
  * tool-call assistant and its results into the following user message as
  * text, limitation 1). Pure and deterministic: every pass re-renders the same
  * bytes (the coordinator's "copy already current" check depends on it).
+ *
+ * Round 27 (limitation 21): the old `[tool: read #call_N]\ninput: …\n\n[tool
+ * result: read #call_N]\noutput:\n…` form read like a transcript the model
+ * should continue — the real model wrote it as plain assistant TEXT with a
+ * fabricated file body (e2e 41769676548 R9/R11). The record is now one framed
+ * block that names itself executed history, in past-tense prose rather than a
+ * bracketed call header. Historian / FTS never read this text (the surface
+ * walk expands op copies back to their source events).
  */
 export function renderToolRecord(items: readonly ToolRecordItem[]): string {
-  return items
-    .map((item) => {
-      const head = item.kind === "call" ? "tool" : "tool result";
-      const lines = [`[${head}: ${item.toolName}${item.callId ? ` #${item.callId}` : ""}]`];
-      if (item.input) lines.push(`input: ${JSON.stringify(item.input)}`);
-      if (item.kind === "result" && item.output !== undefined && item.output.length > 0) lines.push(`output:\n${item.output}`);
-      return lines.join("\n");
-    })
-    .join("\n\n");
+  const lines: string[] = [TOOL_RECORD_OPEN];
+  for (const item of items) {
+    const who = `${item.toolName}${item.callId ? ` (id ${item.callId})` : ""}`;
+    const input = item.input ? ` with input ${JSON.stringify(item.input)}` : "";
+    if (item.kind === "call") {
+      lines.push(`- called ${who}${input}`);
+    } else if (item.output !== undefined && item.output.length > 0) {
+      lines.push(`- ${who}${input} returned:`, item.output);
+    } else {
+      lines.push(`- ${who}${input} returned no output`);
+    }
+  }
+  lines.push(TOOL_RECORD_CLOSE);
+  return lines.join("\n");
 }
 
 /**
