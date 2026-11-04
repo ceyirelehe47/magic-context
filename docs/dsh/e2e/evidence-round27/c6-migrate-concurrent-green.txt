@@ -1,0 +1,12 @@
+(pass) migrate-legacy (round 26 P0-1) > scan is read-only and classifies every legacy row exactly [309.09ms]
+(pass) migrate-legacy (round 26 P0-1) > apply: one transaction, nothing deleted, unique facts injectable, cancelled fact stays cancelled, FTS re-indexed, compartments flagged [244.77ms]
+(pass) migrate-legacy (round 26 P0-1) > apply is idempotent [256.45ms]
+(pass) migrate-legacy (round 26 P0-1) > round 27b C6: two concurrent applies planned from the same scan — the second (stale) plan is refused and changes nothing [265.17ms]
+(pass) migrate-legacy (round 26 P0-1) > an aborted apply rolls back completely (single transaction) [264.30ms]
+(pass) migrate-legacy (round 26 P0-1) > backup → apply → restore reproduces the pre-migration DB [302.23ms]
+(pass) migrate-legacy (round 26 P0-1) > apply → restore → apply within the same second: the second backup gets its own file (e2e 41774795839 M5) [327.37ms]
+(pass) migrate-legacy (round 26 P0-1) > empty DB and missing DB: no error, nothing to do [220.49ms]
+(pass) migrate-legacy (round 26 P0-1) > CLI: scan/dry-run write nothing; --apply backs up, migrates and prints the rollback; --restore verifies [364.12ms]
+(pass) migrate-legacy (round 26 P0-1) > stripInjectedBlocks keeps real text and drops unclosed blocks to the end [0.13ms]
+ 10 pass
+ 0 fail

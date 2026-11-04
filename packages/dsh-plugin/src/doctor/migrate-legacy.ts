@@ -43,6 +43,8 @@
  *                   `dsh_legacy_migration_log`. Idempotent: handled rows carry
  *                   `metadata_json.dshLegacyMigration`, stripped FTS rows no
  *                   longer match, flagged compartments are not re-flagged.
+ *                   A plan made before another apply committed is refused
+ *                   whole (exit 4, nothing applied; round 27b C6).
  *   --restore <f>   copy a backup back over the DB (live DSH/OpenCode/Pi
  *                   processes refuse it unless `--force`), keep a pre-restore
  *                   safety copy, and verify the restored digest equals the
@@ -597,6 +599,13 @@ export function applyLegacyMigration(
         case "memory-archive-polluted": {
           const before = readMemory.get(op.id) as Record<string, unknown> | null;
           if (before == null) throw new Error(`memory #${op.id} vanished since the scan`);
+          // Round 27b (C6): the scan skips rows that carry the migration
+          // marker, so a marked row here means the plan is stale (another
+          // apply committed after this plan was made) — refuse the whole run
+          // rather than overwrite the first run's previousStatus / journal.
+          if (migrationMeta(before)?.dshLegacyMigration !== undefined) {
+            throw new Error(`memory #${op.id} changed since the scan (already migrated by another run)`);
+          }
           const meta = withMigrationMeta(before.metadata_json, {
             runId,
             action: op.kind === "memory-archive-duplicate" ? op.reason : "polluted",
@@ -621,6 +630,10 @@ export function applyLegacyMigration(
             .prepare("SELECT rowid AS rowid, session_id, message_ordinal, message_id, role, content FROM message_history_fts WHERE rowid = ?")
             .get(op.rowid) as Record<string, unknown> | null;
           if (before == null) throw new Error(`fts row ${op.rowid} vanished since the scan`);
+          if (injectedMarkersIn(String(before.content ?? "")).length === 0) {
+            // Round 27b (C6): already stripped by another run — stale plan.
+            throw new Error(`fts row ${op.rowid} changed since the scan (already stripped by another run)`);
+          }
           const cleaned = stripInjectedBlocks(String(before.content ?? ""));
           if (cleaned.length === 0) {
             db.prepare("DELETE FROM message_history_fts WHERE rowid = ?").run(op.rowid);
@@ -890,7 +903,23 @@ export async function runMigrateLegacy(argv: readonly string[], io: MigrateCliIo
       return 0;
     }
     const backup = backupDatabase(db, dbPath);
-    const result = applyLegacyMigration(db, ops);
+    let result: ApplyResult;
+    try {
+      result = applyLegacyMigration(db, ops);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/since the scan/.test(message)) throw error;
+      // Round 27b (C6): a concurrent apply committed between this run's scan
+      // and its transaction. Nothing of this run landed (one transaction).
+      lines.push(
+        "",
+        `refused: the database changed after this run's scan (${message}); nothing was applied by this run.`,
+        "Another migrate-legacy --apply probably ran at the same time. Re-run the scan to see what is left.",
+        `backup taken before the attempt: ${backup.path}`,
+      );
+      emit({ mode, scan, ops, applied: null, refused: "stale-plan", error: message, backup }, lines);
+      return 4;
+    }
     const sugg = recompSuggestions(db);
     const integrity = integrityCheck(db);
     lines.push(
