@@ -274,6 +274,27 @@ function safeThreshold(
   }
 }
 
+/**
+ * Round 28 (adapter scan): fail-open catches on the pre-step path stay
+ * fail-open but are no longer silent — one log line per distinct message per
+ * process (a failure that repeats every step must not flood the log).
+ */
+const reportedPlaneFailures = new Set<string>();
+const MAX_REPORTED_PLANE_FAILURES = 256;
+function reportPlaneFailureOnce(log: ((message: string) => void) | undefined, what: string, error: unknown): void {
+  if (log === undefined) return;
+  const message = error instanceof Error ? error.message : String(error);
+  const key = `${what}\0${message}`;
+  if (reportedPlaneFailures.has(key)) return;
+  if (reportedPlaneFailures.size >= MAX_REPORTED_PLANE_FAILURES) reportedPlaneFailures.clear();
+  reportedPlaneFailures.add(key);
+  try {
+    log(`[magic-context] ${what} failed (fail-open): ${message}`);
+  } catch {
+    // logging must never break the pre-step chain
+  }
+}
+
 /** Fire the historian pass when the context-pressure trigger fires. */
 function maybeFireHistorian(
   historian: NonNullable<ContextPlaneDeps["historian"]>,
@@ -281,6 +302,7 @@ function maybeFireHistorian(
   sessionId: string,
   agent: Agent,
   directory: string | undefined,
+  log?: (message: string) => void,
 ): void {
   try {
     const readPressure = historian.readPressure ?? (() => undefined);
@@ -361,8 +383,9 @@ function maybeFireHistorian(
         ...(inputTokens > 0 ? { lastInputTokens: inputTokens } : {}),
         ...(responseTime > prevResponseTime ? { lastResponseTime: responseTime } : {}),
       });
-    } catch {
-      // 持久化失败不可破坏 pre-step 链（fail-open）。
+    } catch (error) {
+      // 持久化失败不可破坏 pre-step 链（fail-open）；round 28: but say so once.
+      reportPlaneFailureOnce(log, "session_meta pressure persistence", error);
     }
     if (fires) {
       historian.fire({
@@ -373,8 +396,10 @@ function maybeFireHistorian(
         contextWindow,
       });
     }
-  } catch {
-    // The trigger must never break the pre-step chain (fail-open).
+  } catch (error) {
+    // The trigger must never break the pre-step chain (fail-open); round 28:
+    // a silent catch here meant the historian never ran again, untraced.
+    reportPlaneFailureOnce(log, "historian trigger", error);
   }
 }
 
@@ -867,7 +892,7 @@ export async function runContextPlaneStep(
     // background compartment pass (fire-and-forget; never blocks the step).
     const historian = deps.historian;
     if (historian !== undefined && historian.config?.enabled !== false) {
-      maybeFireHistorian(historian, db, canonicalSessionId, agent, deps.directory);
+      maybeFireHistorian(historian, db, canonicalSessionId, agent, deps.directory, deps.log);
     }
   } catch (error) {    deps.log?.(
       `[magic-context] context plane failed (fail-open): ${error instanceof Error ? error.message : String(error)}`,
@@ -914,7 +939,7 @@ export async function awaitHistorianAtTurnEnd(
     if (bootstrap.kind !== "ok") return;
     const sessionId = deps.host.canonicalKey(agent.id);
     if (historian.drain.pending(sessionId) === 0) {
-      maybeFireHistorian(historian, bootstrap.db, sessionId, agent, deps.directory);
+      maybeFireHistorian(historian, bootstrap.db, sessionId, agent, deps.directory, deps.log);
     }
     if (historian.drain.pending(sessionId) === 0) return;
     const result = await historian.drain.drain(awaitMs, sessionId);

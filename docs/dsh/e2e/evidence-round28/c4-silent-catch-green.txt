@@ -1,0 +1,5 @@
+src/agent/context-plane-silent-errors.test.ts  2 pass  0 fail 
+src/agent/context-plane.test.ts  7 pass  0 fail 
+src/agent/historian-drain.test.ts  8 pass  0 fail 
+src/agent/injected-history.test.ts  1 pass  0 fail 
+src/agent/pressure-dense.test.ts  4 pass  0 fail 
