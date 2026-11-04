@@ -1,0 +1,8 @@
+# C5b message-index per-step cost (local, bun 1.4.4, sandbox CPU; ~400-char messages)
+# source: DSH scheduleDshMessageHistoryIndex = function source + getRevision only -> core reads the FULL history view once per new revision (fallbackSnapshot), writes only the new rows. Off the step (core defer); poll granularity 10 ms included in per-step.
+N=200 readMessages median 1.7 ms | initial index 13 ms | per-step (+2 msgs) median 10.5 ms
+N=1000 readMessages median 10.5 ms | initial index 74 ms | per-step (+2 msgs) median 17.9 ms
+N=4000 readMessages median 44.8 ms | initial index 270 ms | per-step (+2 msgs) median 44.7 ms
+N=200 readMessages median 6.4 ms | initial index 51 ms | per-step (+2 msgs) median 10.3 ms
+N=1000 readMessages median 25.1 ms | initial index 220 ms | per-step (+2 msgs) median 34.5 ms
+N=4000 readMessages median 59.0 ms | initial index 448 ms | per-step (+2 msgs) median 73.6 ms

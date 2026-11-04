@@ -1,0 +1,34 @@
+import { it } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { Agent } from "@deepseek-ai/dsh-agent";
+import { Session, SessionId } from "@deepseek-ai/dsh-session";
+import { createAssistantMessage, createUserMessage } from "../compat/dsh-0.1/session";
+import { createTestDb } from "../test-utils";
+import { historyContentProvider } from "./historian-wiring";
+import { scheduleDshMessageHistoryIndex } from "./message-index";
+
+const filler = "lorem ipsum dolor sit amet consectetur ".repeat(10);
+it("bench", async () => {
+  const db = await createTestDb(join(mkdtempSync(join(tmpdir(), "bench-")), "c.db"));
+  for (const N of [200, 1000, 4000]) {
+    const id = `b${N}`;
+    const session = Session.create(SessionId(id), undefined, { id: SessionId(id), version: 4, createdAt: Date.now(), isSeeded: false, cwd: "/tmp/p" } as never);
+    const say = (role: "user" | "assistant", text: string) => session.append(role === "user" ? "user/message" : "assistant/message",
+      role === "user" ? (createUserMessage({ content: [{ type: "text", text }], source: { kind: "user" } }) as never)
+        : ({ turn: 1, step: 1, message: createAssistantMessage({ content: [{ type: "text", text }], provider: "p", model: "m", source: { kind: "model" } as never } as never) } as never), { surfaceOp: "append" });
+    for (let i = 0; i < N / 2; i++) { say("user", `q${i} ${filler}`); say("assistant", `a${i} ${filler}`); }
+    const agent = { id, session, options: {} } as unknown as Agent;
+    const key = `dsh:x:${id}`;
+    const t = [];
+    for (let r = 0; r < 5; r++) { const s = performance.now(); historyContentProvider(agent, key).readMessages(); t.push(performance.now() - s); }
+    // full reconcile then per-step incremental
+    const wait = async (n: number) => { for (let k = 0; k < 600; k++) { const row = db.prepare("SELECT last_indexed_ordinal n FROM message_history_index WHERE session_id=?").get(key) as {n:number}|null; if ((row?.n ?? 0) >= n) return; await Bun.sleep(10); } throw new Error("timeout"); };
+    let s = performance.now(); scheduleDshMessageHistoryIndex(db, key, agent); await wait(N); const first = performance.now() - s;
+    const steps: number[] = [];
+    for (let r = 0; r < 5; r++) { say("user", `new${r} ${filler}`); say("assistant", `ok${r}`); s = performance.now(); scheduleDshMessageHistoryIndex(db, key, agent); await wait(N + 2 * (r + 1)); steps.push(performance.now() - s); }
+    const med = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)]!.toFixed(1);
+    console.log(`N=${N} readMessages median ${med(t)} ms | initial index ${first.toFixed(0)} ms | per-step (+2 msgs) median ${med(steps)} ms`);
+  }
+}, 120000);
