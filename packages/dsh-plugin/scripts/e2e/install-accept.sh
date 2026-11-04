@@ -57,27 +57,30 @@ for l in open(sys.argv[1], errors="replace"):
   TMAGIC="$(grep -c '^\[magic-context\]' "$OUT/turn-$s.log" 2>/dev/null || true)"
   TFENCE="$(grep -ci 'schema' "$OUT/turn-$s.log" 2>/dev/null || true)"
 }
-# Round 28b: compatibility lane (dsh-install input dsh_version). On a DSH other
-# than the pinned DSH_PINNED, doctor's exact-version pin check FAILs by design;
-# when that is the ONLY FAIL line the step's doctor rc counts as 0 and the step
-# records doctorPin=1 (install-accept-check.py reports it as A0 WARN). On the
-# pinned version nothing changes.
+# Round 29: a tarball DECLARES the DSH releases it supports in its peers
+# (HEAD: 0.2.1-rc.5 || 0.2.2-alpha.3; dsh.2: 0.2.1-rc.5 only), judged by
+# dsh-declared.py the way DSH's plugin manager judges them. A tarball that
+# declares the running DSH gets NO exemption and its doctor must exit 0.
+# Round 28b evaluation lane, now ONLY for a tarball that leaves the running DSH
+# out (e.g. dsh.2 on 0.2.2-alpha.3): the plugin manager rejects it unless the
+# profile holds DSH's exact-version exemption, so install_tgz grants it
+# (allow-<step>.log) and, when doctor's version line is its ONLY FAIL, the
+# step's doctor rc counts as 0 and the step records doctorPin=1. A0 reports
+# both and FAILs if the HEAD tarball ever needs either.
+declares() { python3 "$HERE/dsh-declared.py" "$1" "${DSH_VERSION:-}" >> "$OUT/declared.log" 2>&1; }
+CUR_TGZ=""
 PIN_ONLY=0
 DRC=0
-doctor_rc() { # doctor_rc <log> <rc>  -> sets DRC and PIN_ONLY (no subshell)
+doctor_rc() { # doctor_rc <log> <rc>  -> sets DRC and PIN_ONLY (no subshell); judged for CUR_TGZ
   PIN_ONLY=0; DRC="$2"
-  if [[ "$2" -ne 0 && -n "${DSH_PINNED:-}" && "${DSH_VERSION:-}" != "$DSH_PINNED" ]] \
+  if [[ "$2" -ne 0 && -n "${DSH_VERSION:-}" ]] && ! declares "$CUR_TGZ" \
      && grep -q '^\[FAIL\] DSH version$' "$1" && [[ "$(grep '^\[FAIL\]' "$1" | grep -vc '^\[FAIL\] DSH version$')" == "0" ]]; then
     PIN_ONLY=1; DRC=0
   fi
 }
 
 install_tgz() { # install_tgz <tgz> <step>
-  # Round 28b compatibility lane: on a non-pinned DSH the plugin manager rejects
-  # the package (its peers pin the exact DSH) unless the profile holds DSH's
-  # exact-version exemption; grant it for this tarball's version first (the
-  # step records exempt=1, A0 reports it). Pinned DSH: unchanged.
-  if [[ -n "${DSH_PINNED:-}" && "${DSH_VERSION:-}" != "$DSH_PINNED" ]]; then
+  if [[ -n "${DSH_VERSION:-}" ]] && ! declares "$1"; then
     local v; v="$(tar -xzOf "$1" package/package.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
     (cd "$OUT" && timeout 60 node "$DSH_BIN" plugin --profile $P allow-version "dsh-magic-context@$v" --dsh-version "$DSH_VERSION" --accept-risk) > "$OUT/allow-$2.log" 2>&1
   fi
@@ -94,7 +97,7 @@ start_mock() {
 
 # --- a: materialise the headless profile from DSH's template, install the OLD tarball
 timeout 60 node "$DSH_BIN" --profile $P --dump-default-config > "$OUT/dump-config.log" 2>&1
-rc_i=$(install_tgz "$OLD" a)
+CUR_TGZ="$OLD"; rc_i=$(install_tgz "$OLD" a)
 start_mock
 CLI setup --profile $P > "$OUT/setup-a.log" 2>&1; rc_s=$?
 CLI doctor --profile $P > "$OUT/doctor-a.log" 2>&1; rc_d=$?; doctor_rc "$OUT/doctor-a.log" "$rc_d"; rc_d=$DRC; pin_a=$PIN_ONLY
@@ -105,7 +108,7 @@ rec step a install "$rc_i" setup "$rc_s" doctor "$rc_d" doctorPin "$pin_a" versi
   mock "$(head -c 120 "$OUT/mock.log")"
 
 # --- b: upgrade to NEW
-rc_i=$(install_tgz "$NEW" b)
+CUR_TGZ="$NEW"; rc_i=$(install_tgz "$NEW" b)
 CLI setup --profile $P > "$OUT/setup-b.log" 2>&1; rc_s=$?
 CLI doctor --profile $P > "$OUT/doctor-b.log" 2>&1; rc_d=$?; doctor_rc "$OUT/doctor-b.log" "$rc_d"; rc_d=$DRC; pin_b=$PIN_ONLY
 ver=$(CLI --version 2>/dev/null | tail -n 1)
@@ -124,7 +127,7 @@ rec step c setup "$rc_s" doctor "$rc_d" doctorPin "$pin_c" doctorDisabled "$(gre
   tagsBefore "$tags_before" tags "$(dbq 'select count(*) from tags')"
 
 # --- d: roll back to OLD (re-enabled)
-rc_i=$(install_tgz "$OLD" d)
+CUR_TGZ="$OLD"; rc_i=$(install_tgz "$OLD" d)
 CLI setup --profile $P > "$OUT/setup-d.log" 2>&1; rc_s=$?
 CLI doctor --profile $P > "$OUT/doctor-d.log" 2>&1; rc_d=$?; doctor_rc "$OUT/doctor-d.log" "$rc_d"; rc_d=$DRC; pin_d=$PIN_ONLY
 ver=$(CLI --version 2>/dev/null | tail -n 1)

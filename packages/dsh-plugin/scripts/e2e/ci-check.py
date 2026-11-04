@@ -87,6 +87,16 @@ MC_SESSION_TABLES = ("compartments", "compartment_history_versions", "dsh_contex
                      "dsh_pressure_truncations", "historian_runs")
 
 
+
+def _dsh_declared(version: str) -> bool:
+    """Round 29: does packages/dsh-plugin/package.json declare this DSH? (dsh-declared.py)"""
+    import importlib.util
+    here = Path(__file__).resolve().parent
+    spec = importlib.util.spec_from_file_location("dsh_declared", here / "dsh-declared.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.declared(mod.load(str(here.parent.parent / "package.json")), version)[0]
+
 def events(path: Path):
     if not path.exists():
         return []
@@ -385,12 +395,13 @@ def check_r17(c, out: Path, runs):
     else:
         c.add("U5", False, "/ctx-status text agrees with the DB and the live host", st)
     doc = (out / "doctor-after.txt").read_text(errors="replace") if (out / "doctor-after.txt").exists() else ""
-    # Round 28b compatibility lane: on a DSH other than the pinned one, doctor's
-    # exact-version pin check FAILs by design (rc 1). U6 then requires that this
-    # is the ONLY FAIL line; on the pinned DSH it is unchanged (rc 0, no FAIL).
-    pinned, running = os.environ.get("DSH_PINNED", ""), os.environ.get("DSH_VERSION", "")
+    # Round 29: on a DSH the package declares (0.2.1-rc.5, 0.2.2-alpha.3) U6 is
+    # strict (rc 0, no FAIL). Only on an UNDECLARED DSH (round 28b evaluation
+    # lane, dsh_version input) doctor's version line FAILs by design (rc 1), and
+    # U6 then requires that this is the ONLY FAIL line.
+    running = os.environ.get("DSH_VERSION", "")
     fails = [l for l in doc.splitlines() if l.startswith("[FAIL]")]
-    pin_only = bool(pinned) and running != pinned and fails == ["[FAIL] DSH version"] and "rc=1" in doc
+    pin_only = bool(running) and not _dsh_declared(running) and fails == ["[FAIL] DSH version"] and "rc=1" in doc
     c.add("U6", ("rc=0" in doc and "FAIL" not in doc) or pin_only,
           "doctor after all runs: rc 0, no FAIL" + (f" (DSH {running}: only the version pin FAILs)" if pin_only else ""), doc[-300:])
 

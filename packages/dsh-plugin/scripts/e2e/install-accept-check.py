@@ -33,14 +33,19 @@ ok_d = I("d", "install") == 0 and I("d", "setup") == 0 and I("d", "doctor") == 0
 fenced = I("d", "install") == 0 and I("d", "schemaLines") > 0 and not ok_d
 add("A4", True if ok_d else ("warn" if fenced else False),
     "roll back to dsh.2: data readable (turn runs, rows kept) — or an explicit schema refusal (WARN, documented)", d)
-# A0 (round 28b compatibility lane): doctor's exact DSH version pin was the only
-# FAIL in these steps (install-accept.sh counted their doctor rc as 0). Never on
-# the pinned DSH; WARN = the adapter is not certified for this DSH version.
+# A0 (round 29; lane from 28b): which steps needed DSH's exact-version
+# exemption (allow-<step>.log) or had doctor's DSH version line as their only
+# FAIL (doctorPin=1). install-accept.sh does either ONLY for a tarball that
+# does not declare the running DSH. PASS = no step needed either; WARN = only
+# the OLD release's steps (a, d: dsh.2 predates the declaration); FAIL = a
+# HEAD step (b, c) needed one, i.e. HEAD does not declare this DSH.
 pin = [k for k in "abcd" if I(k, "doctorPin") == 1]
 exempt = sorted(p.name for p in out.glob("allow-*.log"))
-add("A0", True if not pin and not exempt else "warn",
-    "pinned DSH: no exemption, doctor clean; other DSH: only doctor's version pin failed and the install needed DSH's exact-version exemption",
-    {"pinOnlySteps": pin, "exemptions": exempt})
+head_needed = [k for k in pin if k in "bc"] + [e for e in exempt if e in ("allow-b.log", "allow-c.log")]
+add("A0", False if head_needed else (True if not pin and not exempt else "warn"),
+    "HEAD declares this DSH: no exemption and a clean doctor on the HEAD steps (b, c); "
+    "an exemption / version-line-only doctor FAIL is allowed only for the old dsh.2 steps (a, d) off its declared rc.5",
+    {"pinOnlySteps": pin, "exemptions": exempt, "headNeeded": head_needed})
 print("| id | result | check | detail |\n|---|---|---|---|")
 for r in rows:
     print("| %s | %s | %s | %s |" % r)

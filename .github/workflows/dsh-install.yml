@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       dsh_version:
-        description: "Optional @deepseek-ai/dsh version for the accept job (round 28b compatibility lane, e.g. 0.2.2-alpha.3). Empty = DSH_PINNED."
+        description: "Optional @deepseek-ai/dsh version for the accept job. Declared (round 29): 0.2.1-rc.5 (default), 0.2.2-alpha.3 — HEAD gets no exemption there; an exemption is granted only to a tarball that does not declare the DSH (the old dsh.2 off rc.5). Empty = DSH_PINNED."
         type: string
         default: ""
 
@@ -22,7 +22,7 @@ permissions:
 
 env:
   BUN_VERSION: 1.4.2
-  DSH_PINNED: 0.2.1-rc.5 # the adapter's compat contract (src/doctor/env.ts DSH_COMPAT_EXPECTED_VERSION)
+  DSH_PINNED: 0.2.1-rc.5 # default DSH (src/doctor/env.ts DSH_COMPAT_EXPECTED_VERSION); declared: DSH_COMPAT_SUPPORTED_VERSIONS
   DSH_VERSION: ${{ inputs.dsh_version || '0.2.1-rc.5' }}
 
 jobs:

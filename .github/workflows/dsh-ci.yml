@@ -6,7 +6,8 @@
 #           filtered install → typecheck:dsh → core typecheck → dsh-plugin
 #           tests → adapter-api tests → contracts:dsh
 #   e2e     ONLY on workflow_dispatch with input e2e=true (spends model quota):
-#           real @deepseek-ai/dsh 0.2.1-rc.5 headless + OpenCode Go
+#           real @deepseek-ai/dsh 0.2.1-rc.5 (or input dsh_version, e.g. the
+#           declared 0.2.2-alpha.3) headless + OpenCode Go
 #           (secret OPENCODE_API_KEY): worker self-test (normal + 1500 ms
 #           timeout), one session over three processes (§N§ identity across
 #           restarts), round 17 real-use scenarios (main session past the 65 %
@@ -34,7 +35,7 @@ on:
         type: string
         default: ""
       dsh_version:
-        description: "Optional @deepseek-ai/dsh version for the e2e job (round 28b compatibility lane, e.g. 0.2.2-alpha.3). Empty = the pinned DSH_PINNED below. Only the e2e job uses it; checks always run on the repo lockfile's DSH."
+        description: "Optional @deepseek-ai/dsh version for the e2e job. Declared releases (round 29): 0.2.1-rc.5 (default) and 0.2.2-alpha.3 run with no exemption; any other version is the evaluation lane (exact-version exemption). Empty = DSH_PINNED below. Only the e2e job uses it; checks always run on the repo lockfile's DSH."
         type: string
         default: ""
 
@@ -47,7 +48,7 @@ concurrency:
 
 env:
   BUN_VERSION: 1.4.2 # packageManager: bun@1.4.2
-  DSH_PINNED: 0.2.1-rc.5 # the adapter's compat contract (src/doctor/env.ts DSH_COMPAT_EXPECTED_VERSION)
+  DSH_PINNED: 0.2.1-rc.5 # default DSH (src/doctor/env.ts DSH_COMPAT_EXPECTED_VERSION); declared: DSH_COMPAT_SUPPORTED_VERSIONS
   DSH_VERSION: ${{ inputs.dsh_version || '0.2.1-rc.5' }}
 
 jobs:
@@ -162,29 +163,32 @@ jobs:
           bun run build
           bash scripts/e2e/install-profile.sh test headless
           source scripts/e2e/env.sh
-          # Round 28b compatibility lane: the plugin's peers pin the exact DSH
-          # (0.2.1-rc.5), so another DSH skips the bundle at boot ("incompatible
-          # with dsh …") unless the profile holds DSH's own exact-version
-          # exemption. Grant it only on a non-pinned DSH (explicit risk
-          # acceptance, DSH's documented route); the pinned lane is unchanged.
-          if [ "$DSH_VERSION" != "$DSH_PINNED" ]; then
+          # Round 29: the plugin declares the exact DSH releases in its peers
+          # (0.2.1-rc.5 || 0.2.2-alpha.3; src/doctor/env.ts
+          # DSH_COMPAT_SUPPORTED_VERSIONS). On a declared DSH the bundle boots
+          # with no exemption and doctor must exit 0, exactly as on rc.5.
+          # Round 28b evaluation lane, kept ONLY for a DSH the package does not
+          # declare (dsh_version input, e.g. 0.2.2-rc.1): DSH skips such a
+          # bundle at boot unless the profile holds its exact-version
+          # exemption, so grant it (explicit risk acceptance) and tolerate
+          # doctor's version line as the single FAIL.
+          if python3 scripts/e2e/dsh-declared.py package.json "$DSH_VERSION"; then
+            echo "DSH_DECLARED=1" >> "$GITHUB_ENV"
+          else
+            echo "DSH_DECLARED=0" >> "$GITHUB_ENV"
             ver=$(node -p "require('./package.json').version")
             node "$DSH_BIN" plugin --profile test allow-version "dsh-magic-context@$ver" --dsh-version "$DSH_VERSION" --accept-risk
-            echo "::warning::DSH $DSH_VERSION: exact-version exemption granted for dsh-magic-context@$ver (peers pin $DSH_PINNED)"
+            echo "::warning::DSH $DSH_VERSION is not declared by dsh-magic-context@$ver: exact-version exemption granted (evaluation lane)"
           fi
           node dist/cli.js setup --profile test
-          # Round 28b: on the pinned DSH doctor must exit 0 (unchanged). On an
-          # evaluated other version (input dsh_version) its exact-version pin
-          # check FAILs by design; that one line alone is tolerated (warning),
-          # any other FAIL still stops the job.
           set +e
           node dist/cli.js doctor --profile test | tee "$RUNNER_TEMP/doctor.txt"
           rc=${PIPESTATUS[0]}
           set -e
           if [ "$rc" -ne 0 ]; then
             other=$(grep '^\[FAIL\]' "$RUNNER_TEMP/doctor.txt" | grep -vc '^\[FAIL\] DSH version$' || true)
-            if [ "$DSH_VERSION" != "$DSH_PINNED" ] && [ "$other" = "0" ]; then
-              echo "::warning::doctor: only the exact DSH version pin failed (installed $DSH_VERSION, pinned $DSH_PINNED)"
+            if ! python3 scripts/e2e/dsh-declared.py package.json "$DSH_VERSION" >/dev/null && [ "$other" = "0" ]; then
+              echo "::warning::doctor: only the DSH version line failed (installed $DSH_VERSION is not declared)"
             else
               exit "$rc"
             fi
@@ -213,7 +217,7 @@ jobs:
           set +e
           python3 scripts/e2e/ci-check.py check "$CI_OUT"
           rc=$?
-          echo "DSH $DSH_VERSION (pinned $DSH_PINNED)" >> "$GITHUB_STEP_SUMMARY"
+          echo "DSH $DSH_VERSION (default $DSH_PINNED; declared by the package: ${DSH_DECLARED:-?})" >> "$GITHUB_STEP_SUMMARY"
           cat "$CI_OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"
           exit $rc
 
