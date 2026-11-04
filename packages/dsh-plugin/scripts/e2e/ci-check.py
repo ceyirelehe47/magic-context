@@ -1760,10 +1760,10 @@ def check(out: Path) -> int:
     # record as its own TEXT (old `[tool: read #call_N]` form, or the new
     # framed record). Model behaviour: WARN with the hits (the run that shows
     # it also fails its own scenario check, e.g. R9/R11 in 41769676548).
-    # Round 28: the fold is one prose note ("Magic Context note: earlier in this
-    # session …") + tagged result text; a model TEXT carrying that note is the
-    # same imitation, so it is detected too (all three generations stay detected).
-    imit = re.compile(r"(?m)^\s*\[tool( result)?: [\w.-]+ #|<recorded-tool-activity|^\s*- called [\w.-]+ \(id |Magic Context note: earlier in this session")
+    # Round 28: the fold is one prose note ("Magic Context note: these tool calls
+    # already ran …") + tagged result text; a model TEXT carrying a Magic note is
+    # the same imitation, so it is detected too (all generations stay detected).
+    imit = re.compile(r"(?m)^\s*\[tool( result)?: [\w.-]+ #|<recorded-tool-activity|^\s*- called [\w.-]+ \(id |Magic Context note: ")
     hits = []
     for p in sorted(out.glob("*.log")):
         for t in visible_texts(p):
@@ -1771,6 +1771,30 @@ def check(out: Path) -> int:
                 hits.append({"run": p.stem, "chars": len(t), "head": (t or "")[:160]})
     c.add("I1", True if not hits else "warn",
           "no model TEXT imitates the folded tool record (limitation 21)", hits or "none")
+
+    # --- I2 (round 28): the model re-reading the SAME file again and again in one
+    # run. Round 28 v1's fold note named no targets ("1 file was read") and the
+    # model, unable to tell its own read had finished, re-read one file 5-8
+    # times (41828791422 t-1 p32.txt x8, h-a2 outbox.ts x8; 41828796915 pnew-02
+    # every file x5), which then failed T1/T2/U7/U8/U10 through max-tokens.
+    # Baseline before the change: at most 2 reads of one file per run
+    # (41792968900). WARN (model behaviour) when any run reads one file >= 4 times.
+    rereads = []
+    for p in sorted(out.glob("*.log")):
+        counts = {}
+        for ev in events(p):
+            if ev.get("type") != "tool_call" or ev.get("tool") != "read":
+                continue
+            inp = ev.get("input") or {}
+            fp = str(inp.get("file_path") or inp.get("filePath") or inp.get("path") or "")
+            if fp:
+                key = fp.rsplit("/", 1)[-1]
+                counts[key] = counts.get(key, 0) + 1
+        worst = {k: v for k, v in counts.items() if v >= 4}
+        if worst:
+            rereads.append({"run": p.stem, "reads": worst})
+    c.add("I2", True if not rereads else "warn",
+          "no run re-reads one file 4+ times (round 28: the fold note must say what already ran)", rereads or "none")
 
     # --- P: process hygiene
     left = (out / "leftover-procs.txt").read_text().split() if (out / "leftover-procs.txt").exists() else []

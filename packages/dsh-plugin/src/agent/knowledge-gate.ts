@@ -428,7 +428,7 @@ export async function maybeInjectKnowledge(
           // input / result template (the round 26 `[tool: …]` and round 27
           // `- called todowrite (id …)` records were both imitated by the
           // model). The todo JSON itself is the content the model needs.
-          const todoText = `${TOOL_RECORD_NOTE_PREFIX}the todo list was set with todowrite. It is restored here after a context fold as reference text (still current); update it by calling todowrite normally.\n\n${String(part.state.output)}`;
+          const todoText = `${TOOL_RECORD_NOTE_PREFIX}the todo list as last set with todowrite, restored after a context fold as plain reference text (still current; update it by calling todowrite normally).\n\n${String(part.state.output)}`;
           const todoSource: MagicMessageSource = {
             kind: "magic-context",
             plugin: "magic-context",

@@ -1403,47 +1403,61 @@ export interface ToolRecordItem {
 }
 
 /** Fixed start of the one-line prose note that replaces a folded tool arc. */
-export const TOOL_RECORD_NOTE_PREFIX = "Magic Context note: earlier in this session ";
+export const TOOL_RECORD_NOTE_PREFIX = "Magic Context note: ";
+/** Start of a folded tool arc's note (round 28 v2). */
+export const TOOL_RECORD_NOTE_HEAD = `${TOOL_RECORD_NOTE_PREFIX}these tool calls already ran and finished`;
 
 const FILE_READ_TOOLS = new Set(["read", "view", "cat", "read_file"]);
-const FILE_EDIT_TOOLS = new Set(["edit", "write", "multiedit", "patch", "apply_patch", "write_file", "edit_file"]);
-const SEARCH_TOOLS = new Set(["grep", "glob", "find", "fs_search", "search", "ls", "list"]);
+const FILE_WRITE_TOOLS = new Set(["write", "write_file"]);
+const FILE_EDIT_TOOLS = new Set(["edit", "multiedit", "patch", "apply_patch", "edit_file"]);
 const COMMAND_TOOLS = new Set(["bash", "shell", "exec", "run", "command"]);
-const FETCH_TOOLS = new Set(["webfetch", "web_fetch", "fetch", "websearch", "web_search"]);
+/** At most this many calls are named in one note; the rest are counted. */
+const MAX_NAMED_CALLS = 12;
+const MAX_TARGET_CHARS = 120;
 
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
+function shortTarget(value: string): string {
+  const oneLine = value.replace(/\s+/g, " ").trim();
+  return oneLine.length > MAX_TARGET_CHARS ? `${oneLine.slice(0, MAX_TARGET_CHARS - 1)}…` : oneLine;
 }
 
-/** Past-tense phrase for `n` calls of one tool class ("3 files were read"). */
-function activityPhrase(tool: string, n: number): string {
+function stringField(input: Record<string, unknown> | null | undefined, ...keys: string[]): string | undefined {
+  if (!input) return undefined;
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Past-tense prose for one call: WHAT was done and on what ("read the file
+ * src/a.ts", "ran the command `ls -la`"). The target is needed: without it the
+ * model cannot tell its own read finished and re-reads the file (round 28 v1,
+ * e2e 41828791422 t-1: the same file read 8 times in one turn).
+ */
+function describeCall(item: ToolRecordItem): string {
+  const tool = item.toolName;
   const t = tool.toLowerCase();
-  const was = n === 1 ? "was" : "were";
-  if (FILE_READ_TOOLS.has(t)) return `${plural(n, "file", "files")} ${was} read`;
-  if (FILE_EDIT_TOOLS.has(t)) return `${plural(n, "file", "files")} ${was} edited`;
-  if (SEARCH_TOOLS.has(t)) return `${plural(n, "search", "searches")} ${was} run`;
-  if (COMMAND_TOOLS.has(t)) return `${plural(n, "command", "commands")} ${was} run`;
-  if (FETCH_TOOLS.has(t)) return `${plural(n, "web lookup", "web lookups")} ${was} made`;
-  if (t === "todowrite" || t === "todoread") return n === 1 ? "the todo list was updated" : `the todo list was updated ${n} times`;
-  return `the ${tool} tool was used ${n === 1 ? "once" : `${n} times`}`;
-}
-
-/** Class key so `edit` + `write` count together as "files edited". */
-function activityClass(tool: string): string {
-  const t = tool.toLowerCase();
-  if (FILE_READ_TOOLS.has(t)) return "read";
-  if (FILE_EDIT_TOOLS.has(t)) return "edit";
-  if (SEARCH_TOOLS.has(t)) return "search";
-  if (COMMAND_TOOLS.has(t)) return "bash";
-  if (FETCH_TOOLS.has(t)) return "fetch";
-  if (t === "todowrite" || t === "todoread") return "todowrite";
-  return tool;
-}
-
-function joinPhrases(phrases: readonly string[]): string {
-  if (phrases.length <= 1) return phrases[0] ?? "";
-  if (phrases.length === 2) return `${phrases[0]} and ${phrases[1]}`;
-  return `${phrases.slice(0, -1).join(", ")} and ${phrases[phrases.length - 1]}`;
+  const input = item.input;
+  const path = stringField(input, "file_path", "filePath", "path");
+  if (FILE_READ_TOOLS.has(t)) return path ? `read the file ${shortTarget(path)}` : "read a file";
+  if (FILE_WRITE_TOOLS.has(t)) return path ? `wrote the file ${shortTarget(path)}` : "wrote a file";
+  if (FILE_EDIT_TOOLS.has(t)) return path ? `edited the file ${shortTarget(path)}` : "edited a file";
+  if (COMMAND_TOOLS.has(t)) {
+    const command = stringField(input, "command", "cmd");
+    return command ? `ran the command \`${shortTarget(command).replace(/`/g, "'")}\`` : "ran a command";
+  }
+  if (t === "grep" || t === "fs_search" || t === "search") {
+    const pattern = stringField(input, "pattern", "query");
+    return pattern ? `searched for "${shortTarget(pattern)}"${path ? ` in ${shortTarget(path)}` : ""}` : "ran a search";
+  }
+  if (t === "glob" || t === "ls" || t === "list") {
+    const pattern = stringField(input, "pattern");
+    return pattern ? `listed files matching "${shortTarget(pattern)}"` : path ? `listed ${shortTarget(path)}` : "listed files";
+  }
+  if (t === "todowrite" || t === "todoread") return "updated the todo list";
+  const query = stringField(input, "query", "url", "prompt", "pattern", "name");
+  return query ? `used ${tool} on "${shortTarget(query)}"` : `used ${tool}`;
 }
 
 /**
@@ -1453,49 +1467,50 @@ function joinPhrases(phrases: readonly string[]): string {
  * bytes (the coordinator's "copy already current" check depends on it).
  *
  * Round 28 (limitations 21/22): any rendering with a call header, a call id,
- * the input and a result block gave the model a template it continued as
+ * the input JSON and a result block gave the model a template it continued as
  * plain assistant TEXT with an invented result — the round 26 `[tool: read
  * #call_N]` form (e2e 41769676548, 41777488761) and the round 27 framed
  * `<recorded-tool-activity>` / `- called read (id …) with input {…}` /
  * `returned:` form (41792968900 h-a4, copied verbatim, note included). The
- * fold now shows ONE past-tense prose line counting what was done ("earlier in
- * this session 3 files were read and 1 command was run …, use ctx_expand"),
+ * fold is now ONE prose sentence naming what was done, in order ("these tool
+ * calls already ran and finished …: read the file a.ts; ran the command `ls`"),
  * then each result's text exactly as Magic holds it (its §N§ tag first, so
- * tags / ctx_reduce / pressure truncation are unchanged). No call, id or input
- * is rendered; those stay in the DSH event log, which historian, FTS and
- * ctx_expand read through the surface walk (op copies expand back to their
- * source events), so none of them lose anything.
+ * tags / ctx_reduce / pressure truncation are unchanged). No call id, no input
+ * JSON, no per-call header lines; the call id and full input stay in the DSH
+ * event log, which historian, FTS and ctx_expand read through the surface walk
+ * (op copies expand back to their source events), so none of them lose
+ * anything.
+ *
+ * v1 of this round named no targets ("1 file was read") and the model, unable
+ * to tell that its own read had finished, re-read the same file up to 8 times
+ * in one turn (e2e 41828791422 / 41828796915 T1, U7, U8, U10) — the targets are
+ * back, as prose.
  */
 export function renderToolRecord(items: readonly ToolRecordItem[]): string {
-  // Count calls per activity class, once per call id (a call and its result
-  // are two items); items without an id count individually.
-  const counts = new Map<string, { tool: string; ids: Set<string>; anonymous: number }>();
+  // One entry per call (a call and its result are two items with one id).
+  const calls: Array<{ item: ToolRecordItem; hasResult: boolean }> = [];
+  const byId = new Map<string, { item: ToolRecordItem; hasResult: boolean }>();
   const outputs: string[] = [];
   for (const item of items) {
-    const cls = activityClass(item.toolName);
-    let entry = counts.get(cls);
-    if (entry === undefined) {
-      entry = { tool: item.toolName, ids: new Set(), anonymous: 0 };
-      counts.set(cls, entry);
-    }
-    if (item.callId) entry.ids.add(item.callId);
-    else if (item.kind === "call") entry.anonymous += 1;
-    else if (!items.some((other) => other !== item && other.kind === "call" && !other.callId && activityClass(other.toolName) === cls)) {
-      entry.anonymous += 1;
+    const known = item.callId ? byId.get(item.callId) : undefined;
+    if (known !== undefined) {
+      if (item.kind === "result") known.hasResult = true;
+      if (known.item.input == null && item.input != null) known.item = { ...known.item, input: item.input };
+    } else {
+      const entry = { item, hasResult: item.kind === "result" };
+      calls.push(entry);
+      if (item.callId) byId.set(item.callId, entry);
     }
     if (item.kind === "result" && item.output !== undefined && item.output.length > 0) outputs.push(item.output);
   }
-  const phrases: string[] = [];
-  for (const [, entry] of counts) {
-    const n = entry.ids.size + entry.anonymous;
-    if (n > 0) phrases.push(activityPhrase(entry.tool, n));
-  }
-  const did = phrases.length > 0 ? joinPhrases(phrases) : "some tools were used";
-  const merged =
+  const named = calls.slice(0, MAX_NAMED_CALLS).map(({ item, hasResult }) => `${describeCall(item)}${hasResult ? "" : " (no result recorded)"}`);
+  const more = calls.length > MAX_NAMED_CALLS ? `; and ${calls.length - MAX_NAMED_CALLS} more` : "";
+  const list = named.length > 0 ? `${named.join("; ")}${more}` : "some tools were used";
+  const where =
     outputs.length > 0
-      ? "those tool calls already finished and their results were merged into this context as the reference text below"
-      : "those tool calls already finished and their results were merged into this context";
-  const note = `${TOOL_RECORD_NOTE_PREFIX}${did}. ${merged[0]!.toUpperCase()}${merged.slice(1)}. ctx_expand shows the original calls and full results; call tools normally for any new work.`;
+      ? "their results are merged below as plain reference text, in this order"
+      : "no result text is shown here";
+  const note = `${TOOL_RECORD_NOTE_HEAD}; ${where}: ${list}. Do not run them again to get the same result; ctx_expand shows the original calls in full; call tools normally for new work.`;
   return [note, ...outputs].join("\n\n");
 }
 

@@ -124,9 +124,12 @@ describe("folded tool calls render as one past-tense prose summary, no call / id
       // No structured call lines at all: no call id, no input JSON.
       expect(folded!).not.toContain("call_7");
       expect(folded!).not.toContain('"filePath"');
-      expect(folded!).not.toContain("/w/p19.txt");
-      // One past-tense prose summary that points at ctx_expand.
-      expect(folded!).toMatch(/earlier in this session 1 file was read\b/);
+      expect(folded!).not.toMatch(/^\s*\{.*\}\s*$/m);
+      // One past-tense prose sentence that NAMES what was done (round 28 v2: v1's
+      // bare "1 file was read" made the model re-read the same file up to 8 times
+      // in one turn, e2e 41828791422 t-1) and points at ctx_expand.
+      expect(folded!).toMatch(/these tool calls already ran and finished; their results are merged below as plain reference text, in this order: read the file \/w\/p19\.txt\./);
+      expect(folded!).toMatch(/Do not run them again/);
       expect(folded!).toContain("ctx_expand");
       expect(folded!.match(/Magic Context note/g)!.length).toBe(1);
       // The tagged result text is kept (the model still needs what it read), §N§ first.
@@ -138,7 +141,7 @@ describe("folded tool calls render as one past-tense prose summary, no call / id
     });
   });
 
-  it("the renderer is pure: one summary line counting calls by kind, results verbatim, no ids or inputs", () => {
+  it("the renderer is pure: one prose line naming each call's target in order, results verbatim, no ids or input JSON", () => {
     const items = [
       { kind: "call" as const, toolName: "read", callId: "call_1", input: { filePath: "/a" } },
       { kind: "call" as const, toolName: "read", callId: "call_2", input: { filePath: "/b" } },
@@ -152,27 +155,34 @@ describe("folded tool calls render as one past-tense prose summary, no call / id
     const text = renderToolRecord(items);
     expect(renderToolRecord(items)).toBe(text);
     const first = text.split("\n")[0]!;
-    expect(first).toMatch(/^Magic Context note: earlier in this session 3 files were read and 1 command was run\./);
-    expect(first).toContain("ctx_expand");
+    expect(first).toBe(
+      "Magic Context note: these tool calls already ran and finished; their results are merged below as plain reference text, in this order: read the file /a; read the file /b; read the file /c; ran the command `ls`. Do not run them again to get the same result; ctx_expand shows the original calls in full; call tools normally for new work.",
+    );
     expect(text.match(/Magic Context note/g)!.length).toBe(1);
-    for (const out of ["\u00a73\u00a7 body a", "\u00a74\u00a7 body b", "\u00a76\u00a7 x.txt"]) expect(text).toContain(out);
+    expect(text).toBe([first, "\u00a73\u00a7 body a", "\u00a74\u00a7 body b", "\u00a76\u00a7 x.txt"].join("\n\n"));
     for (const id of ["call_1", "call_2", "call_3", "call_4"]) expect(text).not.toContain(id);
-    expect(text).not.toContain("/a");
     expect(text).not.toContain('"command"');
+    expect(text).not.toContain('"filePath"');
     expect(text).not.toMatch(/^\[tool|recorded-tool-activity|- called|returned/m);
   });
 
-  it("other tools and calls without a result are counted in plain words", () => {
-    expect(renderToolRecord([{ kind: "call", toolName: "grep", callId: "c1", input: { pattern: "x" } }]).split("\n")[0]).toMatch(
-      /earlier in this session 1 search was run\./,
+  it("other tools, long commands and calls without a result are named in plain words", () => {
+    const one = (item: Parameters<typeof renderToolRecord>[0][number]) => renderToolRecord([item]).split("\n")[0]!;
+    expect(one({ kind: "call", toolName: "grep", callId: "c1", input: { pattern: "TODO", path: "src" } })).toContain(
+      'no result text is shown here: searched for "TODO" in src (no result recorded).',
     );
-    expect(
-      renderToolRecord([
-        { kind: "call", toolName: "edit", callId: "c1", input: {} },
-        { kind: "call", toolName: "write", callId: "c2", input: {} },
-        { kind: "call", toolName: "ctx_note", callId: "c3", input: {} },
-      ]).split("\n")[0],
-    ).toMatch(/earlier in this session 2 files were edited and the ctx_note tool was used once\./);
+    expect(one({ kind: "call", toolName: "edit", callId: "c1", input: { filePath: "/w/x.ts", oldString: "a", newString: "b" } })).toContain(
+      "edited the file /w/x.ts (no result recorded)",
+    );
+    expect(one({ kind: "call", toolName: "ctx_note", callId: "c3", input: {} })).toContain("used ctx_note (no result recorded)");
+    const long = one({ kind: "call", toolName: "bash", callId: "c4", input: { command: `echo ${"x".repeat(300)}\nls` } });
+    expect(long).toMatch(/ran the command `echo x+…`/);
+    expect(long.length).toBeLessThan(400);
+    const many = renderToolRecord(
+      Array.from({ length: 15 }, (_, i) => ({ kind: "call" as const, toolName: "read", callId: `c${i}`, input: { file_path: `f${i}.txt` } })),
+    ).split("\n")[0]!;
+    expect(many).toContain("read the file f11.txt (no result recorded); and 3 more.");
+    expect(many).not.toContain("f12.txt");
   });
 
   it("historian / FTS / ctx_expand input is unchanged by the fold format: raw messages before and after the landed replace are identical (call id + input included)", async () => {

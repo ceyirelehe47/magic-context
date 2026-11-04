@@ -1,0 +1,6 @@
+(fail) folded tool calls render as one past-tense prose summary, no call / id / input lines (round 28, limitations 21/22) > the landed copy carries no imitable call template: no `[tool: …]`, no framed record, no call id, no input [497.19ms]
+(fail) folded tool calls render as one past-tense prose summary, no call / id / input lines (round 28, limitations 21/22) > the renderer is pure: one prose line naming each call's target in order, results verbatim, no ids or input JSON [0.99ms]
+(fail) folded tool calls render as one past-tense prose summary, no call / id / input lines (round 28, limitations 21/22) > other tools, long commands and calls without a result are named in plain words [0.72ms]
+(pass) folded tool calls render as one past-tense prose summary, no call / id / input lines (round 28, limitations 21/22) > historian / FTS / ctx_expand input is unchanged by the fold format: raw messages before and after the landed replace are identical (call id + input included) [183.12ms]
+ 1 pass
+ 3 fail
