@@ -1,0 +1,362 @@
+{
+ "historyCount": 45,
+ "surfaceCount": 2,
+ "lastCompartmentEnd": 42,
+ "prompt": {
+  "found": true,
+  "historyOrdinal": 35,
+  "coveredBy": "29-42",
+  "onSurface": true,
+  "originSeqs": [
+   157
+  ],
+  "shadowedBy": [
+   216
+  ],
+  "onRawSurface": false,
+  "inSummaryText": true
+ },
+ "files": [
+  {
+   "file": "p27.txt",
+   "checksum": "P19-27-AA15A2",
+   "resultSeq": 162,
+   "historyOrdinal": 37,
+   "coveredBy": "29-42",
+   "onSurface": false,
+   "originSeqs": [
+    162
+   ],
+   "shadowedBy": [
+    216
+   ],
+   "onRawSurface": false,
+   "inSummaryText": false
+  },
+  {
+   "file": "p28.txt",
+   "checksum": "P19-28-6B2FF9",
+   "resultSeq": 169,
+   "historyOrdinal": 38,
+   "coveredBy": "29-42",
+   "onSurface": false,
+   "originSeqs": [
+    169
+   ],
+   "shadowedBy": [
+    216
+   ],
+   "onRawSurface": false,
+   "inSummaryText": false
+  },
+  {
+   "file": "p29.txt",
+   "checksum": "P19-29-1B8737",
+   "resultSeq": 176,
+   "historyOrdinal": 39,
+   "coveredBy": "29-42",
+   "onSurface": false,
+   "originSeqs": [
+    176
+   ],
+   "shadowedBy": [
+    216
+   ],
+   "onRawSurface": false,
+   "inSummaryText": false
+  },
+  {
+   "file": "p30.txt",
+   "checksum": "P19-30-0903C6",
+   "resultSeq": 183,
+   "historyOrdinal": 40,
+   "coveredBy": "29-42",
+   "onSurface": false,
+   "originSeqs": [
+    183
+   ],
+   "shadowedBy": [
+    216
+   ],
+   "onRawSurface": false,
+   "inSummaryText": false
+  },
+  {
+   "file": "p31.txt",
+   "checksum": "P19-31-2789DE",
+   "resultSeq": 190,
+   "historyOrdinal": 41,
+   "coveredBy": "29-42",
+   "onSurface": false,
+   "originSeqs": [
+    190
+   ],
+   "shadowedBy": [
+    216
+   ],
+   "onRawSurface": false,
+   "inSummaryText": false
+  }
+ ],
+ "compactions": [
+  {
+   "seq": 47,
+   "shadowedSeqs": [
+    8,
+    9,
+    10,
+    11,
+    23,
+    25,
+    31
+   ],
+   "summaryCompartmentRanges": [
+    [
+     1,
+     5
+    ]
+   ],
+   "summaryMaxEnd": 5
+  },
+  {
+   "seq": 60,
+   "shadowedSeqs": [
+    58,
+    38
+   ],
+   "summaryCompartmentRanges": [
+    [
+     1,
+     5
+    ],
+    [
+     6,
+     8
+    ]
+   ],
+   "summaryMaxEnd": 8
+  },
+  {
+   "seq": 74,
+   "shadowedSeqs": [
+    72,
+    45,
+    51
+   ],
+   "summaryCompartmentRanges": [
+    [
+     1,
+     5
+    ],
+    [
+     6,
+     8
+    ],
+    [
+     9,
+     10
+    ]
+   ],
+   "summaryMaxEnd": 10
+  },
+  {
+   "seq": 89,
+   "shadowedSeqs": [
+    87,
+    57,
+    64,
+    65
+   ],
+   "summaryCompartmentRanges": [
+    [
+     1,
+     5
+    ],
+    [
+     6,
+     8
+    ],
+    [
+     9,
+     10
+    ],
+    [
+     11,
+     11
+    ]
+   ],
+   "summaryMaxEnd": 11
+  },
+  {
+   "seq": 103,
+   "shadowedSeqs": [
+    101,
+    71,
+    78,
+    79,
+    80
+   ],
+   "summaryCompartmentRanges": [
+    [
+     1,
+     5
+    ],
+    [
+     6,
+     8
+    ],
+    [
+     9,
+     10
+    ],
+    [
+     11,
+     11
+    ],
+    [
+     12,
+     17
+    ]
+   ],
+   "summaryMaxEnd": 17
+  },
+  {
+   "seq": 118,
+   "shadowedSeqs": [
+    116,
+    86,
+    93,
+    94
+   ],
+   "summaryCompartmentRanges": [
+    [
+     1,
+     5
+    ],
+    [
+     6,
+     8
+    ],
+    [
+     9,
+     10
+    ],
+    [
+     11,
+     11
+    ],
+    [
+     12,
+     17
+    ],
+    [
+     18,
+     18
+    ]
+   ],
+   "summaryMaxEnd": 18
+  },
+  {
+   "seq": 144,
+   "shadowedSeqs": [
+    133,
+    100,
+    107,
+    108,
+    109,
+    115,
+    122,
+    123,
+    132,
+    135,
+    136,
+    137
+   ],
+   "summaryCompartmentRanges": [
+    [
+     1,
+     5
+    ],
+    [
+     6,
+     8
+    ],
+    [
+     9,
+     10
+    ],
+    [
+     11,
+     11
+    ],
+    [
+     12,
+     17
+    ],
+    [
+     18,
+     18
+    ],
+    [
+     19,
+     28
+    ]
+   ],
+   "summaryMaxEnd": 28
+  },
+  {
+   "seq": 216,
+   "shadowedSeqs": [
+    153,
+    152,
+    155,
+    156,
+    157,
+    158,
+    164,
+    171,
+    178,
+    185,
+    192,
+    206,
+    208,
+    209
+   ],
+   "summaryCompartmentRanges": [
+    [
+     1,
+     5
+    ],
+    [
+     6,
+     8
+    ],
+    [
+     9,
+     10
+    ],
+    [
+     11,
+     11
+    ],
+    [
+     12,
+     17
+    ],
+    [
+     18,
+     18
+    ],
+    [
+     19,
+     28
+    ],
+    [
+     29,
+     42
+    ]
+   ],
+   "summaryMaxEnd": 42
+  }
+ ]
+}

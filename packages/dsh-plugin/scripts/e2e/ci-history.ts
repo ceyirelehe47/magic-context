@@ -15,6 +15,21 @@
 //     `ctx_expand(start, end)` of that compartment shows it.
 // plus every compaction/summary event (shadowed seqs, whether its summary text
 // carries a compartment whose range reaches the read turn).
+//
+// Round 33 (R14 structural basis): per item also
+//   - originSeqs: the raw event(s) that carry it (the read's tool/result; for
+//     the prompt every un-derived user/message holding the needle);
+//   - shadowedBy: every compaction/summary whose `shadowedSeqs` contains one of
+//     originSeqs or a node derived from them through `sourceEventSeqs` (a Magic
+//     surface-replace copy of the read, the checkpoint that folded that copy, …)
+//     — i.e. the native compaction structurally folded the original message;
+//   - onRawSurface: the text is on the surface OUTSIDE every summary node's own
+//     text (a summary node = a user/message whose sourceEventSeqs name a
+//     compaction/summary, or a copy whose sources are all summary nodes). The
+//     summary texts are cut out of each surface message before probing, so a
+//     checkpoint that restates a checksum no longer counts as "still visible",
+//     while any raw message (or Magic injection) that still carries it does;
+//   - inSummaryText: the text occurs in a summary node's own text (diagnostic).
 // Prints JSON only; no secrets are read.
 import { readFileSync } from "node:fs";
 import { decodeSeqRanges, Session, SessionId } from "@deepseek-ai/dsh-session";
@@ -61,13 +76,58 @@ const coveredBy = (ordinal: number | null): string | null => {
   const c = compartments.find((x) => x.start_message <= ordinal && ordinal <= x.end_message);
   return c ? `${c.start_message}-${c.end_message}` : null;
 };
-const locate = (probe: string) => {
+// Round 33: structural fold evidence (see header).
+const summaryEventSeqs = new Set(events.filter((e) => e.type === "compaction/summary").map((e) => e.seq));
+const sourcesOf = (e: Ev): number[] => (Array.isArray(e.sourceEventSeqs) ? (e.sourceEventSeqs as number[]) : []);
+const summaryNodeSeqs = new Set<number>();
+for (const e of events) {
+  // events are in seq order, so a copy's sources are classified before it
+  const src = sourcesOf(e);
+  if (e.type !== "user/message" || src.length === 0) continue;
+  if (src.some((s) => summaryEventSeqs.has(s))) summaryNodeSeqs.add(e.seq);
+  else if (src.every((s) => summaryNodeSeqs.has(s))) summaryNodeSeqs.add(e.seq);
+}
+const contentTexts = (e: Ev): string[] => {
+  const d = e.data as { content?: Array<{ text?: unknown }> } | undefined;
+  return (d?.content ?? []).map((p) => (typeof p.text === "string" ? p.text : "")).filter((t) => t.length > 0);
+};
+// Each summary node's text without a leading Magic "§N§ " tag; cut out of the
+// JSON form of every surface message before the raw-surface probe.
+const summaryTexts = [...summaryNodeSeqs]
+  .flatMap((seq) => contentTexts(events.find((e) => e.seq === seq)!))
+  .map((t) => t.replace(/^\s*\u00a7\d+\u00a7\s*/, ""))
+  .filter((t) => t.length > 0)
+  .sort((a, b) => b.length - a.length);
+const cut = (json: string): string =>
+  summaryTexts.reduce((acc, t) => acc.split(JSON.stringify(t).slice(1, -1)).join("\u0000"), json);
+const derivedFrom = new Map<number, number[]>();
+for (const e of events) for (const s of sourcesOf(e)) derivedFrom.set(s, [...(derivedFrom.get(s) ?? []), e.seq]);
+const closure = (roots: number[]): Set<number> => {
+  const seen = new Set<number>(roots);
+  const todo = [...roots];
+  while (todo.length > 0) for (const n of derivedFrom.get(todo.pop()!) ?? []) if (!seen.has(n)) (seen.add(n), todo.push(n));
+  return seen;
+};
+const summaryEvents = events.filter((e) => e.type === "compaction/summary");
+const structural = (probe: string, originSeqs: number[]) => {
+  const reach = closure(originSeqs);
+  return {
+    originSeqs,
+    shadowedBy: summaryEvents
+      .filter((e) => ((e.data as { shadowedSeqs?: number[] })?.shadowedSeqs ?? []).some((s) => reach.has(s)))
+      .map((e) => e.seq),
+    onRawSurface: surface.some((m) => cut(textOf(m)).includes(probe)),
+    inSummaryText: summaryTexts.some((t) => t.includes(probe)),
+  };
+};
+const locate = (probe: string, originSeqs: number[]) => {
   const h = history.find((m) => textOf(m).includes(probe));
   const historyOrdinal = h ? h.ordinal : null;
   return {
     historyOrdinal,
     coveredBy: coveredBy(historyOrdinal),
     onSurface: surface.some((m) => textOf(m).includes(probe)),
+    ...structural(probe, originSeqs),
   };
 };
 
@@ -85,7 +145,7 @@ for (const e of events) {
   const path = /e2e-pressure-fixtures\/(p\d+\.txt)/.exec(text)?.[1];
   const checksum = /CHECKSUM: (P19-\d+-[0-9A-F]{6})/.exec(text)?.[1];
   if (!path || !checksum) continue;
-  files.push({ file: path, checksum, resultSeq: e.seq, ...locate(checksum) });
+  files.push({ file: path, checksum, resultSeq: e.seq, ...locate(checksum, [e.seq]) });
 }
 const compactions = events
   .filter((e) => e.type === "compaction/summary")
@@ -106,7 +166,15 @@ console.log(
       historyCount: history.length,
       surfaceCount: surface.length,
       lastCompartmentEnd,
-      prompt: { found: promptEvent !== undefined, ...locate(needle) },
+      prompt: {
+        found: promptEvent !== undefined,
+        ...locate(
+          needle,
+          events
+            .filter((e) => e.type === "user/message" && sourcesOf(e).length === 0 && JSON.stringify(e.data ?? {}).includes(needle))
+            .map((e) => e.seq),
+        ),
+      },
       files,
       compactions,
     },
