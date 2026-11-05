@@ -1,0 +1,386 @@
+# deepseek-harness: dsh-v0.2.2-rc.1 (66491b05e3) -> master (fcc0ad4621), adapter-relevant source diffs
+# git diff dsh-v0.2.2-rc.1 master -- <path>  (vendor/ diff is EMPTY: cordis 4.1.0 / loader 1.1.0 / include 1.1.0 unchanged)
+
+## git diff --stat dsh-v0.2.2-rc.1 master -- vendor/
+(empty)
+
+## packages/subagent/subagent/src/types.ts
+diff --git a/packages/subagent/subagent/src/types.ts b/packages/subagent/subagent/src/types.ts
+index 2a99fef1bd..1786ed8e2e 100644
+--- a/packages/subagent/subagent/src/types.ts
++++ b/packages/subagent/subagent/src/types.ts
+@@ -1,10 +1,8 @@
+ /**
+  * The seam's consumer-facing contracts: request, result, and capability types
+  * for {@link SubagentProvider}, plus the `subagent/start` and `subagent/end`
+- * payloads that plugins and hosts observe. Internal control interfaces belong
+- * with their implementation — the lifecycle observer in `./lifecycle.ts`, the
+- * manager host in `./manager.ts` — so this module stays the published
+- * surface rather than a bag of everything type-shaped.
++ * payloads that plugins and hosts observe. Internal control interfaces, such
++ * as the manager host, belong with their implementation.
+  *
+  * @module @deepseek-ai/dsh-subagent/types
+  */
+@@ -15,7 +13,7 @@ import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
+ import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+ import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+ 
+-/** Identifies one accepted subagent run across its lifecycle event pair. */
++/** Identifies one subagent residency epoch across its lifecycle event pair. */
+ export type SubagentRunId = Branded<'SubagentRunId'>
+ 
+ /**
+@@ -28,15 +26,19 @@ export function SubagentRunId(id: string): SubagentRunId {
+ }
+ 
+ /** One managed child execution and its result delivery policy. */
+-export interface SubagentActivationSpec {
++export interface SubagentActivationSpec extends Omit<SubagentStartRequest, 'label' | 'signal'> {
+   /** Registered backend to use. */
+   readonly provider: string
+   /** Short task label retained in cataloged child membership. */
+   readonly label: string
++  /**
++   * Requested name, unique among the parent's children: 1–32 lower-case
++   * letters, digits, or hyphens starting with a letter, other than `lead`.
++   * Omission selects the first free `agent-N`.
++   */
++  readonly name?: string
+   /** Optional reserved identity for a local child; external backends allocate their own ids. */
+   readonly childId?: SessionId
+-  /** Task, parent, and backend-supported execution options. */
+-  readonly request: Omit<SubagentStartRequest, 'label' | 'signal'>
+   /** Cancellation before publication; callers own later cancellation through dispose. */
+   readonly signal: AbortSignal
+   /** Parent delivery notifies the model; caller delivery only returns the result. Local children always enter the parent catalog. */
+@@ -47,6 +49,11 @@ export interface SubagentActivationSpec {
+ export interface SubagentActivation {
+   /** Stable identity of the child. */
+   readonly childId: SessionId
++  /**
++   * Model-facing name: slash-separated names from the root when every creator
++   * below the root is named, otherwise the child Session id.
++   */
++  readonly name: string
+   /** Accepted inbox message, when the backend has a local inbox. */
+   readonly messageId?: MessageId
+   /**
+@@ -54,20 +61,28 @@ export interface SubagentActivation {
+    * Teardown failures are reported by dispose() without replacing a captured result.
+    */
+   readonly result: Promise<SubagentResult>
+-  /** Stop and release this activation and its owned descendants; rejects on teardown failure. */
++  /** Stop and release only this activation; rejects on teardown failure. */
+   dispose(): Promise<void>
+ }
+ 
++/** Model-facing names of one live tree member and its direct creator. */
++export interface SubagentMemberNames {
++  /** `lead` for the root, the slash-separated path for a named descendant, otherwise the Session id. */
++  readonly self: string
++  /** The direct creator's name by the same rule; absent for the root. */
++  readonly parent?: string
++}
++
+ /**
+- * Authority under which one interrupt request is admitted. `user` carries the
+- * durable direct-parent address a human client presented; `ancestor` carries
+- * the exact live Agent object whose recorded lineage must contain the caller.
++ * Authority under which one interrupt request is admitted. `user` is a trusted
++ * host operation; Remote callers need permission on the target Session before
++ * invoking it. `ancestor` carries an exact live Agent in the target's creation ancestry.
+  */
+ export type SubagentInterruptAuthority =
+-  | { readonly kind: 'user'; readonly parentSessionId: SessionId }
++  | { readonly kind: 'user' }
+   | { readonly kind: 'ancestor'; readonly agent: Agent }
+ 
+-/** Options for one model-authored message between adjacent Agents. */
++/** Options for one model-authored message within a subagent tree. */
+ export interface SubagentSendMessageOptions {
+   /** Caller cancellation, owning the operation only until inbox acceptance. */
+   readonly signal: AbortSignal
+@@ -75,16 +90,18 @@ export interface SubagentSendMessageOptions {
+ 
+ /**
+  * Observe-only identifying detail for a published subagent run, carried by
+- * `subagent/start`. Local and external activations share this payload.
++ * `subagent/start` and `subagent/end`. Local and external activations share it.
+  */
+ export interface SubagentRunInfo {
+-  /** Unique identity shared with the paired terminal event. */
++  /** Unique identity shared by one residency epoch's start/end pair. */
+   readonly runId: SubagentRunId
+   /**
+    * Provider name recorded when the child was first created, retained even
+    * after that provider is unregistered.
+    */
+   readonly provider: string
++  /** Durable direct creator, independent of the live subagent tree root. */
++  readonly parentSessionId: SessionId
+   /** The child agent's id. */
+   readonly id: SessionId
+   /** Whether this activation owns a local Agent, fixed at publication. */
+@@ -95,15 +112,7 @@ export interface SubagentRunInfo {
+  * Observe-only outcome detail for a settled subagent run, carried by
+  * `subagent/end` and paired with one {@link SubagentRunInfo} by `runId`.
+  */
+-export interface SubagentRunEndInfo {
+-  /** Unique identity shared with the paired start event. */
+-  readonly runId: SubagentRunId
+-  /** The same provider name carried by the paired start event. */
+-  readonly provider: string
+-  /** The child agent's id. */
+-  readonly id: SessionId
+-  /** Whether this activation owns a local Agent, fixed at publication. */
+-  readonly local: boolean
++export interface SubagentRunEndInfo extends SubagentRunInfo {
+   /** The terminal stop reason. */
+   readonly stopReason: SubagentResult['stopReason']
+   /**
+@@ -129,9 +138,8 @@ export interface SubagentCapabilities {
+ }
+ 
+ /**
+- * Task and optional capabilities supplied to a backend. startActivation carries
+- * these fields in request while owning its label, cancellation, and delivery
+- * policy separately.
++ * Task and optional capabilities supplied to a backend. The activation spec
++ * shares these task options and defines its own label and cancellation policy.
+  */
+ export interface SubagentStartRequest {
+   /** Initial child directory; relative paths resolve against the parent's current directory. Omitted inherits that directory at start. */
+
+## packages/subagent/subagent/package.json
+diff --git a/packages/subagent/subagent/package.json b/packages/subagent/subagent/package.json
+index 4db1484d56..589ce69ab3 100644
+--- a/packages/subagent/subagent/package.json
++++ b/packages/subagent/subagent/package.json
+@@ -18,10 +18,6 @@
+       "types": "./lib/types/index.d.ts",
+       "default": "./lib/index.js"
+     },
+-    "./internal": {
+-      "types": "./lib/types/internal.d.ts",
+-      "default": "./lib/types/internal.js"
+-    },
+     "./client": {
+       "types": "./lib/types/client.d.ts",
+       "default": "./lib/types/client.js"
+
+## packages/core/agent/src/index.ts
+diff --git a/packages/core/agent/src/index.ts b/packages/core/agent/src/index.ts
+index c93ebbc94d..374be30180 100644
+--- a/packages/core/agent/src/index.ts
++++ b/packages/core/agent/src/index.ts
+@@ -66,8 +66,6 @@ export type AgentSetup = (
+ export interface CreateAgentOptions {
+   /** The live agent/session identity. */
+   readonly sessionId: SessionId
+-  /** Live parent Agent for runtime ownership; omit for a root Agent. */
+-  readonly parentAgent?: Agent
+   /**
+    * Session creation metadata: validated absolute `cwd`, `parentSession`
+    * fork lineage, the `isSeeded` fork marker, the coarse `origin`
+@@ -129,8 +127,6 @@ export interface CreateAgentOptions {
+ export interface ResumeAgentOptions {
+   /** The persisted session id to load and use as the live agent/session identity. */
+   readonly resumeSessionId: SessionId
+-  /** Live parent Agent for runtime ownership; omit for a root Agent. */
+-  readonly parentAgent?: Agent
+   /** Route fallback and output controls; see {@link AgentOptions} for live accessor semantics. */
+   readonly agentOptions?: AgentOptions
+   /** Optional creation-only cancellation signal for persistence load/setup; detached before return. */
+@@ -191,7 +187,7 @@ export interface AgentFactory {
+    * transaction and resulting lifecycle to that owner; it must not infer
+    * ownership from the factory object's registration context.
+    * @param ownerCtx - caller-bound context that owns the transaction and live handle.
+-   * @param options - agent/session identity, configuration, optional live parent, and setup.
++   * @param options - agent/session identity, configuration, and setup.
+    * @returns the owned handle after setup and both creation announcements complete.
+    */
+   createAgent(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle>
+@@ -203,7 +199,7 @@ export interface AgentFactory {
+    * Initialization cleanup and publication follow the same timing as
+    * {@link createAgent}.
+    * @param ownerCtx - caller-bound context that owns load, setup, and the live handle.
+-   * @param options - persisted identity, configuration, optional live parent, and setup.
++   * @param options - persisted identity, configuration, and setup.
+    * @returns the owned handle after setup, both announcements, and loop start complete.
+    */
+   resume(ownerCtx: Context, options: ResumeAgentOptions): Promise<AgentHandle>
+@@ -218,8 +214,6 @@ const DISPOSED_INITIATOR_MESSAGE = 'agent initiator scope is disposed'
+ interface AgentEntry {
+   readonly id: SessionId
+   readonly agent: Agent
+-  /** Runtime creator-agent ownership; independent of durable session lineage. */
+-  readonly owner: Agent | undefined
+   readonly carrier: Scoped<Agent>
+   announced: boolean
+   announcing: boolean
+@@ -410,7 +404,7 @@ export class AgentRegistry extends Service {
+    * agent): this constructs the agent and its session. Rejects if no factory is
+    * registered or creation/setup fails. The resolved {@link AgentHandle} lets
+    * the owner tear down exactly this agent.
+-   * @param options - shared identity, optional live parent, session seed/metadata, and agent options.
++   * @param options - shared identity, session seed/metadata, and agent options.
+    * @returns the handle after setup, rollback-covered publication, and loop start complete.
+    */
+   async create(options: CreateAgentOptions): Promise<AgentHandle> {
+@@ -429,7 +423,7 @@ export class AgentRegistry extends Service {
+    * Load a persisted session and resume an agent on it through the registered
+    * factory. Rejects if no factory is registered; the factory rejects if
+    * session persistence is not configured or persistence/setup fails.
+-   * @param options - persisted identity, optional live parent, configuration, and setup.
++   * @param options - persisted identity, configuration, and setup.
+    * @returns the handle after setup, rollback-covered publication, and loop start complete.
+    */
+   async resume(options: ResumeAgentOptions): Promise<AgentHandle> {
+@@ -447,8 +441,7 @@ export class AgentRegistry extends Service {
+    * (`scopeTarget(agent, agent)`): the subject is the agent in hand, so the
+    * emits are scope-filtered regardless of which context invoked `register`
+    * (calling through `agent.ctx` scopes EFFECTS; dispatch scoping always
+-   * requires passing the carrier). The entry is a runtime root; factory-backed
+-   * creation uses `options.parentAgent` for child ownership. Await the registration before using the agent.
++   * requires passing the carrier). Await registration before using the agent.
+    * @param agent - the already-constructed agent to record in the store.
+    * @returns the awaitable Cordis effect disposer (single-shot; a repeat call
+    *   returns undefined without awaiting an in-flight teardown). Exact
+@@ -461,7 +454,7 @@ export class AgentRegistry extends Service {
+    */
+   register(agent: Agent): ReturnType<Context['effect']> {
+     return this.ctx.effect(async function* (this: AgentRegistry) {
+-      yield this.enter(agent, undefined)
++      yield this.enter(agent)
+       await this.announce(agent, 'startup')
+     }.bind(this), 'agents.register()')
+   }
+@@ -473,15 +466,12 @@ export class AgentRegistry extends Service {
+    * returned detach closure into its pre-installed composite teardown before
+    * calling {@link announce}. Ordinary callers use {@link register}.
+    * @param agent - the prepared, unpublished agent.
+-   * @param owner - explicitly supplied live runtime owner, or
+-   *   undefined for a top-level runtime root. This is runtime ownership, not
+-   *   the resumed session's durable parent lineage.
+    * @returns an idempotent closure that removes this exact entry and emits
+    *   `agent/disposed` with listener failures contained. When called from a
+    *   `agent/created` listener, removal and disposal wait until the serial
+    *   creation dispatch settles.
+    */
+-  enter(agent: Agent, owner: Agent | undefined): () => void {
++  enter(agent: Agent): () => void {
+     const id = agent.id
+     if (id !== agent.session.id) {
+       throw new Error(`agent id "${id}" does not match session id "${agent.session.id}"`)
+@@ -493,7 +483,6 @@ export class AgentRegistry extends Service {
+     const entry: AgentEntry = {
+       id,
+       agent,
+-      owner,
+       carrier,
+       announced: false,
+       announcing: false,
+@@ -592,18 +581,6 @@ export class AgentRegistry extends Service {
+     return this.store.get(id)?.agent
+   }
+ 
+-  /**
+-   * Test whether a live agent was created through one exact parent agent's
+-   * scoped context. Runtime ownership is independent of durable session
+-   * lineage and remains unambiguous when unrelated providers reuse an id.
+-   * @param id - the candidate child agent's shared agent/session id.
+-   * @param owner - the expected runtime creator agent.
+-   * @returns true only while the exact child entry is live under that owner.
+-   */
+-  isOwnedBy(id: SessionId, owner: Agent): boolean {
+-    return this.store.get(id)?.owner === owner
+-  }
+-
+   /**
+    * All live agents, in registration order.
+    * @returns a fresh array; mutating it does not affect the registry.
+@@ -612,18 +589,6 @@ export class AgentRegistry extends Service {
+     return [...this.store.values()].map(entry => entry.agent)
+   }
+ 
+-  /**
+-   * All live top-level agents in registration order. A top-level agent was
+-   * created without an owning agent context; durable session lineage does not
+-   * affect this runtime relation, so a resumed fork may still be a root.
+-   * @returns a fresh array; mutating it does not affect the registry.
+-   */
+-  roots(): Agent[] {
+-    return [...this.store.values()]
+-      .filter(entry => entry.owner === undefined)
+-      .map(entry => entry.agent)
+-  }
+-
+   /** Reject new initiator boundaries while inherited continuations drain. */
+   private closeInitiators(): void {
+     if (this.initiatorState === 'active') this.initiatorState = 'closing'
+
+## packages/core/session/src/known-event-types.ts
+diff --git a/packages/core/session/src/known-event-types.ts b/packages/core/session/src/known-event-types.ts
+index a0f5c17795..466e76bb80 100644
+--- a/packages/core/session/src/known-event-types.ts
++++ b/packages/core/session/src/known-event-types.ts
+@@ -66,6 +66,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
+   'team/member',
+   'team/message/delivered',
+   'team/message/queued',
++  'team/mode',
+   'team/task',
+   'todo/write',
+   'tool-workflow/agent-end',
+
+## packages/boot/plugin-manager/src/index.ts
+diff --git a/packages/boot/plugin-manager/src/index.ts b/packages/boot/plugin-manager/src/index.ts
+index ceb82aac47..b1d696ad74 100644
+--- a/packages/boot/plugin-manager/src/index.ts
++++ b/packages/boot/plugin-manager/src/index.ts
+@@ -522,7 +522,6 @@ export class PluginManager extends TypertRemoteService {
+         catch (error) { platformError = managementError(error) }
+         const error = platformError ?? targetError ?? (enabled ? { code: 'not-bundle' as const } : undefined)
+         bundles.push({ name, official, availability: 'missing', ...catalogMeta, ...target, enabled, installed, optional,
+-          ...offered.listedByDefault === undefined ? {} : { listedByDefault: offered.listedByDefault },
+           ...platformError?.code === 'unsupported-platform' ? { listedByDefault: false } : {},
+           removable: enabled, rows: [], overrides: [],
+           ...error === undefined ? {} : { error } })
+
+## packages/preset/agent-preset-registry/src/session.ts
+diff --git a/packages/preset/agent-preset-registry/src/session.ts b/packages/preset/agent-preset-registry/src/session.ts
+index 3d26773052..fd920bd7c7 100644
+--- a/packages/preset/agent-preset-registry/src/session.ts
++++ b/packages/preset/agent-preset-registry/src/session.ts
+@@ -23,10 +23,9 @@ declare module '@deepseek-ai/dsh-session/types' {
+      * The session's agent preset was chosen after creation, while the session
+      * was still blank. Log-only: it records the composition later turns ran
+      * under, so a resumed or forked session rebuilds the same one instead of
+-     * the header's creation-time value. In a child Session, an occurrence
+-     * before its first own `subagent/descriptor` marks an independent spawn
+-     * selection that cold resume restores instead of joining the parent's
+-     * composition (`dsh-subagent` README, "Restoring child composition").
++     * the header's creation-time value. Subagent restoration reads this saved
++     * selection independently of its creator (`dsh-subagent` README,
++     * "Restoring child composition").
+      */
+     'agent-preset/selected': { agentPreset: string }
+   }
+
+## packages/subagent/subagent/src/index.ts (exported/public members only)
++export type {} from './projection.ts'
++export { ROOT_AGENT_NAME } from './names.ts'
++  protected async [Service.init](): Promise<void> {
+-  protected async [Service.init](): Promise<void> {
+-  async waitForChildren(parent: Agent): Promise<boolean> {
++  rootOf(caller: Agent): Agent {
++  namesOf(agent: Agent): SubagentMemberNames {
++  async resolveName(caller: Agent, name: string, signal: AbortSignal): Promise<SessionId> {
++  async waitForTreeWork(root: Agent): Promise<boolean> {
+-  async drainChildren(parent: Agent, childIds: readonly SessionId[]): Promise<void> {
+-  listChildren(parentSessionId: SessionId, signal?: AbortSignal): Promise<SubagentCatalogEntry[]> {
+-  interruptByParent(
++  interruptByUser(childSessionId: SessionId): SubagentInterruptReceipt {
+-  list(): string[] {
++  private assertProviderCurrent(provider: SubagentProvider): void {

@@ -7,7 +7,7 @@ adapter layer). Version `<upstream>-dsh.N`, git tag `dsh/<upstream>-dsh.N`
 (`bun pm pack` in `packages/dsh-plugin`, as `dsh-install.yml` does).
 Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-round*`.
 
-## Unreleased (branch `dsh-integration` after dsh.6, round 31; no tag)
+## Unreleased (branch `dsh-integration` after dsh.6, rounds 31–32; no tag)
 
 - **npm install next to DSH 0.2.2-alpha.3 / 0.2.2-rc.1** no longer fails ERESOLVE: the
   `@deepseek-ai/cordis` / `cordis-plugin-include` peers list what each declared DSH depends on
@@ -17,6 +17,13 @@ Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-roun
 - **ctx_expand** no longer shows Magic's own injected `<session-history>` / `<project-memory>` /
   `<ctx-search-hint>` text as user messages (ordinals unchanged).
 - CI: push job `contracts-dsh` checks typecheck:dsh + contracts:dsh against alpha.3 and rc.1.
+- **Forward compatibility with DSH master (round 32, no new DSH declared):** the Magic worker's
+  subagent activation spec carries its task both nested (`request`, what every declared DSH reads)
+  and flattened (`parent` / `prompt` / `maxDepth`, what deepseek-harness master after 0.2.2-rc.1
+  reads); with the old spec master's `startActivation` threw. The worker has no production
+  caller yet (env-gated self-test only), so no released path changes behaviour.
+- CI: manual evaluation lane `dsh-ref-eval.yml` (released DSH + selected packages built from a
+  deepseek-harness git ref; evaluation only, not a support claim).
 
 ## 0.49.35-dsh.6 (tag `dsh/0.49.35-dsh.6`, round 31, 2026-11-05)
 

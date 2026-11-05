@@ -1,0 +1,15 @@
+# B1 repro (evidence-round28 script) on cordis 4.1.0 / loader 1.1.0 / include 1.1.0 (= DSH master fcc0ad4621 vendor/, byte-identical source to rc.1), node v22.23.3
+## raw
+update err cannot resolve entry child1
+raw stock file changed: true
+- id: child1
+  name: file:///workspace/work/r32-overlay/b1/w/child.mjs
+  config:
+    a: 1
+- id: self1
+  name: file:///workspace/work/r32-overlay/b1/w/selfunload.mjs
+  disabled: true
+
+## built
+update err cannot resolve entry child1
+built stock file changed: false

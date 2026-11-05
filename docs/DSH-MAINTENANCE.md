@@ -48,6 +48,24 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
+Baseline (round 32, 2026-11-05, same declared DSH set, core v0.49.35; code HEAD `c096b8a68`,
+CI lane `49b83e250`): `dsh-plugin` **643 pass** (+3: subagent-spec), `adapter-api` **15**,
+`contracts:dsh` **105** on rc.5 / alpha.3 / rc.1, typecheck 0 (push 42033679422 @ `fb8621502`,
+42035083245 @ `49b83e250`); real-model `e2e` **135 judged** (unchanged): rc.5 42034146821 133/1/1 (R14 FAIL — checker
+non-vacuity guard tripped by model text, see limitation 27) and rerun 42037652492 @ `49b83e250`
+**133/0/2** (E2, T3 WARN; R14 PASS); rc.1 42034156577 **134/0/1**. No tag,
+no dsh.7 (user decision pending). Round 32 evaluated **DSH master** (deepseek-harness
+`fcc0ad4621`, after 0.2.2-rc.1) — limitation 27, `docs/dsh/e2e/evidence-round32/`:
+
+| area | master vs rc.1 | verdict | evidence |
+|---|---|---|---|
+| cordis peer `~4.0.5 \|\| 4.0.6-alpha.2 \|\| ~4.1.0` | vendor/ diff empty: cordis **4.1.0**, loader 1.1.0, include 1.1.0 = rc.1 (the 11-04 bump `60d811de43` is inside the rc.1 tag) | inside the range; no change, nothing to add | 已复现 (git diff + npm dist-tags; overlay built on 4.1.0) |
+| preset write-back (preset-include write+commit, PresetTree) | loader/include source unchanged; PresetTree unchanged (registry: doc comment only) | holds | 已复现 (round 28 repro on 4.1.0/1.1.0: raw Include rewrites, built entry does not) |
+| setup / doctor / profile patch | app-boot, config-editor unchanged; plugin-manager only drops `listedByDefault` on missing rows; `evaluatePluginCompatibility` unchanged | holds | 已复现 for the unit/fake-DSH tests on the master overlay; real app boot of master 静态推断 |
+| worker activation spec | `SubagentActivationSpec` flattened (`request` removed) | **broke on master → fixed** (`c096b8a68`, both shapes) | 已复现 (real master `startActivation`: TypeError → reaches manager) |
+| contracts / typecheck | dsh-agent drops `parentAgent` / `isOwnedBy` / `roots`; dsh-subagent drops `./internal`, `waitForChildren`, `listChildren`… | none used; 0 errors after the fix, contracts 105 | 已复现 (local + CI `dsh-ref-eval` 42035098645: 643/0) |
+| node engines | `>=24.9.0` unchanged | CI node 24 lane covers it | 静态 |
+
 Baseline (round 31, 2026-11-05, DSH **0.2.1-rc.5 (default) + 0.2.2-alpha.3 + 0.2.2-rc.1
 declared**, core v0.49.35; code HEAD `4a29a6bf5`): `typecheck:dsh` **0 errors** on the lockfile's
 rc.5 **and** (new push-CI job `contracts-dsh`) on alpha.3 and rc.1, `dsh-plugin` **640 pass**
@@ -961,6 +979,10 @@ Triage order when something breaks:
    new core behaviour is intended; fix the adapter when it is not.
 
 ### DSH upgrades
+
+Before a DSH release ships, `dsh-ref-eval.yml` (manual, round 32) checks the adapter against
+selected packages built from a deepseek-harness ref (default `master`) on top of the newest
+released DSH; it is an early warning only and never changes what is declared.
 
 All `@deepseek-ai/*` vocabulary is supposed to live behind
 `src/compat/dsh-0.1/` (name kept for history; it now targets 0.2). A DSH bump:
@@ -2227,6 +2249,50 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     - **Still open:** Y2 / T3 pending the user; full `npm install` of the whole DSH tree + plugin
       not exercised (only the cordis pair); Windows bin shim not exercised (静态推断: npm `.cmd`
       shims call the real path).
+
+27. **Round 32 (2026-11-05) — DSH master evaluation (cordis 4.1.0 / loader 1.1.0); no tag.**
+    - **What master is:** deepseek-harness `master` = `fcc0ad4621` (2026-11-04 16:40 CST) =
+      tag `dsh-v0.2.2-rc.1` (`66491b05e3`) + 811 commits. The 11-04 vendor bump `60d811de43`
+      (cordis 4.1.0, loader 1.1.0, include 1.1.0, schemastery 3.19.0) is an ancestor of the rc.1
+      tag, so master's cordis / loader / include are exactly rc.1's (`git diff … -- vendor/`
+      empty); all master package versions still read 0.2.2-rc.1; `engines.node >=24.9.0`. npm has
+      no nightly / canary / newer prerelease (dsh next = rc.1).
+    - **cordis peer:** 4.1.0 is inside `~4.1.0`; nothing added. A future 4.2 would fall outside
+      it — per the user's rule only add it once a DSH release depends on it (then also the
+      matching plugin-include range).
+    - **Broke on master, fixed (adapter only, 已复现 → green):** `SubagentActivationSpec` is now
+      flattened (`extends Omit<SubagentStartRequest,'label'|'signal'>`; `startActivation` reads
+      `spec.parent` / `prompt` / `maxDepth`). `magicWorkerActivation` sends both shapes
+      (`c096b8a68`); rc.5 / alpha.3 / rc.1 keep reading `spec.request`. Before: real master
+      `startActivation` → `TypeError … spec.parent.id`, typecheck TS2353. The worker has no
+      production caller (only the env-gated self-test), so no released behaviour changed.
+    - **Other master removals the adapter does not use (grep, 静态):** dsh-agent `parentAgent`,
+      `isOwnedBy`, `roots`; dsh-subagent `./internal` export, `waitForChildren`,
+      `drainChildren`, `listChildren`, `interruptByParent`, `list`, `user` interrupt
+      `parentSessionId`; `dispose()` now releases only that activation (worker children have no
+      descendants: `maxDepth` = parent + 1).
+    - **New CI lane (evaluation only):** `dsh-ref-eval.yml` (manual) + `overlay-dsh-ref.sh`:
+      released DSH from npm + listed package dirs compiled from a deepseek-harness ref. A green
+      run is not a support claim (mixed tree, no app boot, no e2e). First run 42033780423 was a
+      false green (tsc OOM hidden by `tee`), fixed in `49b83e250`.
+    - **e2e R14 FAIL on rc.5 (42034146821) — model behaviour, checker guard; not Magic, not
+      core/DSH (judgement 已复现 from the artifact; cause read off the session log; rerun
+      42037652492 on rc.5 @ `49b83e250` PASS, rc.1 42034156577 PASS):** every substantive R14
+      property held (lock-d `/compact` success, nothing lost, the five lock-c reads inside
+      compartment 32-43, summary reaches 43); the only false conjunct is the non-vacuity guard
+      `shadowed` non-empty in `ci-check.py` `check_r23_history`. In lock-c the model called
+      `ctx_memory update id 12` with the five checksums, the historian quoted them in compartment
+      32-43, and `ci-history.ts`'s substring probe found them in lock-d's checkpoint summary, so no
+      item counted as shadowed. Not timing (lock-d 22.7 s, no hold); not `c096b8a68` (only the
+      env-gated worker self-test reaches `magicWorkerActivation`; scenario L has no worker). First
+      R14 FAIL since round 23 (rounds 28–31 all PASS). Assertion not relaxed; possible refinement
+      (judge "shadowed" by `shadowedSeqs` in the history view instead of surface substring
+      absence) left for the user. Evidence: `docs/dsh/e2e/evidence-round32/` section C.
+    - **Risks / open:** master is not a release — the next DSH (0.2.2 / 0.2.3) may change more
+      before it ships, so re-run `dsh-ref-eval` (and add the release to the peers only after
+      it is published and passes install + e2e); vendor packages are not rebuilt by the lane
+      (it reports a version difference instead); real `dsh` app boot / e2e on master not run;
+      the subagent `name` field (optional, `agent-N` default) is not set by the worker.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

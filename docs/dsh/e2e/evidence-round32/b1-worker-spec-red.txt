@@ -1,0 +1,14 @@
+# adapter @ ffd40242a (before fix)
+master fcc0ad4621: startActivation threw TypeError: undefined is not an object (evaluating 'spec.parent.id')
+rc.1 (npm): reached manager.startLocal — top-level (master reads): parent undefined prompt undefined maxDepth undefined; spec.request (rc.x reads): parent parent-1 prompt 1 maxDepth 1; delivery caller
+
+# typecheck dsh-plugin against master dsh-subagent/dsh-agent (before fix)
+$ tsc --noEmit
+src/compat/dsh-0.1/subagent.ts(106,5): error TS2353: Object literal may only specify known properties, and 'request' does not exist in type 'SubagentActivationSpec'.
+
+# unit (subagent-spec.test.ts @ RED 67d6d0a6f)
+(pass) magicWorkerActivation spec shape (released nested request + DSH master flattened) > keeps the nested request read by rc.5 / alpha.3 / rc.1 [0.19ms]
+(fail) magicWorkerActivation spec shape (released nested request + DSH master flattened) > also carries parent / prompt / maxDepth at the top level (DSH master flattened spec) [3.47ms]
+(fail) magicWorkerActivation spec shape (released nested request + DSH master flattened) > adds no field the released spec does not know besides the flattened request copy [2.43ms]
+ 1 pass
+ 2 fail

@@ -1,0 +1,31 @@
+// Round 32 — does the adapter's worker activation spec reach the subagent manager
+// on DSH master (fcc0ad4621, flattened SubagentActivationSpec) and on rc.1
+// (nested `request`)? Runs the REAL SubagentRuntime.prototype.startActivation of
+// each build; only the provider registry / manager / agents service are stubs.
+// usage: bun worker-spec-repro.ts <path to adapter src/compat/dsh-0.1/subagent.ts>
+const adapter = await import(process.argv[2]!);
+const builds: Record<string, string> = {
+  "master fcc0ad4621": "/workspace/work/r32-overlay/node_modules/@deepseek-ai/dsh-subagent/lib/index.js",
+  "rc.1 (npm)": "/workspace/work/r32-overlay/node_modules/@deepseek-ai/dsh-subagent.rc1/lib/index.js",
+};
+for (const [label, path] of Object.entries(builds)) {
+  const { SubagentRuntime } = await import(path);
+  const parent = { id: "parent-1", session: { id: "parent-1", header: { id: "parent-1" } }, options: {} };
+  let reached: Record<string, unknown> | undefined;
+  const self = Object.create(SubagentRuntime.prototype);
+  const provider = { name: "spawn", capabilities: { depthLimit: true, agentOptions: true, outputSchema: true, agentPreset: true }, prepareContinuable: async () => ({}) };
+  const manager = { startLocal: async (spec: Record<string, unknown>) => { reached = spec; return { childId: "c", messageId: "m", result: Promise.resolve({}), dispose: async () => {} }; } };
+  Object.defineProperty(self, "ctx", { value: { get: (n: string) => (n === "agents" ? { get: (id: string) => (id === "parent-1" ? parent : undefined) } : undefined) } });
+  self.expectProvider = () => provider;
+  self.requireManager = () => manager;
+  self.assertProviderCurrent = () => {};
+  const spec = adapter.magicWorkerActivation(parent, { label: "magic-worker", prompt: [{ type: "text", text: "task" }], maxDepth: 1, signal: new AbortController().signal, childId: "child-1" });
+  try {
+    await self.startActivation(spec);
+    type T = { parent?: { id: string }; prompt?: unknown[]; maxDepth?: number } | undefined;
+    const top = reached as T, req = reached?.request as T;
+    console.log(`${label}: reached manager.startLocal — top-level (master reads): parent ${top?.parent?.id} prompt ${top?.prompt?.length} maxDepth ${top?.maxDepth}; spec.request (rc.x reads): parent ${req?.parent?.id} prompt ${req?.prompt?.length} maxDepth ${req?.maxDepth}; delivery ${reached?.delivery}`);
+  } catch (e) {
+    console.log(`${label}: startActivation threw ${(e as Error).name}: ${(e as Error).message}`);
+  }
+}

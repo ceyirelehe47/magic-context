@@ -1,0 +1,27 @@
+== run 42034146821
+ ci-check.py check_r23_history conjuncts (recomputed from the artifact):
+  lock-d rc=0 & /compact done kind=success: True  (t] e2e: /compact at idle: done kind=success elapsedMs=20046 text="Compacted 15 history items (~14440 tokens).")
+  compactions >= 2: 8
+  prompt found: True (onSurface=True, coveredBy=32-43, ordinal=35)
+  files: [('p27.txt', True, '32-43', 37), ('p28.txt', True, '32-43', 38), ('p29.txt', True, '32-43', 39), ('p30.txt', True, '32-43', 40), ('p31.txt', True, '32-43', 41)]
+  shadowed (not onSurface) non-empty: False []
+  lost (neither onSurface nor coveredBy): []
+  last summary reaches: True (summaryMaxEnd=43, lastCompartmentEnd=43)
+  last compaction/summary seq 224: compartments 1-6, 7-8, 9-10, 11-11, 12-17, 18-18, 19-31, 32-43
+  checksums quoted verbatim in that summary text: ['P19-27-AA15A2', 'P19-28-6B2FF9', 'P19-29-1B8737', 'P19-30-0903C6', 'P19-31-2789DE']
+  prompt needle 'read each of these five files' in summary text: True
+== run 42034156577
+ ci-check.py check_r23_history conjuncts (recomputed from the artifact):
+  lock-d rc=0 & /compact done kind=success: True  (t] e2e: /compact at idle: done kind=success elapsedMs=15086 text="Compacted 14 history items (~13914 tokens).")
+  compactions >= 2: 8
+  prompt found: True (onSurface=True, coveredBy=32-42, ordinal=35)
+  files: [('p27.txt', False, '32-42', 37), ('p28.txt', False, '32-42', 38), ('p29.txt', False, '32-42', 39), ('p30.txt', False, '32-42', 40), ('p31.txt', False, '32-42', 41)]
+  shadowed (not onSurface) non-empty: True [37, 38, 39, 40, 41]
+  lost (neither onSurface nor coveredBy): []
+  last summary reaches: True (summaryMaxEnd=42, lastCompartmentEnd=42)
+  last compaction/summary seq 217: compartments 1-5, 6-8, 9-10, 11-11, 12-17, 18-18, 19-31, 32-42
+  checksums quoted verbatim in that summary text: []
+  prompt needle 'read each of these five files' in summary text: True
+
+lock-c model ctx_memory calls: 42034146821 = 1 (update id 12, CONFIG_VALUES, content lists the five checksums); 42034156577 = 0.
+Source: artifacts dsh-e2e of runs 42034146821 / 42034156577 (history-lock.json, lock-d.log, lock-c.log, lock-session.jsonl).

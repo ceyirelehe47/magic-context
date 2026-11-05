@@ -1,0 +1,27 @@
+# adapter @ fix
+master fcc0ad4621: reached manager.startLocal — top-level (master reads): parent parent-1 prompt 1 maxDepth 1; spec.request (rc.x reads): parent parent-1 prompt 1 maxDepth 1; delivery caller
+rc.1 (npm): reached manager.startLocal — top-level (master reads): parent parent-1 prompt 1 maxDepth 1; spec.request (rc.x reads): parent parent-1 prompt 1 maxDepth 1; delivery caller
+
+# typecheck dsh-plugin (src incl. contracts) after fix; overlay: dsh-agent, dsh-subagent, dsh-llm, dsh-session built from master fcc0ad4621 (overlay-dsh-ref.sh), all other @deepseek-ai 0.2.2-rc.1 npm; cordis 4.1.0 / include 1.1.0 = master vendor
+src exit 0
+# test-file typecheck (tsconfig.test.json), same overlay
+test exit 0
+
+# unit @ fix c096b8a68 (subagent-spec + worker + worker-selftest + subagent-depth + subagent-restrict)
+ 26 pass
+ 0 fail
+Ran 26 tests across 5 files. [1305.00ms]
+
+# full dsh-plugin suite on the same master overlay (3 chunks, bun 1.4.4, node 22.23.3 local)
+## master4-suite-nonagent
+ 302 pass
+ 0 fail
+Ran 302 tests across 38 files. [47.05s]
+## master4-suite-agent1
+ 131 pass
+ 0 fail
+Ran 131 tests across 28 files. [86.34s]
+## master4-suite-agent2
+ 210 pass
+ 0 fail
+Ran 210 tests across 29 files. [87.09s]
