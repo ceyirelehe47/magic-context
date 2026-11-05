@@ -62,7 +62,7 @@ user decision; known limitation 28). Push CI 42069775942 @ `7f3e6d451`: `dsh-plu
 `adapter-api` **15**, `contracts:dsh` **105** (rc.5 / alpha.3 / rc.1), typecheck 0, ci-check unit **33**,
 wf-lint 0. Install acceptance from `dsh/0.49.35-dsh.7` (setup is on the install path), **A0–A8 PASS on
 all three**: rc.5 42070371822, alpha.3 42070380440, rc.1 42070387621. Real-model e2e rc.5 (also the
-pre-dsh.8 e2e round 34 recommended): 42070363765 E2E_RESULT. No rc.1 e2e (no 0.2.2-specific change).
+pre-dsh.8 e2e round 34 recommended): 42070363765 **131 / 3 / 1** (R9 / BS1 / R15 = scenario L lock-a 400 s timeout, model re-reads); rerun 42077125011 @ `be560e7e1` **129 / 5 / 1**: R9 FAIL again (lock-a 400 s timeout, this time slow model / summarize responses, 5 of 8 reads done, no re-reads), BS1 / R15 PASS; U7–U10 FAIL (scenario K: the first k-1 model response took ~132 s, past the script's 120 s edit window, so the jsonc was never edited); E2 WARN as always. Neither run is clean; both are model latency / behaviour against the scenarios' time budgets, not round 35 code (待验证; no assertion relaxed). No rc.1 e2e (no 0.2.2-specific change).
 Client bundle after B6 checked: react / jsx-runtime / react-dom / dsh-client-store come from the web
 boot `staticModules` of all three DSH (非缺陷). Evidence: `docs/dsh/e2e/evidence-round35/README.md`.
 
