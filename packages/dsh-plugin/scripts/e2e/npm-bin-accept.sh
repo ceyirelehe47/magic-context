@@ -9,7 +9,9 @@
 #   npm-bin-accept.sh <dsh-dir> <label>=<tgz> [<label>=<tgz> ...]
 #
 # For each tarball: copy <dsh-dir> (a clean npm project holding only
-# @deepseek-ai/dsh@$DSH_VERSION), `npm install <tgz>` in it — NO --force, NO
+# @deepseek-ai/dsh@$DSH_VERSION) — or, for a label ending in `-alone`, start from an
+# EMPTY npm project (the bin probe without the DSH tree, so B4 is visible even where
+# B2-style resolution fails) — `npm install <tgz>` in it — NO --force, NO
 # --legacy-peer-deps — then run the CLI four ways (exec the .bin link, node on the
 # .bin link, node on dist/cli.js, npx). Writes $OUT/npm-bin.jsonl (one JSON line per
 # tarball) + npm-<label>.log; judged by install-accept-check.py (A5, A6, C5, C6).
@@ -21,7 +23,8 @@ mkdir -p "$OUT"
 for spec in "$@"; do
   label="${spec%%=*}"; tgz="$(readlink -f "${spec#*=}")"
   want="$(tar -xzOf "$tgz" package/package.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
-  W="$RUNNER_TEMP/npm-$label"; rm -rf "$W"; cp -a "$DSH_DIR" "$W"
+  W="$RUNNER_TEMP/npm-$label"; rm -rf "$W"
+  if [[ "$label" == *-alone ]]; then mkdir -p "$W"; echo '{"name":"npm-alone","private":true}' > "$W/package.json"; else cp -a "$DSH_DIR" "$W"; fi
   (cd "$W" && timeout 300 npm install --no-audit --no-fund "$tgz") > "$OUT/npm-$label.log" 2>&1; rc=$?
   eres="$(grep -c 'ERESOLVE' "$OUT/npm-$label.log" || true)"
   L="$W/node_modules/.bin/dsh-magic-context"
@@ -32,7 +35,8 @@ for spec in "$@"; do
   vdirect="$( [[ -f "$W/node_modules/dsh-magic-context/dist/cli.js" ]] && run node "$W/node_modules/dsh-magic-context/dist/cli.js" --version || echo '<missing>')"
   vnpx="$( [[ -e "$L" ]] && run npx --no-install dsh-magic-context --version || echo '<missing>')"
   # doctor through the link must say SOMETHING (B4 printed nothing); a missing profile is fine
-  dlines="$( [[ -e "$L" ]] && (cd "$W" && timeout 60 node "$L" doctor --profile npm-accept-none 2>&1 | wc -l) || echo 0)"
+  # (doctor exits non-zero on the missing profile; with pipefail only wc's count is kept)
+  dlines=0; [[ -e "$L" ]] && dlines="$(cd "$W" && { timeout 60 node "$L" doctor --profile npm-accept-none 2>&1 || true; } | wc -l)"
   target="$( [[ -L "$L" ]] && readlink "$L" || echo '')"
   python3 -c 'import json,sys; print(json.dumps(dict(zip(sys.argv[1::2], sys.argv[2::2]))))' \
     label "$label" want "$want" npmRc "$rc" eresolve "$eres" link "$link" linkTarget "$target" \

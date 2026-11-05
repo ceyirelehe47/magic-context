@@ -72,30 +72,34 @@ def bin_ok(o):
     return (str(o.get("link")) == "1" and w != "" and all(o.get(k) == w for k in ("vexec", "vnode", "vdirect", "vnpx"))
             and int(o.get("doctorLines") or 0) > 0)
 h, o_ = npm.get("head", {}), npm.get("old", {})
+ha, oa = npm.get("head-alone", {}), npm.get("old-alone", {})
 add("A5", bool(h) and npm_ok(h),
     "npm install of the HEAD tgz next to the npm-installed DSH, no --force / --legacy-peer-deps (B2)",
     {k: h.get(k) for k in ("npmRc", "eresolve", "dsh", "cordis")})
-add("A6", bool(h) and npm_ok(h) and bin_ok(h),
-    "HEAD bin through npm's node_modules/.bin symlink: exec / node <link> / node dist/cli.js / npx all print the version, doctor prints (B4)",
-    {k: h.get(k) for k in ("link", "linkTarget", "want", "vexec", "vnode", "vdirect", "vnpx", "doctorLines")})
+add("A6", bool(ha) and npm_ok(ha) and bin_ok(ha),
+    "HEAD bin through npm's node_modules/.bin symlink (npm install of the tgz in an empty project, so B2 cannot mask it): exec / node <link> / node dist/cli.js / npx all print the version, doctor prints (B4)",
+    {k: ha.get(k) for k in ("npmRc", "link", "linkTarget", "want", "vexec", "vnode", "vdirect", "vnpx", "doctorLines")})
 add("A7", V("b", "expandStatus") == "completed" and I("b", "expandUser") > 0 and I("b", "expandInjected") == 0,
-    "HEAD tgz ctx_expand over the session's first ordinals shows the user's text and none of Magic's injected <session-history>/<project-memory>/<ctx-search-hint> (B5)",
+    "HEAD tgz ctx_expand over the session's first ordinals shows the user's text and none of Magic's injected <session-history>/<project-memory>/<project-docs>/<user-profile>/<ctx-search-hint> (B5)",
     {k: b.get(k) for k in ("expandStatus", "expandLen", "expandUser", "expandInjected")} | {"memWrite(a)": a.get("memStatus")})
 add("A8", V("b", "binPnpm") == NEWV,
     "HEAD bin through the profile's pnpm .bin shim prints the version", {"binPnpm": V("b", "binPnpm"), "want": NEWV})
 # controls on the OLD tarball (every tag up to dsh.6 predates the B2/B4/B5 fixes)
 if o_:
     add("C5", True if not npm_ok(o_) else "warn",
-        "control: npm install of the OLD tgz (expected ERESOLVE on 0.2.2-alpha.3 / rc.1; on rc.5 the old cordis peer matches, so WARN there just means no B2 on rc.5)",
+        "control: npm install of the OLD tgz next to DSH fails (dsh.6: ERESOLVE on every declared DSH — cordis peer on alpha.3 / rc.1, optional client peers on rc.5 / alpha.3)",
         {k: o_.get(k) for k in ("npmRc", "eresolve", "cordis")})
-    if npm_ok(o_):
-        add("C6", True if o_.get("vnode", "") in ("", "<missing>") and o_.get("vdirect") == o_.get("want") else "warn",
-            "control: OLD bin through the symlink prints nothing under node while dist/cli.js prints the version (B4 visible to the probe)",
-            {k: o_.get(k) for k in ("link", "vexec", "vnode", "vdirect", "vnpx", "doctorLines")})
+if oa:
+    add("C6", True if npm_ok(oa) and oa.get("vnode", "") == "" and oa.get("vdirect") == oa.get("want") else "warn",
+        "control: OLD bin through the symlink (empty project) prints nothing under node while node dist/cli.js prints the version (B4 visible to the probe)",
+        {k: oa.get(k) for k in ("npmRc", "link", "vexec", "vnode", "vdirect", "vnpx", "doctorLines")})
 add("C7", True if V("d", "expandStatus") == "completed" and I("d", "expandInjected") > 0 else "warn",
     "control: OLD tgz ctx_expand in the same session shows the injected text (B5 visible to the probe)",
     {k: d.get(k) for k in ("expandStatus", "expandLen", "expandUser", "expandInjected")})
 print("tarballs: OLD %s, HEAD %s; DSH installed %s" % (OLDV or "?", NEWV or "?", V("meta", "dshInstalled") or "?"))
+x5 = npm.get("x5-noopt")
+if x5:  # experiment, never a verdict: the HEAD manifest without its optional peers (not shipped)
+    print("experiment X5 (HEAD tgz minus optional peers, next to DSH; not shipped, not judged): npmRc %s eresolve %s vnode %r" % (x5.get("npmRc"), x5.get("eresolve"), x5.get("vnode")))
 print("| id | result | check | detail |\n|---|---|---|---|")
 for r in rows:
     print("| %s | %s | %s | %s |" % r)

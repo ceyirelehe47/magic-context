@@ -64,7 +64,7 @@ for l in open(sys.argv[1], errors="replace"):
     elif o.get("type") == "tool_result" and calls.get(o.get("callId")) == sys.argv[2] and res is None:
         r = o.get("result"); t = r if isinstance(r, str) else json.dumps(r, ensure_ascii=False)
         res = {"status": o.get("status"), "len": len(t),
-               "injected": sum(t.count(m) for m in ("<session-history>", "<project-memory>", "<ctx-search-hint>")),
+               "injected": sum(t.count(m) for m in ("<session-history>", "<project-memory>", "<project-docs>", "<user-profile>", "<ctx-search-hint>")),
                "user": t.count("MOCK:a"), "needle": t.count("ACC-RULE-7731")}
 print(json.dumps(res or {"status": "none"}))
 PY
@@ -87,7 +87,11 @@ for l in open(sys.argv[1], errors="replace"):
     if o.get("type")=="session": print(o.get("sessionId","")); break' "$OUT/turn-$s.log")"
   TRC="$(tail -n 1 "$OUT/turn-$s.out" | sed -n 's/^rc=\([0-9]*\).*/\1/p')"
   TMAGIC="$(grep -c '^\[magic-context\]' "$OUT/turn-$s.log" 2>/dev/null || true)"
-  TFENCE="$(grep -ci 'schema' "$OUT/turn-$s.log" 2>/dev/null || true)"
+  # Round 33 (P1-B): only core's schema-fence refusal counts (storage-db.ts "refusing to open … upstream
+  # migration lane vN is newer than this binary supports"); a bare 'schema' also matched ordinary text
+  # (42050299481 turn d: the ctx_expand result quoting ARCHITECTURE.md), which would have turned a broken
+  # rollback into A4 WARN instead of FAIL.
+  TFENCE="$(grep -cE 'refusing to open .*upstream migration lane v[0-9]+ is newer than this binary supports' "$OUT/turn-$s.log" 2>/dev/null || true)"
 }
 # Round 29: a tarball DECLARES the DSH releases it supports in its peers
 # (HEAD: 0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1; dsh.2: 0.2.1-rc.5 only), judged by

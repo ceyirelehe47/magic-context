@@ -53,6 +53,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.ref }}
+      - name: Inspection tools from the dispatched ref (an old tag does not have them)
+        uses: actions/checkout@v4
+        with:
+          path: _tools
+          sparse-checkout: packages/dsh-plugin/scripts/ci
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
@@ -83,7 +88,7 @@ jobs:
           timeout 120 npm pack --pack-destination "$RUNNER_TEMP/npmpack" > "$RUNNER_TEMP/npmpack/npm-pack.log" 2>&1 || { cat "$RUNNER_TEMP/npmpack/npm-pack.log"; exit 1; }
           N="$(ls "$RUNNER_TEMP"/npmpack/dsh-magic-context-*.tgz)"
           rc=0
-          python3 scripts/ci/tarball-inspect.py "$RUNNER_TEMP/tgz/${{ matrix.name }}.tgz" package.json --npm "$N" > "$RUNNER_TEMP/tgz/${{ matrix.name }}-inspect.md" || rc=$?
+          python3 "$GITHUB_WORKSPACE/_tools/packages/dsh-plugin/scripts/ci/tarball-inspect.py" "$RUNNER_TEMP/tgz/${{ matrix.name }}.tgz" package.json --npm "$N" > "$RUNNER_TEMP/tgz/${{ matrix.name }}-inspect.md" || rc=$?
           { echo "node -v $(node -v) · bun $(bun --version) · npm $(npm --version) · GITHUB_SHA $GITHUB_SHA"; cat "$RUNNER_TEMP/tgz/${{ matrix.name }}-inspect.md"; } | tee -a "$GITHUB_STEP_SUMMARY"
           cp "$N" "$RUNNER_TEMP/tgz/${{ matrix.name }}-npm.tgz"
           if [ "${{ matrix.name }}" = head ]; then exit $rc; fi
@@ -144,7 +149,30 @@ jobs:
           bash packages/dsh-plugin/scripts/e2e/install-accept.sh "$RUNNER_TEMP/tgz/old.tgz" "$RUNNER_TEMP/tgz/head.tgz"
       - name: npm path next to the npm-installed DSH (B2 / B4; OLD = control)
         run: |
-          bash packages/dsh-plugin/scripts/e2e/npm-bin-accept.sh "$RUNNER_TEMP/e2e/dsh" head="$RUNNER_TEMP/tgz/head.tgz" old="$RUNNER_TEMP/tgz/old.tgz"
+          # Round 33 experiment (NOT shipped, informational row X5): the HEAD tarball with
+          # its OPTIONAL peers (client-* / react) removed, to see whether they are what
+          # npm trips over next to rc.5 / alpha.3 (42050286656 / 42050293048: ERESOLVE via
+          # the absent optional peer dsh-client-ui-primitives resolved to 0.2.2-rc.1).
+          python3 - "$RUNNER_TEMP/tgz/head.tgz" "$RUNNER_TEMP/tgz/head-noopt.tgz" <<'PY'
+          import io, json, sys, tarfile
+          src, dst = sys.argv[1], sys.argv[2]
+          with tarfile.open(src) as t, tarfile.open(dst, "w:gz") as o:
+              for m in t.getmembers():
+                  data = t.extractfile(m).read() if m.isfile() else None
+                  if m.name == "package/package.json":
+                      p = json.loads(data)
+                      opt = [k for k, v in (p.get("peerDependenciesMeta") or {}).items() if v.get("optional")]
+                      for k in opt:
+                          p["peerDependencies"].pop(k, None)
+                      p.pop("peerDependenciesMeta", None)
+                      data = (json.dumps(p, indent=2) + "\n").encode()
+                      m.size = len(data)
+                      print("X5 variant: removed optional peers", opt)
+                  o.addfile(m, io.BytesIO(data) if data is not None else None)
+          PY
+          bash packages/dsh-plugin/scripts/e2e/npm-bin-accept.sh "$RUNNER_TEMP/e2e/dsh" head="$RUNNER_TEMP/tgz/head.tgz" old="$RUNNER_TEMP/tgz/old.tgz" \
+            head-alone="$RUNNER_TEMP/tgz/head.tgz" old-alone="$RUNNER_TEMP/tgz/old.tgz" \
+            x5-noopt="$RUNNER_TEMP/tgz/head-noopt.tgz"
       - name: Check
         run: |
           set -o pipefail
