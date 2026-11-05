@@ -48,7 +48,51 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 30, 2026-11-05, DSH **0.2.1-rc.5 (default) + 0.2.2-alpha.3 +
+Baseline (round 31, 2026-11-05, DSH **0.2.1-rc.5 (default) + 0.2.2-alpha.3 + 0.2.2-rc.1
+declared**, core v0.49.35; code HEAD `4a29a6bf5`): `typecheck:dsh` **0 errors** on the lockfile's
+rc.5 **and** (new push-CI job `contracts-dsh`) on alpha.3 and rc.1, `dsh-plugin` **640 pass**
+(+7 over round 30's 633: dsh-cordis-peer 3, cli-entry-symlink 3, ctx-expand-injected 1),
+`adapter-api` **15**, `contracts:dsh` **105** on rc.5 / alpha.3 / rc.1, 0 fail
+(push 42010507314 @ `4a29a6bf5`); real-model `e2e` **135 judged** (unchanged).
+Evidence: `docs/dsh/e2e/evidence-round31/` (run table and B1–B5 in its README).
+
+**Release (A, user-approved 2026-11-05 17:38 CST):** `dsh/0.49.35-dsh.6` — annotated tag object
+`521e38d5e2f504e7450ecba7fff17d3fe1416d91` → commit `3988121a92e42c9b546c257d4134930f9768f2d4`
+(round 30 `d2d7c196c` + version bump + RELEASE-NOTES); push CI 42004476390 green (633/15/105);
+declares `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`. The tag's own `dsh-install.yml` has the
+node 24 lane. Install acceptance on the tag: rc.5 42004888402 A0–A4 PASS (node 22.23.4),
+alpha.3 42004900457 and rc.1 42004912274 A0 WARN (old dsh.2 steps a/d only) A1–A4 PASS (node
+24.22.1 / 24.22.2). No GitHub release, no npm, no `v*` tag. Known in dsh.6 and fixed after it on
+the branch (no tag): npm ERESOLVE on the cordis peers next to alpha.3 / rc.1, bin silent through
+an npm/bun `.bin` symlink under node, ctx_expand showing Magic's injected text (limitation 26).
+
+| run id | kind | DSH | node | exemption | PASS / FAIL / WARN | FAIL classification | I1 | I2 | R10 (P / backstop) |
+|---|---|---|---|---|---|---|---|---|---|
+| 42004476390 | push checks @ `3988121a9` (dsh.6) | lockfile rc.5 | — | — | success 633/15/105 | — | | | |
+| 42004888402 | install @ tag dsh.6 | rc.5 | 22.23.4 | none | A0–A4 PASS | — | | | |
+| 42004900457 | install @ tag dsh.6 | alpha.3 | 24.22.1 | old dsh.2 a/d only | A0 WARN, A1–A4 PASS | — | | | |
+| 42004912274 | install @ tag dsh.6 | rc.1 | 24.22.2 | old dsh.2 a/d only | A0 WARN, A1–A4 PASS | — | | | |
+| 42006327584 | push @ `a587b6890` (cancelled by next push) | rc.5 + overlay alpha.3 / rc.1 | 24 | — | contracts-dsh failure (typecheck PASS) | overlay skipped DSH peers (dsh-scope); fixed `b26aa4aad` | | | |
+| 42006585357 | push @ `e443057d6` | same | 24 | — | checks success 636/15/105; contracts-dsh failure (same) | same | | | |
+| 42007145308 | push @ `b26aa4aad` | rc.5; alpha.3; rc.1 | — / 24 | — | success 639/15/105; contracts-dsh 105 + 105 | — | | | |
+| 42007570885 | e2e r31r5a @ `b26aa4aad` | rc.5 | 22 | none | **133 / 0 / 2** (E2, R10-P) | — (C3 PASS) | PASS | PASS | WARN / PASS |
+| 42007576307 | e2e r31rc1 @ `b26aa4aad` | rc.1 | 24 | none | 132 / 1 / 2 (E2, I1) | U14: ctx_expand carried m0 injected text (adapter, fixed `4a29a6bf5`); I1 WARN model behaviour | WARN | PASS | PASS / PASS |
+| 42010507314 | push @ `4a29a6bf5` | rc.5; alpha.3; rc.1 | — / 24 | — | success **640/15/105**; contracts-dsh 105 + 105 | — | | | |
+| 42010611777 | e2e r31r5b @ `4a29a6bf5` | rc.5 | 22 | none | **132 / 0 / 3** (E2, R10-P, T3) | — (C3 PASS, U14 PASS) | PASS | PASS | WARN / PASS |
+| 42010617157 | e2e r31rc1b @ `4a29a6bf5` | rc.1 | 24 | none | **134 / 0 / 1** (E2) | — (C3, U14, Y1, Y2 PASS) | PASS | PASS | PASS / PASS |
+
+Round 31 commits (no core change; red test first):
+- `3988121a9` release: `0.49.35-dsh.6` version bump + RELEASE-NOTES (tagged `dsh/0.49.35-dsh.6`).
+- `f566dcc5a` RED: cordis peers vs the cordis each declared DSH depends on (npm ERESOLVE on alpha.3 / rc.1).
+- `8d8a513e2` peers `@deepseek-ai/cordis` `~4.0.5 || 4.0.6-alpha.2 || ~4.1.0`, plugin-include `~1.0.10 || 1.0.11-alpha.2 || ~1.1.0`.
+- `a587b6890` CI: push job `contracts-dsh` (alpha.3, rc.1; node 24) — overlay the @deepseek-ai packages, run typecheck:dsh + contracts:dsh.
+- `702a4fd1e` RED: bin through a symlink (node keeps the link in argv[1]) prints nothing.
+- `e443057d6` bin direct-entry check by realpath (`isDirectEntryFor`).
+- `b26aa4aad` CI: overlay installs DSH's peers (no `--legacy-peer-deps`; dsh-scope was missing).
+- `5adba5c21` RED: ctx_expand renders the m0 knowledge baseline's injected text (real rc.1 e2e 42007576307).
+- `4a29a6bf5` ctx_expand raw messages through `withoutInjectedText`.
+
+Previous baseline (round 30, 2026-11-05, DSH **0.2.1-rc.5 (default) + 0.2.2-alpha.3 +
 0.2.2-rc.1 declared**, core v0.49.35; code HEAD `5daa53311`): `typecheck:dsh` **0 errors**,
 `dsh-plugin` **633 pass** (+2 over round 29's 631: doctor rc.1 case +1,
 doctor-shared-handle +1), `adapter-api` **15**, `contracts:dsh` **105**, 0 fail
@@ -2158,6 +2202,31 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       the same generic "Issues with peer dependencies" warning it prints on rc.5; the
       cordis code is byte-identical — 静态推断, not changed);
       type-level contracts still run only against the lockfile's rc.5 packages.
+
+26. **Round 31 (2026-11-05) — dsh.6 released; scan + fix.**
+    - **dsh.6:** tag `dsh/0.49.35-dsh.6` (object `521e38d5e`) → `3988121a9`; declares
+      `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`.
+    - **Fixed (已复现 → green, adapter only):** cordis / cordis-plugin-include peers were rc.5-only
+      (`~4.0.5` / `~1.0.10`), so `npm install` next to alpha.3 (4.0.6-alpha.2 / 1.0.11-alpha.2) or
+      rc.1 (4.1.0 / 1.1.0) failed ERESOLVE (pnpm only warns) — peers now list what each declared
+      DSH depends on; the bin printed nothing when run through an npm/bun `.bin` symlink under
+      node (`isDirectEntryFor` by realpath); ctx_expand showed Magic's own `<session-history>` /
+      `<project-memory>` / hint text of the knowledge baseline as user text (now filtered like
+      the historian / FTS input; ordinals unchanged). dsh.6 ships all three; use the branch or
+      the next tag. Workaround for npm on dsh.6: `--legacy-peer-deps`, run `node <pkg>/dist/cli.js`.
+    - **New coverage:** push CI `contracts-dsh` runs typecheck:dsh + contracts:dsh against alpha.3
+      and rc.1 (overlay of the @deepseek-ai packages) — 0 type errors, 105/105 on both. Not
+      covered: the test-file typecheck and the full dsh-plugin suite on alpha.3 / rc.1.
+    - **rc.5 C3 — 定性 (scenario; DSH 原生 pricing, no change):** the historian fires at cmp-03 on
+      DSH token-meter `projectedTokens` (≈ 71–73 %) computed before Magic's pressure truncation of
+      two big `read` results in the same pre-step; DSH's meter keeps the pre-rewrite total
+      because a plugin surface `replace` has no adjacent `compaction/*` shadow-price claim
+      (`foldSurfaceProjection`), so the next request is sent at ≈ 48 %. One early pass covers
+      little; C3 then passes only if the model's later turns re-cross 65 % (2 of 4 runs did).
+      Assertion unchanged; options for the user in evidence-round31 B1.
+    - **Still open:** Y2 / T3 pending the user; full `npm install` of the whole DSH tree + plugin
+      not exercised (only the cordis pair); Windows bin shim not exercised (静态推断: npm `.cmd`
+      shims call the real path).
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

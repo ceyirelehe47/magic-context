@@ -7,6 +7,17 @@ adapter layer). Version `<upstream>-dsh.N`, git tag `dsh/<upstream>-dsh.N`
 (`bun pm pack` in `packages/dsh-plugin`, as `dsh-install.yml` does).
 Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-round*`.
 
+## Unreleased (branch `dsh-integration` after dsh.6, round 31; no tag)
+
+- **npm install next to DSH 0.2.2-alpha.3 / 0.2.2-rc.1** no longer fails ERESOLVE: the
+  `@deepseek-ai/cordis` / `cordis-plugin-include` peers list what each declared DSH depends on
+  (`~4.0.5 || 4.0.6-alpha.2 || ~4.1.0`, `~1.0.10 || 1.0.11-alpha.2 || ~1.1.0`). pnpm was fine.
+- **`dsh-magic-context` bin through a symlink** (npm / bun `.bin`, global bin) runs under node
+  instead of exiting silently.
+- **ctx_expand** no longer shows Magic's own injected `<session-history>` / `<project-memory>` /
+  `<ctx-search-hint>` text as user messages (ordinals unchanged).
+- CI: push job `contracts-dsh` checks typecheck:dsh + contracts:dsh against alpha.3 and rc.1.
+
 ## 0.49.35-dsh.6 (tag `dsh/0.49.35-dsh.6`, round 31, 2026-11-05)
 
 - Core: upstream **v0.49.35**, unchanged.
