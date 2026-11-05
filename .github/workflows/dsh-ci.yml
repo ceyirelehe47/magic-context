@@ -5,7 +5,7 @@
 #   checks  every push to dsh-integration / dsh-sync/** and every dispatch:
 #           filtered install → typecheck:dsh → core typecheck → dsh-plugin
 #           tests → adapter-api tests → contracts:dsh → ci-check.py unit tests
-#           (R14 / Y2 / empty input, round 33) → wf-lint
+#           (R14 / Y2 / empty input, round 33; unique ids, round 34) → wf-lint
 #   e2e     ONLY on workflow_dispatch with input e2e=true (spends model quota):
 #           real @deepseek-ai/dsh 0.2.1-rc.5 (or input dsh_version, e.g. the
 #           declared 0.2.2-alpha.3 / 0.2.2-rc.1) headless + OpenCode Go
@@ -105,13 +105,13 @@ jobs:
         continue-on-error: true
         run: bun run contracts:dsh 2>&1 | tee "$RUNNER_TEMP/contracts.log"; exit ${PIPESTATUS[0]}
 
-      - name: ci-check.py unit tests (R14, Y2, empty input; round 33, gating)
+      - name: ci-check.py unit tests (R14, Y2, empty input; round 33 — unique ids; round 34; gating)
         id: t_cicheck
         continue-on-error: true
         run: |
           set -o pipefail
           rc=0
-          for t in test_ci_check_r14.py test_ci_check_y2.py test_ci_check_empty.py; do
+          for t in test_ci_check_r14.py test_ci_check_y2.py test_ci_check_empty.py test_ci_check_ids.py; do
             echo "== $t"
             python3 "packages/dsh-plugin/scripts/e2e/$t" -v 2>&1 | tee -a "$RUNNER_TEMP/ci-check-tests.log" || rc=1
           done

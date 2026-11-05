@@ -638,12 +638,14 @@ def check_r22_lock(c, out: Path, runs):
     c.add("R9", not bad and bool(holds),
           "scenario L runs exit 0; the background historian held the lease (e2e hold) in lock-a",
           bad or {"holds": len(holds), "historianTriggers": [(m.group(1), m.group(5)) for m in fires][:8]})
+    # Round 34: id BS1 (was R10, shared with scenario P's ctx_reduce row; the round 21-24
+    # history in DSH-MAINTENANCE calls this row R10).
     deferrals = re.findall(r"native pressure backstop deferred: .*?\(pressure ([0-9.?]+) % ≥ ([0-9.?]+) %\)", text_a)
     checks = [(m.start(), m.group(2), m.group(3), m.group(5)) for m in CHECK.finditer(text_a) if m.group(1) == "false"]
     evs = lock_events_before_c(out)
     ends = [(e.get("data") or {}) for e in evs if e.get("type") == "compaction/end"]
     errs = [str(d.get("error"))[:200] for d in ends if d.get("error")]
-    c.add("R10", bool(deferrals) and not errs,
+    c.add("BS1", bool(deferrals) and not errs,
           "backstop (90 % path; 36 % on this route) deferred silently while the historian held the lease: no compaction/end error",
           {"deferrals": deferrals[:6], "compactionEnds": len(ends), "errors": errs[:3]})
     # Round 24 (R10 fix): an over-backstop check that finds no region whose
@@ -1766,17 +1768,18 @@ def check(out: Path) -> int:
         c.add("N5", n == 0, "child has 0 Magic DB rows", n)
         check_child_log(c, "N", out / "child-selftest-normal.jsonl", expect_abort=False)
 
-    # --- T: 1500 ms timeout (502d74b94)
+    # --- T: 1500 ms timeout (502d74b94). Round 34: ids WT0-WT3 (were T0-T3, shared with
+    # scenario T); the child-log rows keep their Tc* ids (no clash).
     r = selftest_report(out / "selftest-timeout.log")
-    c.add("T0", r is not None, "selftest-timeout: ctx_worker_selftest called", runs.get("selftest-timeout", ("", ""))[1])
+    c.add("WT0", r is not None, "selftest-timeout: ctx_worker_selftest called", runs.get("selftest-timeout", ("", ""))[1])
     if r is not None:
-        c.add("T1", r.get("ok") is False and r.get("workerText") is None, "worker ok:false after timeout",
+        c.add("WT1", r.get("ok") is False and r.get("workerText") is None, "worker ok:false after timeout",
               {"timeoutMs": r.get("timeoutMs")})
         wl = r.get("workerLog") or []
-        c.add("T2", any("timed out after 1500ms" in m for m in wl),
+        c.add("WT2", any("timed out after 1500ms" in m for m in wl),
               "502d74b94: workerLog names the reason (timed out after 1500ms; child disposed)", wl)
         n = child_rows(db_st, r.get("childSessionId"))
-        c.add("T3", n in (0, None), "child has 0 Magic DB rows", n)
+        c.add("WT3", n in (0, None), "child has 0 Magic DB rows", n)
         check_child_log(c, "T", out / "child-selftest-timeout.jsonl", expect_abort=True)
 
     # --- M: one session, three processes
@@ -1807,7 +1810,8 @@ def check(out: Path) -> int:
         after = {t["message_id"]: t["tag_number"] for t in dumps[b]}
         changed = {m: (n, after.get(m)) for m, n in before.items() if after.get(m) != n}
         c.add(f"M3.{a}-{b}", not changed, f"restart {a}->{b}: every earlier tag keeps its number", changed or len(before))
-    c.add("M4", len(dumps) == 3, "tag dumps after all three turns", sorted(dumps))
+    # Round 34: id MP4 (was M4, shared with scenario M's --restore row).
+    c.add("MP4", len(dumps) == 3, "tag dumps after all three turns", sorted(dumps))
     for k, text in finals.items():
         m = TAG_PREFIX.match(text)
         if not m:

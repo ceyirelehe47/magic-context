@@ -167,7 +167,7 @@ tool calls & context recovery, integrity after /compact, crash recovery — **PA
 `fcc0ad4621`: WARN everywhere — type / contract / unit level only, no real boot, no install (unpublished).
 Soak is round-26 code and rc.5 only (supporting evidence).
 
-**Duplicate check ids (noted, not renamed).** `T3` is both the worker 1500 ms timeout row (child has 0
+**Duplicate check ids (noted in round 33; renamed in round 34 — see "检查 ID 改名（第 34 轮）" in the CI section).** `T3` is both the worker 1500 ms timeout row (child has 0
 Magic rows) and scenario T's tail row; `R10` is both scenario P's ctx_reduce row and the lock-a backstop
 deferral row. In this document "T3 WARN" and "R10-P" mean scenario T and scenario P.
 
@@ -1018,11 +1018,33 @@ DSH 自己的 CI，只在本 fork 运行（`if: github.repository == 'ceyirelehe
 | id | 内容 |
 |---|---|
 | N0–N5, Nc1–Nc3 | 正常 worker：`ok:true`；子会话可见工具与实际请求里的工具 ⊆ `read/grep/glob`；`bash/write/edit/ctx_*` 在子会话作用域解析为 `child:false`（执行器会报 `UNKNOWN_TOOL`）；`workerText`、子会话 system prompt 和回复里都没有 `§N§`；子会话在 Magic 表里 0 行 |
-| T0–T3, Tc1–Tc4 | 1500 ms 超时：`ok:false`；`workerLog` 写明 `worker timed out after 1500ms; child disposed`（复验 `502d74b94`）；子会话 `turn/end` 为 `aborted {kind: parent}`；子会话 0 行 |
-| M0–M4 | 三个进程、同一个会话：每轮退出码 0；每轮之后 tag 号和 message id 都唯一、从 1 连续编号；重启前已有的 tag 号在之后的导出里都不变 |
+| WT0–WT3（第 34 轮前为 T0–T3）, Tc1–Tc4 | 1500 ms 超时：`ok:false`；`workerLog` 写明 `worker timed out after 1500ms; child disposed`（复验 `502d74b94`）；子会话 `turn/end` 为 `aborted {kind: parent}`；子会话 0 行 |
+| M0.k–M3.a-b, MP4（第 34 轮前为 M4） | 三个进程、同一个会话：每轮退出码 0；每轮之后 tag 号和 message id 都唯一、从 1 连续编号；重启前已有的 tag 号在之后的导出里都不变 |
 | M5（WARN） | 模型回复开头的 `§N§` 当时没有被其他消息占用（属于模型行为，只告警） |
 | P1 | 运行结束后没有残留的 `dsh` 进程 |
 | Nc5 / Tc5 | 子会话的 `sandbox/mode` 事件，仅记录（见下文 worker 沙箱一节） |
+
+### 检查 ID 改名（第 34 轮）
+
+用户 2026-11-06 00:09 CST 决定给重复的检查 ID 改名。第 33 轮记下 `T3` / `R10`；第 34 轮按「同一次运行里同一个
+ID 不得出现在两项不同的检查上」全量扫描后，另发现 `T0`–`T2` 和 `M4` 也是两项共用。场景 T、场景 P、场景 M（migrate）
+在本文档和运行表里引用最多，保留原 ID；另一方改用未被占用的新 ID。**判定逻辑完全不变**：改名前后的 `ci-check.py`
+在 8 份真实 artifact 和空目录 / 干净数据 / 坏数据三种合成输入上，按下表映射后 `summary.md` 逐行相同、退出码相同
+（已复现，`test_ci_check_ids.py` 钉住）。`U4` / `U5` / `C0` 是同一项检查的两个分支（一次运行只写一次），不改。
+
+| 旧 ID | 新 ID | 检查 | 保留旧 ID 的一方 |
+|---|---|---|---|
+| T0 | **WT0** | worker 1500 ms 超时：调用了 `ctx_worker_selftest` | 场景 T：scenario T ran |
+| T1 | **WT1** | worker 超时：`ok:false`，无 `workerText` | 场景 T：退出码 0 且 `/compact` 成功 |
+| T2 | **WT2** | worker 超时：`workerLog` 写明 timed out after 1500ms | 场景 T：mini-historian 回答 `<unprocessed_from>` |
+| T3 | **WT3** | worker 超时：子会话 0 行 Magic 数据 | 场景 T：checkpoint 的 `<unsummarized_tail>` 携带约束（WARN 按用户决定保留） |
+| R10 | **BS1** | 场景 L：historian 持锁时 90 % 兜底安静推迟，无 compaction/end 错误 | 场景 P：模型违规调用 ctx_reduce（WARN-only） |
+| M4 | **MP4** | 一个会话三个进程：三轮之后都有 tag 导出 | 场景 M：`--restore` 还原迁移前的 DB |
+
+子会话日志行 `Tc1`–`Tc5`（worker 超时）不与场景 T 冲突，保持不变。**历史 evidence 不改写**：第 34 轮之前的
+`summary.md`、运行表和本文档里的旧段落中，worker 超时的 `T0`–`T3` 即现在的 `WT0`–`WT3`；第 21–24 轮讨论的
+`R10`（兜底推迟、"819 >= 475" 等）即现在的 `BS1`，第 28 轮起表格里的 "R10 (P / backstop)" 一列的 backstop 即 `BS1`；
+多进程的 `M4` 即 `MP4`。
 
 触发与查看（本环境没有 `gh`，用 `apicall github`）：
 
