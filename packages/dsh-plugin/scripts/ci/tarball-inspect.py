@@ -11,9 +11,9 @@ fixes visible in the bundle) and exits 1 when the tarball is not what the source
   - a file named by main / types / bin / exports / dsh.bundle.patch is missing;
   - dist/cli.js has no `#!/usr/bin/env node` shebang or is not executable;
   - --npm given: the npm-packed tarball's file list differs from this one's.
-The bundle probes (B4 realpath entry check, B5 withoutInjectedText in the ctx_expand
-path) are reported as static evidence; they do not replace the runtime checks
-(install-accept-check.py A6 / A7).
+The bundle probes (B4 realpath, B5 withoutInjectedText) only report presence: the dsh.6
+tarball matches them too (round 33), so they decide nothing — the runtime checks
+(install-accept-check.py A6 / A7, with the OLD tarball as control) do.
 """
 import json
 import sys
@@ -78,13 +78,13 @@ if cli in files:
     if not files[cli].mode & 0o111:
         fails.append("dist/cli.js not executable")
     body = read(tgz, cli).decode(errors="replace")
-    print(f"- B4 probe (static): dist/cli.js resolves realpath for the entry check: {'realpathSync' in body or 'realpath' in body}")
+    print(f"- B4 probe (static, presence only — NOT discriminating, dsh.6 matches too): 'realpath' in dist/cli.js: {'realpathSync' in body or 'realpath' in body}")
 else:
     fails.append("dist/cli.js missing")
 
 expand_files = [n for n in files if n.startswith("package/dist/") and n.endswith(".js") and b"ctx_expand" in read(tgz, n)]
 wit = [n for n in expand_files if b"withoutInjectedText" in read(tgz, n)]
-print(f"- B5 probe (static): dist files defining ctx_expand: {len(expand_files)}; of those referencing withoutInjectedText: {len(wit)}")
+print(f"- B5 probe (static, presence only — NOT discriminating, dsh.6 matches too): dist files defining ctx_expand: {len(expand_files)}; of those referencing withoutInjectedText: {len(wit)}")
 tests = [n for n in files if n.endswith(".test.ts")]
 print(f"- test files shipped (src/ is in `files`): {len(tests)}")
 

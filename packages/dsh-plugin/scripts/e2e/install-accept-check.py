@@ -51,7 +51,8 @@ add("A4", True if ok_d else ("warn" if fenced else False),
 pin = [k for k in "abcd" if I(k, "doctorPin") == 1]
 exempt = sorted(p.name for p in out.glob("allow-*.log"))
 head_needed = [k for k in pin if k in "bc"] + [e for e in exempt if e in ("allow-b.log", "allow-c.log")]
-add("A0", False if head_needed else (True if not pin and not exempt else "warn"),
+# round 33: non-vacuous — the HEAD steps must have run (an empty accept.jsonl read as PASS)
+add("A0", False if head_needed or not (b and c) else (True if not pin and not exempt else "warn"),
     "HEAD declares this DSH: no exemption and a clean doctor on the HEAD steps (b, c); "
     "an exemption / version-line-only doctor FAIL is allowed only for the OLD tarball's steps (a, d) when it does not declare this DSH",
     {"pinOnlySteps": pin, "exemptions": exempt, "headNeeded": head_needed})
@@ -82,7 +83,7 @@ add("A6", bool(ha) and npm_ok(ha) and bin_ok(ha),
 add("A7", V("b", "expandStatus") == "completed" and I("b", "expandUser") > 0 and I("b", "expandInjected") == 0,
     "HEAD tgz ctx_expand over the session's first ordinals shows the user's text and none of Magic's injected <session-history>/<project-memory>/<project-docs>/<user-profile>/<ctx-search-hint> (B5)",
     {k: b.get(k) for k in ("expandStatus", "expandLen", "expandUser", "expandInjected")} | {"memWrite(a)": a.get("memStatus")})
-add("A8", V("b", "binPnpm") == NEWV,
+add("A8", NEWV != "" and V("b", "binPnpm") == NEWV,
     "HEAD bin through the profile's pnpm .bin shim prints the version", {"binPnpm": V("b", "binPnpm"), "want": NEWV})
 # controls on the OLD tarball (every tag up to dsh.6 predates the B2/B4/B5 fixes)
 if o_:
