@@ -691,7 +691,17 @@ def check_r23_history(c, out: Path, runs):
     the lock-c prompt and every checksum read in lock-c are still on the
     model-visible surface or inside a published compartment (ctx_expand of its
     start..end shows them) — nothing was shadowed without a summary. Run
-    41619627652 failed this: /compact #2 replayed compartments 1–17 over them."""
+    41619627652 failed this: /compact #2 replayed compartments 1–17 over them.
+
+    Round 33: "folded" is judged structurally (ci-history.ts): an item is
+    folded when a compaction/summary's shadowedSeqs holds its raw event or a
+    node derived from it (`shadowedBy`) AND its text is not on the surface
+    outside the summary nodes' own text (`onRawSurface` false). A checkpoint
+    that restates a checksum (run 42034146821) no longer hides the fold; a raw
+    message that still carries the text still counts as not folded. Every item
+    not on the raw surface (folded or otherwise gone) must lie in a compartment
+    (`lost`) and be reached by the last summary; a summary quoting the text no
+    longer rescues an item from `lost`. At least one item must be folded."""
     rc = runs.get("lock-d", ("", "missing"))[1]
     done = e2e_lines(out / "lock-d.log", "/compact at idle: done")
     h = load_json(out / "history-lock.json") or {}
@@ -699,18 +709,27 @@ def check_r23_history(c, out: Path, runs):
     prompt = h.get("prompt") if isinstance(h.get("prompt"), dict) else {}
     comps = h.get("compactions") if isinstance(h.get("compactions"), list) else []
     items = ([("prompt", prompt)] if prompt.get("found") else []) + [(f.get("file"), f) for f in files]
-    lost = [n for n, it in items if not it.get("onSurface") and not it.get("coveredBy")]
-    shadowed = [it.get("historyOrdinal") for _, it in items if not it.get("onSurface") and it.get("historyOrdinal")]
+    structural = bool(items) and all(isinstance(it.get("shadowedBy"), list) and isinstance(it.get("onRawSurface"), bool)
+                                     for _, it in items)
+    gone = [(n, it) for n, it in items if structural and not it.get("onRawSurface")]
+    lost = [n for n, it in gone if not it.get("coveredBy")]
+    folded = [it.get("historyOrdinal") for _, it in gone if it.get("shadowedBy") and it.get("historyOrdinal")]
+    gone_ord = [it.get("historyOrdinal") for _, it in gone if it.get("historyOrdinal")]
+    unplaced = [n for n, it in gone if not it.get("historyOrdinal")]
     last = comps[-1] if comps else {}
-    reaches = not shadowed or (last.get("summaryMaxEnd") or 0) >= max(shadowed)
+    reaches = not gone_ord or (last.get("summaryMaxEnd") or 0) >= max(gone_ord)
     ok = rc.startswith("rc=0") and bool(done) and "kind=success" in done[0] and len(comps) >= 2 \
-        and bool(prompt.get("found")) and bool(files) and bool(shadowed) and not lost and reaches
+        and bool(prompt.get("found")) and bool(files) and structural and bool(folded) and not lost and not unplaced and reaches
     c.add("R14", ok,
-          "second native compaction (lock-d): lock-c's prompt and checksums stay visible or inside a compartment (recoverable by ctx_expand); the summary reaches them",
-          {"lockD": rc, "done": [d[-160:] for d in done[:1]], "compactions": [(x.get("seq"), len(x.get("shadowedSeqs") or []), x.get("summaryCompartmentRanges")) for x in comps][:4],
+          "second native compaction (lock-d): lock-c's prompt and checksums are folded by a compaction (shadowedSeqs) or still on the raw surface; whatever left the raw surface is inside a compartment (recoverable by ctx_expand) and reached by the summary; at least one item folded",
+          {"lockD": rc, "done": [d[-160:] for d in done[:1]],
+           "basis": "structural (shadowedSeqs + raw surface)" if structural else "MISSING structural fields in history-lock.json (ci-history.ts < round 33)",
+           "folded": folded, "lost": lost, "unplaced": unplaced, "reaches": reaches, "summaryMaxEnd": last.get("summaryMaxEnd"),
+           "compactions": [(x.get("seq"), len(x.get("shadowedSeqs") or []), x.get("summaryCompartmentRanges")) for x in comps][-2:],
            "lastCompartmentEnd": h.get("lastCompartmentEnd"),
-           "prompt": prompt, "files": [{k: f.get(k) for k in ("file", "checksum", "historyOrdinal", "coveredBy", "onSurface")} for f in files][:6],
-           "lost": lost, "error": (out / "history-lock.err").read_text(errors="replace")[-300:] if (out / "history-lock.err").exists() else ""})
+           "items": [{"item": n, **{k: it.get(k) for k in ("historyOrdinal", "coveredBy", "shadowedBy", "onRawSurface", "inSummaryText", "onSurface")}}
+                     for n, it in items][:6],
+           "error": (out / "history-lock.err").read_text(errors="replace")[-300:] if (out / "history-lock.err").exists() else ""})
 
 
 X_WINDOW = 24000

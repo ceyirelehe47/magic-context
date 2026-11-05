@@ -1,0 +1,19 @@
+test_1_folded_summary_restates_passes (__main__.R14.test_1_folded_summary_restates_passes) ... ok
+test_2_not_folded_fails (__main__.R14.test_2_not_folded_fails) ... ok
+test_2b_shadowed_but_still_on_raw_surface_is_not_folded (__main__.R14.test_2b_shadowed_but_still_on_raw_surface_is_not_folded) ... ok
+test_2c_only_quoted_no_structural_fold_fails (__main__.R14.test_2c_only_quoted_no_structural_fold_fails) ... ok
+test_3_lost_fails (__main__.R14.test_3_lost_fails) ... ok
+test_3b_one_lost_summary_quote_does_not_rescue (__main__.R14.test_3b_one_lost_summary_quote_does_not_rescue) ... ok
+test_4_summary_does_not_reach_fails (__main__.R14.test_4_summary_does_not_reach_fails) ... ok
+test_4b_gone_unfolded_item_must_be_reached (__main__.R14.test_4b_gone_unfolded_item_must_be_reached) ... ok
+test_5_normal_rc1_passes (__main__.R14.test_5_normal_rc1_passes) ... ok
+test_5_normal_rc5_rerun_passes (__main__.R14.test_5_normal_rc5_rerun_passes) ... ok
+test_fewer_than_two_compactions_fails (__main__.R14.test_fewer_than_two_compactions_fails) ... ok
+test_legacy_json_without_structural_fields_fails (__main__.R14.test_legacy_json_without_structural_fields_fails) ... ok
+test_lock_d_failure_fails (__main__.R14.test_lock_d_failure_fails) ... ok
+test_prompt_or_files_missing_fails (__main__.R14.test_prompt_or_files_missing_fails) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.071s
+
+OK

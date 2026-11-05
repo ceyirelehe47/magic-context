@@ -1,0 +1,82 @@
+test_1_folded_summary_restates_passes (__main__.R14.test_1_folded_summary_restates_passes) ... FAIL
+test_2_not_folded_fails (__main__.R14.test_2_not_folded_fails) ... ERROR
+test_2b_shadowed_but_still_on_raw_surface_is_not_folded (__main__.R14.test_2b_shadowed_but_still_on_raw_surface_is_not_folded) ... ERROR
+test_2c_only_quoted_no_structural_fold_fails (__main__.R14.test_2c_only_quoted_no_structural_fold_fails) ... ok
+test_3_lost_fails (__main__.R14.test_3_lost_fails) ... FAIL
+test_3b_one_lost_summary_quote_does_not_rescue (__main__.R14.test_3b_one_lost_summary_quote_does_not_rescue) ... FAIL
+test_4_summary_does_not_reach_fails (__main__.R14.test_4_summary_does_not_reach_fails) ... ok
+test_4b_gone_unfolded_item_must_be_reached (__main__.R14.test_4b_gone_unfolded_item_must_be_reached) ... ok
+test_5_normal_rc1_passes (__main__.R14.test_5_normal_rc1_passes) ... ok
+test_5_normal_rc5_rerun_passes (__main__.R14.test_5_normal_rc5_rerun_passes) ... ok
+test_fewer_than_two_compactions_fails (__main__.R14.test_fewer_than_two_compactions_fails) ... ok
+test_legacy_json_without_structural_fields_fails (__main__.R14.test_legacy_json_without_structural_fields_fails) ... FAIL
+test_lock_d_failure_fails (__main__.R14.test_lock_d_failure_fails) ... ok
+test_prompt_or_files_missing_fails (__main__.R14.test_prompt_or_files_missing_fails) ... ok
+
+======================================================================
+ERROR: test_2_not_folded_fails (__main__.R14.test_2_not_folded_fails)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/r33b/packages/dsh-plugin/scripts/e2e/test_ci_check_r14.py", line 75, in test_2_not_folded_fails
+    self.assertEqual(detail["folded"], [])
+                     ~~~~~~^^^^^^^^^^
+KeyError: 'folded'
+
+======================================================================
+ERROR: test_2b_shadowed_but_still_on_raw_surface_is_not_folded (__main__.R14.test_2b_shadowed_but_still_on_raw_surface_is_not_folded)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/r33b/packages/dsh-plugin/scripts/e2e/test_ci_check_r14.py", line 84, in test_2b_shadowed_but_still_on_raw_surface_is_not_folded
+    self.assertEqual(detail["folded"], [])
+                     ~~~~~~^^^^^^^^^^
+KeyError: 'folded'
+
+======================================================================
+FAIL: test_1_folded_summary_restates_passes (__main__.R14.test_1_folded_summary_restates_passes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/r33b/packages/dsh-plugin/scripts/e2e/test_ci_check_r14.py", line 66, in test_1_folded_summary_restates_passes
+    self.assertEqual(res, "PASS", detail)
+AssertionError: 'FAIL' != 'PASS'
+- FAIL
++ PASS
+ : {'lockD': 'rc=0 elapsed=22.7s', 'done': ['[magic-context] e2e: /compact at idle: done kind=success elapsedMs=20046 text="Compacted 15 history items (~14440 tokens)."'], 'compactions': [(48, 7, [[1, 6]]), (61, 2, [[1, 6], [7, 8]]), (75, 3, [[1, 6], [7, 8], [9, 10]]), (90, 4, [[1, 6], [7, 8], [9, 10], [11, 11]])], 'lastCompartmentEnd': 43, 'prompt': {'found': True, 'historyOrdinal': 35, 'coveredBy': '32-43', 'onSurface': True, 'originSeqs': [158], 'shadowedBy': [224], 'onRawSurface': False, 'inSummaryText': True}, 'files': [{'file': 'p27.txt', 'checksum': 'P19-27-AA15A2', 'historyOrdinal': 37, 'coveredBy': '32-43', 'onSurface': True}, {'file': 'p28.txt', 'checksum': 'P19-28-6B2FF9', 'historyOrdinal': 38, 'coveredBy': '32-43', 'onSurface': True}, {'file': 'p29.txt', 'checksum': 'P19-29-1B8737', 'historyOrdinal': 39, 'coveredBy': '32-43', 'onSurface': True}, {'file': 'p30.txt', 'checksum': 'P19-30-0903C6', 'historyOrdinal': 40, 'coveredBy': '32-43', 'onSurface': True}, {'file': 'p31.txt', 'checksum': 'P19-31-2789DE', 'historyOrdinal': 41, 'coveredBy': '32-43', 'onSurface': True}], 'lost': [], 'error': ''}
+
+======================================================================
+FAIL: test_3_lost_fails (__main__.R14.test_3_lost_fails)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/r33b/packages/dsh-plugin/scripts/e2e/test_ci_check_r14.py", line 101, in test_3_lost_fails
+    self.assertEqual(len(detail["lost"]), 6)
+AssertionError: 0 != 6
+
+======================================================================
+FAIL: test_3b_one_lost_summary_quote_does_not_rescue (__main__.R14.test_3b_one_lost_summary_quote_does_not_rescue)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/r33b/packages/dsh-plugin/scripts/e2e/test_ci_check_r14.py", line 110, in test_3b_one_lost_summary_quote_does_not_rescue
+    self.assertEqual(detail["lost"], ["p29.txt"])
+AssertionError: Lists differ: [] != ['p29.txt']
+
+Second list contains 1 additional elements.
+First extra element 0:
+'p29.txt'
+
+- []
++ ['p29.txt']
+
+======================================================================
+FAIL: test_legacy_json_without_structural_fields_fails (__main__.R14.test_legacy_json_without_structural_fields_fails)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/r33b/packages/dsh-plugin/scripts/e2e/test_ci_check_r14.py", line 163, in test_legacy_json_without_structural_fields_fails
+    self.assertEqual(res, "FAIL", detail)
+AssertionError: 'PASS' != 'FAIL'
+- PASS
++ FAIL
+ : {'lockD': 'rc=0 elapsed=22.7s', 'done': ['[magic-context] e2e: /compact at idle: done kind=success elapsedMs=20046 text="Compacted 15 history items (~14440 tokens)."'], 'compactions': [(48, 7, [[1, 5]]), (61, 2, [[1, 5], [6, 8]]), (75, 3, [[1, 5], [6, 8], [9, 10]]), (90, 4, [[1, 5], [6, 8], [9, 10], [11, 11]])], 'lastCompartmentEnd': 42, 'prompt': {'found': True, 'historyOrdinal': 35, 'coveredBy': '32-42', 'onSurface': True}, 'files': [{'file': 'p27.txt', 'checksum': 'P19-27-AA15A2', 'historyOrdinal': 37, 'coveredBy': '32-42', 'onSurface': False}, {'file': 'p28.txt', 'checksum': 'P19-28-6B2FF9', 'historyOrdinal': 38, 'coveredBy': '32-42', 'onSurface': False}, {'file': 'p29.txt', 'checksum': 'P19-29-1B8737', 'historyOrdinal': 39, 'coveredBy': '32-42', 'onSurface': False}, {'file': 'p30.txt', 'checksum': 'P19-30-0903C6', 'historyOrdinal': 40, 'coveredBy': '32-42', 'onSurface': False}, {'file': 'p31.txt', 'checksum': 'P19-31-2789DE', 'historyOrdinal': 41, 'coveredBy': '32-42', 'onSurface': False}], 'lost': [], 'error': ''}
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.052s
+
+FAILED (failures=4, errors=2)
