@@ -7,14 +7,34 @@ adapter layer). Version `<upstream>-dsh.N`, git tag `dsh/<upstream>-dsh.N`
 (`bun pm pack` in `packages/dsh-plugin`, as `dsh-install.yml` does).
 Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-round*`.
 
-## Unreleased (branch `dsh-integration` after dsh.5, round 30; no tag — dsh.6 is a user decision)
+## 0.49.35-dsh.6 (tag `dsh/0.49.35-dsh.6`, round 31, 2026-11-05)
 
-- DSH declared: `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1` (adds 0.2.2-rc.1, npm
-  `next`; byte-identical to alpha.3 apart from version strings). Verified with no
-  exemption on node 24: install A0 WARN (old dsh.2 only) A1–A4 PASS, e2e 133/0/2 and
-  134/0/1. package.json still reads `0.49.35-dsh.5` until a release bumps it.
-- CI: node 24 for every DSH other than 0.2.1-rc.5; e2e scenario Y kill lookup works on
-  node ≥ 24; doctor closes its DB check through core `closeDatabase()` (test isolation).
+- Core: upstream **v0.49.35**, unchanged.
+- DSH: declared (peers, exact alternatives) **`0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`**.
+  Default / lockfile / devDependencies: 0.2.1-rc.5. Anything else (0.2.2-rc.2, alpha.2,
+  alpha.4, 0.2.2) is refused by DSH's plugin manager and by `doctor` / `setup`.
+  DSH 0.2.2-alpha.3 and 0.2.2-rc.1 require node ≥ 24.9.0.
+- Contains every change after dsh.5 (`9206770c3`) through round 30 (`d2d7c196c`);
+  the release commit only bumps the version and moves these notes.
+
+Changes since dsh.5 (round 30, adapter / CI / test / docs only, no core change):
+
+- **DSH 0.2.2-rc.1 declared** (npm `next`; byte-identical to alpha.3 in all 89
+  `@deepseek-ai/dsh-*` packages apart from version strings). Real app-boot on rc.5,
+  alpha.3 and rc.1 accepts the manifest. Verified with no exemption on node 24:
+  install A0 WARN (old dsh.2 only) A1–A4 PASS, e2e 133/0/2 and 134/0/1.
+- **CI node 24 lane**: every DSH other than 0.2.1-rc.5 runs on node 24 (install and
+  e2e); rc.5 stays on node 22.
+- **e2e scenario Y on node ≥ 24**: the harness finds the DSH process by
+  `/proc/<pid>/exe` (node 24 names its main thread `MainThread`), so Y1 really kills
+  it again. Assertions unchanged.
+- **doctor** closes its shared-DB check through core `closeDatabase()` instead of
+  `db.close()`, so no closed handle stays in core's per-path cache (test isolation;
+  doctor is CLI-only).
+
+Known open items: Y2 on alpha.3 (check timing, pending the user), T3 WARN wording
+(pending the user), C3 on rc.5 (intermittent, see round 31), /compact queueing not
+implemented, cordis peer range vs rc.1's cordis 4.1.0 (see round 31).
 
 ## 0.49.35-dsh.5 (tag `dsh/0.49.35-dsh.5`, round 30, 2026-11-05)
 
