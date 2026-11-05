@@ -1,0 +1,91 @@
+# Round 32 — EVALUATION ONLY, manual. Checks the DSH adapter against DSH
+# packages built from a git ref of deepseek-ai/deepseek-harness (default
+# master, i.e. ahead of the newest npm release), without building the whole
+# DSH monorepo: the released <base> DSH is npm-installed (overlay-dsh-types.sh)
+# and only the listed package directories are compiled from <ref> on top of it
+# (overlay-dsh-ref.sh). Vendor cordis / loader / include are not rebuilt; the
+# lane prints whether the ref's versions equal the installed ones.
+#
+# A green run is NOT a support claim (mixed tree, no real DSH app boot, no e2e);
+# the declared DSH versions and the peers are unaffected. It shows where the
+# adapter would break first when the next DSH release ships.
+name: dsh-ref-eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      dsh_ref:
+        description: "deepseek-harness git ref (branch, tag or sha)"
+        required: false
+        default: "master"
+      base:
+        description: "released DSH the rest of the tree comes from (npm)"
+        required: false
+        default: "0.2.2-rc.1"
+      packages:
+        description: "DSH package dirs (under packages/) to build from the ref, space-separated"
+        required: false
+        default: "core/agent subagent/subagent llm/llm core/session"
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: "1.4.4"
+
+jobs:
+  ref-eval:
+    if: github.repository == 'ceyirelehe47/magic-context'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    name: adapter vs DSH ${{ inputs.dsh_ref }} (base ${{ inputs.base }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install the DSH lane (filtered, no lifecycle scripts)
+        run: |
+          bun install --ignore-scripts \
+            --filter '@cortexkit/opencode-magic-context' \
+            --filter '@cortexkit/retina-local-fs' \
+            --filter 'dsh-magic-context-adapter' \
+            --filter 'dsh-magic-context'
+      - name: Overlay DSH ${{ inputs.base }} + packages from ${{ inputs.dsh_ref }}
+        env:
+          DSH_REF: ${{ inputs.dsh_ref }}
+          DSH_BASE: ${{ inputs.base }}
+          DSH_PKGS: ${{ inputs.packages }}
+        run: |
+          # shellcheck disable=SC2086
+          bash packages/dsh-plugin/scripts/e2e/overlay-dsh-ref.sh "$DSH_BASE" "$DSH_REF" "$RUNNER_TEMP/dsh-overlay" $DSH_PKGS | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: typecheck:dsh
+        id: tc
+        if: always()
+        run: bun run typecheck:dsh
+      - name: dsh-plugin test-file typecheck
+        id: tct
+        if: always()
+        run: bun run --cwd packages/dsh-plugin tsc --noEmit -p tsconfig.test.json
+      - name: contracts:dsh
+        id: contracts
+        if: always()
+        run: bun run contracts:dsh
+      - name: dsh-plugin tests
+        id: tests
+        if: always()
+        run: bun run --cwd packages/dsh-plugin test 2>&1 | tee "$RUNNER_TEMP/tests.log"; exit "${PIPESTATUS[0]}"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "| step | outcome |"; echo "|---|---|"
+            echo "| typecheck:dsh | ${{ steps.tc.outcome }} |"
+            echo "| test-file typecheck | ${{ steps.tct.outcome }} |"
+            echo "| contracts:dsh | ${{ steps.contracts.outcome }} |"
+            echo "| dsh-plugin tests | ${{ steps.tests.outcome }} $(grep -E '^ *[0-9]+ (pass|fail)$' "$RUNNER_TEMP/tests.log" 2>/dev/null | tr '\n' ' ') |"
+            echo; echo "Evaluation only: mixed tree, not a support claim."
+          } >> "$GITHUB_STEP_SUMMARY"
