@@ -1,0 +1,68 @@
+# DSH e2e (CI)
+
+| check | result | what | detail |
+|---|---|---|---|
+| N0 | FAIL | selftest-normal: ctx_worker_selftest called |  |
+| T0 | FAIL | selftest-timeout: ctx_worker_selftest called |  |
+| M0.1 | FAIL | multi-1 exit | missing |
+| M0.2 | FAIL | multi-2 exit | missing |
+| M0.3 | FAIL | multi-3 exit | missing |
+| M4 | FAIL | tag dumps after all three turns | [] |
+| C0 | FAIL | scenario C ran | no cmp-* runs |
+| S0 | FAIL | child-parent exit | missing |
+| S1 | FAIL | parent delegated through the subagent tool | no 'started subagent' |
+| S2 | FAIL | child reached the stock compaction-basic SUMMARIZER (compaction/summary, not only prune; no error) | {"compaction/start": 0, "compaction/summary": 0, "compaction/prune": 0, "errors": [], "childPromptTokens": []} |
+| S3 | PASS | child summary is not MC historian output (no <compartment>, no §N§) | [] |
+| S4 | FAIL | child has 0 rows in every Magic table | null |
+| S5 | PASS | MC table growth during the child run is the parent's own only | {"delta": {"compartments": 0, "compartment_history_versions": 0, "dsh_context_compaction_marker": 0, "compartment_state_lease": 0, "session_meta": 0, "tags": 0, "pending_ops": 0, "dsh_context_outbox": 0, "dsh_pressure_truncations": 0, "historian_runs": 0}, "parentCompartments": 0} |
+| S6 | FAIL | child turn completed | null |
+| S7 | FAIL | child result (>= 6 of 8 CHECKSUM codes) in the parent reply or the child's final message | {"parentHits": 0, "childHits": 0, "of": 0, "parent": "", "child": ""} |
+| R0 | FAIL | scenario P runs exit 0 | {"pnew": 0, "pold": 0} |
+| R1 | FAIL | MC-led main session: no native pressure compaction below 65 % | {"nativeRegions": [], "compactionStartEvents": 0, "maxTriggerPct": 0, "maxPromptPct": 0} |
+| R2 | FAIL | MC historian fired first (pct >= 63, threshold 65) — MC leads, native is only the backstop | {"firstFire": null, "thresholds": [], "nativeBeforeFire": false} |
+| R3 | FAIL | session passed the old DSH-default threshold (30.4 %) with no native compaction there | {"oldDefaultPct": 30.4, "maxPct": 0} |
+| R4 | FAIL | pre-round-19 policy (explicit DSH defaults) measured: native compaction fired below MC's 65 % | {"firstNativePct": null, "nativeRegions": [], "compactionStartEvents": 0, "oldDefaultPct": 30.4} |
+| R6 | FAIL | native pressure checks ran on the MC main session with an effective threshold >= 65 % | {"pnew": [], "pold": []} |
+| R7 | FAIL | main-session native compaction completed through the MC summarize hook (no compaction/end error) | {"compactionEnds": 0, "errors": [], "unresolvableInLogs": 0} |
+| R5 | PASS | no TargetPressureConfigError ('leaving no pressure budget') in any run log | clean |
+| R10 | PASS | scenario P: the model did not call ctx_reduce against the prompt (pnew before MC fired, pold at all) | none |
+| R8 | PASS | no native compaction failed on a busy historian lease (backstop defers, /compact waits) | {"compactionEnds": 0, "leaseBusyErrors": [], "leaseBusyLogLines": "none", "backstopDeferrals": 0, "compactLeaseWaits": 0, "mainChecksWithPctUnknown": 0} |
+| R9 | FAIL | scenario L runs exit 0; the background historian held the lease (e2e hold) in lock-a | {"lock-01": "missing", "lock-a": "missing", "lock-b": "missing", "lock-c": "missing"} |
+| R10 | FAIL | backstop (90 % path; 36 % on this route) deferred silently while the historian held the lease: no compaction/end error | {"deferrals": [], "compactionEnds": 0, "errors": []} |
+| R15 | PASS | every lock-a pressure check at/above the backstop compacted, deferred or was skipped with a visible 'backstop skipped' line (no silent check, no failed compaction/end) | {"overBackstop": 0, "outcomes": [], "silent": [], "skipped": 0, "skipLines": [], "errors": []} |
+| R11 | FAIL | a later pressure check retried after the deferral (compacted, or below the backstop once the historian covered it) | {"checksAfterLastDeferral": [], "compartments": 0} |
+| R12 | FAIL | /compact (DSH command registry, at idle) met the busy lease, waited <= 45 s and completed | {"start": [], "waits": [], "done": [], "commandDone": []} |
+| R13 | FAIL | timeout branch: /compact behind a stuck lease fails closed after the (3 s) wait, lease released, nothing left behind | {"start": [], "timeoutAfterS": [], "done": [], "released": false, "liveLeases": []} |
+| R14 | FAIL | second native compaction (lock-d): lock-c's prompt and checksums are folded by a compaction (shadowedSeqs) or still on the raw surface; whatever left the raw surface is inside a compartment (recoverable by ctx_expand) and reached by the summary; at least one item folded | {"lockD": "missing", "done": [], "basis": "MISSING structural fields in history-lock.json (ci-history.ts < round 33)", "folded": [], "lost": [], "unplaced": [], "reaches": true, "summaryMaxEnd": null, "compactions": [], "lastCompartmentEnd": null, "items": [], "error": ""} |
+| X0 | FAIL | scenario X ran (mock model) | no x-* runs |
+| Y0 | FAIL | scenario Y ran (kill -9 during a historian hold) | no y-* runs |
+| F0 | FAIL | scenario F ran (SIGKILL in the tail-fold window) | no f-* runs |
+| W0 | FAIL | scenario W ran (worker self-test on the mock) | no w-1 run |
+| ST0 | FAIL | scenario S ran (multi-session stress, mock) | no s-* runs |
+| U7 | FAIL | scenario K: jsonc edited during the live k-1 turn (pre- and post-edit steps in one process) | {"k-1": "missing", "k-2": "missing"} |
+| U8 | FAIL | settings page: restart-only memory.injection_budget_tokens shows 运行中的值 4000 · 待重启生效 6000; the hot key is not listed | {"rendered": [], "pendingKeysBefore": [], "pendingKeysAfter": []} |
+| U9 | FAIL | /ctx-status (DSH command registry, live process): Pending restart lists memory running 4000 -> after restart 6000, not protected_tokens | {"kind": null, "pendingBlock": null} |
+| U10 | FAIL | hot protected_tokens: shown as 9000 at once (settings view) and applied by the next steps of the same process (protection floor -> 9000) | {"effective": {}, "popoverProtectedTokens": null, "floorBefore": [], "floorAfter": [], "hotAfter": [], "dbFloor": null, "historianModel": {"page": null, "agent": null}} |
+| U12 | FAIL | settings page historian.model == the model the agent uses (profile-row value shown, source profile) | {"page": {}, "agent": null} |
+| U11 | FAIL | after the restart (k-2, new process) nothing is pending: the new memory value is the running value | {"pending": null, "ctxStatusKind": null} |
+| U13 | FAIL | session A: each fact pinned as its own active memory (one codeword each) | {"perCode": {"ARCH-KESTREL-4127": [], "RULE-MARMOT-5830": [], "FILE-HERON-2261": [], "TODO-BISON-9074": []}, "mixed": [], "ctxMemoryCalledIn": [], "class": "model"} |
+| U14 | FAIL | session A: historian published compartments in >= 2 passes, covering the four fact turns; no compartment carries a codeword no message (text, tool call or result) in its range carries, nor injected-block markup | {"readTurns": "0", "passesWithNewCompartments": "0", "compartments": [], "foreignCodes": [], "foreignNotInProjectMemoryBlock": [], "injectedMarkup": [], "historyRows": 0, "numberingMismatch": [], "codesInCompartmentText": [], "searchTurnOrdinal": null} |
+| U15 | FAIL | session B (new): injected <project-memory> carries all four codewords | {"m0": {}, "class": "missing"} |
+| U16 | FAIL | ctx_search message lane returns the fact's own user message (its ordinal, or folded into the compartment covering it), no other fact mixed in, no injected block | {"called": false, "factOrdinal": null, "hit": "", "otherCodesInHit": [], "injectedInResults": [], "injectedRowsIndexed": [], "errors": [], "class": "model"} |
+| U17 | FAIL | ctx_expand of the hit's range covers the fact's ordinal and contains the original fact sentence verbatim | {"called": false, "factOrdinal": null, "expanded": [], "errors": [], "answer": "", "class": "model"} |
+| U18 | FAIL | ctx_search compartment lane: a codeword-free paraphrase returns the compartment covering the fact (no injected block in the results) | {"called": false, "compartmentHits": [], "factOrdinal": null, "chunkEmbeddings": null, "injectedInResults": [], "head": "", "class": "model"} |
+| U19 | FAIL | embedding endpoint down: ctx_search still answers from full-text and says so (no error) | {"called": false, "errors": [], "ruleHit": false, "tail": ""} |
+| U20 | FAIL | session B (new, after restart): four paraphrased questions → the right codeword each | {"answer": "", "wrong": {}, "toolsUsed": [], "class": "product"} |
+| U21 | FAIL | after the correction: old todo memory not active, new todo memory active | {"oldActive": [], "newActive": [], "allTodo": [], "ctxMemoryCalled": false, "class": "model"} |
+| U22 | FAIL | session C (new): current todo answered and injected with the NEW codeword; the old one is not injected as a live fact | {"answer": "", "m0ProjectMemoryCodes": [], "staleActiveSources": [], "oldNamedOnlyInReplacement": false, "class": "product"} |
+| U23 | FAIL | session C ctx_search: new todo returned (or already injected), no stale old-todo result, no session-A message in C's history lanes | {"called": false, "newInResults": false, "newInjected": false, "stale": [], "leak": [], "head": "", "answer": "", "class": null} |
+| U24 | FAIL | never-recorded fact: the answer contains no invented codeword | {"answer": "", "invented": [], "recordedCodeGivenForWrongFact": [], "notRecorded": false, "class": null} |
+| U25 | FAIL | no cross-session mixing: A's compartments never carry B's new todo; C's <session-history> carries none of A's facts | {"aCompartmentsWithB": [], "cSessionHistoryCodes": []} |
+| U26 | FAIL | memory identity: every scenario memory under a git:/dir: project identity, no exact duplicate active | {"rawPath": [], "activeDuplicates": [], "projectPaths": [], "sourceTypes": [], "class": "product"} |
+| T0 | FAIL | scenario T ran (/compact with <unprocessed_from>) | no t-* runs |
+| M0 | FAIL | scenario M ran (legacy migration through the built CLI) | no m-digests.json |
+| E0 | FAIL | scenario E ran (ranking: bag of words vs real embeddings) | no e-* runs |
+| DN1 | PASS | no run hit the DSH-native cordis.yml boot race (WARN = DSH prepareProfile in-place rewrite read empty by a concurrent boot on the same profile) | {"runs": []} |
+| I1 | PASS | no model TEXT imitates the folded tool record (limitation 21) | none |
+| I2 | PASS | no run re-reads one file 4+ times (round 28: the fold note must say what already ran) | none |
+| P1 | PASS | no leftover dsh processes | 0 |

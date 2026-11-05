@@ -1,0 +1,42 @@
+npm error code ERESOLVE
+npm error ERESOLVE could not resolve
+npm error
+npm error While resolving: dsh-accept@undefined
+npm error Found: @deepseek-ai/cordis@4.0.5
+npm error node_modules/@deepseek-ai/cordis
+npm error   peer @deepseek-ai/cordis@"~4.0.5" from @deepseek-ai/cordis-plugin-group@1.0.5
+npm error   node_modules/@deepseek-ai/cordis-plugin-group
+npm error     peer @deepseek-ai/cordis-plugin-group@"~1.0.5" from @deepseek-ai/dsh-app-boot@0.2.1-rc.5
+npm error     node_modules/@deepseek-ai/dsh-app-boot
+npm error       @deepseek-ai/dsh-app-boot@"0.2.1-rc.5" from @deepseek-ai/dsh@0.2.1-rc.5
+npm error       node_modules/@deepseek-ai/dsh
+npm error         @deepseek-ai/dsh@"^0.2.1-rc.5" from the root project
+npm error       9 more (@deepseek-ai/dsh-agent-preset-registry, ...)
+npm error   peer @deepseek-ai/cordis@"~4.0.5" from @deepseek-ai/cordis-plugin-include@1.0.10
+npm error   node_modules/@deepseek-ai/cordis-plugin-include
+npm error     peerOptional @deepseek-ai/cordis-plugin-include@"~1.0.10" from @deepseek-ai/cordis@4.0.5
+npm error     @deepseek-ai/cordis-plugin-include@"~1.0.10" from @deepseek-ai/dsh@0.2.1-rc.5
+npm error     node_modules/@deepseek-ai/dsh
+npm error       @deepseek-ai/dsh@"^0.2.1-rc.5" from the root project
+npm error     4 more (@deepseek-ai/dsh-agent-preset-registry, ...)
+npm error   297 more (@deepseek-ai/cordis-plugin-loader, ...)
+npm error
+npm error Could not resolve dependency:
+npm error dsh-magic-context@"file:../tgz/head.tgz" from the root project
+npm error
+npm error Conflicting peer dependency: @deepseek-ai/cordis@4.1.0
+npm error node_modules/@deepseek-ai/cordis
+npm error   peer @deepseek-ai/cordis@"~4.1.0" from @deepseek-ai/dsh-client-ui-primitives@0.2.2-rc.1
+npm error   node_modules/@deepseek-ai/dsh-client-ui-primitives
+npm error     peerOptional @deepseek-ai/dsh-client-ui-primitives@"0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1" from dsh-magic-context@0.49.35-dsh.7
+npm error     node_modules/dsh-magic-context
+npm error       dsh-magic-context@"file:../tgz/head.tgz" from the root project
+npm error
+npm error Fix the upstream dependency conflict, or retry
+npm error this command with --force or --legacy-peer-deps
+npm error to accept an incorrect (and potentially broken) dependency resolution.
+npm error
+npm error
+npm error For a full report see:
+npm error <path>
+npm error A complete log of this run can be found in: <path>

@@ -7,14 +7,22 @@ adapter layer). Version `<upstream>-dsh.N`, git tag `dsh/<upstream>-dsh.N`
 (`bun pm pack` in `packages/dsh-plugin`, as `dsh-install.yml` does).
 Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-round*`.
 
-## Unreleased (branch `dsh-integration` after dsh.6, rounds 31–32; no tag)
+## 0.49.35-dsh.7 — 待发 / pending (rounds 31–33; NO tag, not published)
 
-- **npm install next to DSH 0.2.2-alpha.3 / 0.2.2-rc.1** no longer fails ERESOLVE: the
-  `@deepseek-ai/cordis` / `cordis-plugin-include` peers list what each declared DSH depends on
-  (`~4.0.5 || 4.0.6-alpha.2 || ~4.1.0`, `~1.0.10 || 1.0.11-alpha.2 || ~1.1.0`). pnpm was fine.
+Version prepared in `packages/dsh-plugin/package.json` (commit `e80118969`, revert it alone to drop
+the bump). Product code = `c096b8a68` (no adapter / core source change after it). Core: upstream
+v0.49.35, unchanged. DSH declared (unchanged since dsh.6): `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`.
+Release-candidate acceptance: `docs/dsh/e2e/evidence-round33/a-release-candidate.md`.
+
+- **cordis peers** follow the declared DSH (`~4.0.5 || 4.0.6-alpha.2 || ~4.1.0`,
+  `~1.0.10 || 1.0.11-alpha.2 || ~1.1.0`): `npm install` of the tarball next to DSH **0.2.2-rc.1**
+  resolves (dsh.6: ERESOLVE). **Not fixed for rc.5 / alpha.3** (round 33): npm still fails ERESOLVE
+  there because it resolves the plugin's ABSENT optional peer `@deepseek-ai/dsh-client-ui-primitives`
+  to 0.2.2-rc.1, whose cordis peer `~4.1.0` conflicts (same for dsh.6). The documented install
+  path (`dsh plugin add`, pnpm) is unaffected on all three DSH versions. Fix pending a user decision.
 - **`dsh-magic-context` bin through a symlink** (npm / bun `.bin`, global bin) runs under node
   instead of exiting silently.
-- **ctx_expand** no longer shows Magic's own injected `<session-history>` / `<project-memory>` /
+- **ctx_expand** no longer shows Magic's own injected `<session-history>` / `<project-memory>` / `<project-docs>` /
   `<ctx-search-hint>` text as user messages (ordinals unchanged).
 - CI: push job `contracts-dsh` checks typecheck:dsh + contracts:dsh against alpha.3 and rc.1.
 - **Forward compatibility with DSH master (round 32, no new DSH declared):** the Magic worker's
@@ -24,6 +32,12 @@ Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-roun
   caller yet (env-gated self-test only), so no released path changes behaviour.
 - CI: manual evaluation lane `dsh-ref-eval.yml` (released DSH + selected packages built from a
   deepseek-harness git ref; evaluation only, not a support claim).
+- CI (round 33): `dsh-install.yml` packs the dispatched ref's HEAD, upgrades from / rolls back to
+  input `old_ref`, inspects the tarball (`npm pack` + `bun pm pack`), and adds the npm path (B2 /
+  bin symlink) and a ctx_expand probe, each with the old tarball as control; CI false positives
+  closed (contracts-dsh overlay without pipefail, A4 schema WARN, vacuous checks; `wf-lint.py`
+  gates the dsh-*.yml); summaries name the installed DSH, node and SHA. e2e checker R14 / Y2 judged
+  structurally (B line, `evidence-round33/b-*.md`).
 
 ## 0.49.35-dsh.6 (tag `dsh/0.49.35-dsh.6`, round 31, 2026-11-05)
 

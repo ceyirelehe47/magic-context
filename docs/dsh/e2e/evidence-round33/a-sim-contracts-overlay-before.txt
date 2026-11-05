@@ -1,0 +1,3 @@
+step 'Overlay DSH ${{ matrix.dsh }} (@deepseek-ai/*)' (.github/workflows/dsh-ci.yml:contracts-dsh) shell=/bin/bash -e stubs=['bash']
+stderr: stub bash: failing on purpose (packages/dsh-plugin/scripts/e2e/overlay-dsh-types.sh X <tmp>/dsh-overlay)
+step exit code: 0

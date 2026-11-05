@@ -1,0 +1,2 @@
+[old] node v22.23.3 via symlink: '' rc=0; exec link: ''; direct: '0.49.35-dsh.6'
+[head] node v22.23.3 via symlink: '0.49.35-dsh.7' rc=0; exec link: '0.49.35-dsh.7'; direct: '0.49.35-dsh.7'
