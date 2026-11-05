@@ -48,7 +48,37 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 33, 2026-11-05, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
+Baseline (round 34, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
+core v0.49.35 unchanged). **dsh.7 released** (user-approved 2026-11-06 00:09 CST): annotated tag
+`dsh/0.49.35-dsh.7` = tag object `c53d95218` → commit `d76150f60` (CI 42062657884, dsh-ci
+workflow_dispatch checks, green: 643 / 15 / 105 + ci-check unit 30 — the push of `d76150f60` went
+through only after a GitHub `commit_refs_rules` error and its push event created no run). No `v*` tag,
+no GitHub Release, no npm. No workflow is triggered by `dsh/*` tags (`dsh-install.yml` is dispatch-only).
+**dsh.8 prepared, not tagged:** version `0.49.35-dsh.8` (`3006f8c9a`); B6 fixed by option (a)
+(`a7c92e49f`: the four optional peers client-connection / client-ui-primitives / client-ui-slots /
+react dropped, required peers unchanged) + `d7d3064e5` (react 19.2.7 as a test-only devDependency,
+because bun had installed react only through that peer — push 42064111482 / 42065385722 failed on
+`client.test.ts` "Cannot find package 'react'" until then). Push CI 42066039991 @ `d7d3064e5`: `dsh-plugin`
+**647** (+4 B6), `adapter-api` **15**, `contracts:dsh` **105** (rc.5 / alpha.3 / rc.1), typecheck 0,
+ci-check unit **33** (+3 unique ids), wf-lint 0 findings. Install acceptance from `dsh/0.49.35-dsh.7`,
+**A0–A8 PASS on all three, A5 (npm install next to the npm-installed DSH, no --force /
+--legacy-peer-deps) PASS on rc.5 and alpha.3 for the first time**: final code rc.5 42066064277,
+alpha.3 42066083404, rc.1 42066100857 (also at `3006f8c9a`: 42064124868 / 42064140623 / 42064155721).
+Evidence: `docs/dsh/e2e/evidence-round34/README.md`.
+
+Decisions recorded this round (user, 2026-11-06 00:09 CST):
+- **T3 WARN kept** (scenario T, the model restating the constraint in its own live tail): not changed.
+- **C3 waits for an upstream fix** (DSH token-meter): no change, no narrowing.
+- **Upstream issue drafts** (`evidence-round33/b-upstream-issue-drafts.md`) **not filed** for now.
+- **Duplicate check ids renamed** (WT0–WT3, BS1, MP4; table in the CI section, "检查 ID 改名（第 34 轮）").
+- **dsh-soak.yml unfrozen**: may be changed, every run needs the user's approval (CI section). Not triggered.
+- Not done: no real-model e2e this round (no product logic change beyond the manifest; not requested).
+
+Round 34 commits: `a7c92e49f` B6 (a) + RED/GREEN test + RELEASE-NOTES dsh.8 待发, `3006f8c9a` version
+dsh.8, `c1dc8262f` unique ci-check ids, `cc8c5614e` soak unfrozen, `d7d3064e5` react devDependency, and
+the docs commit (this section, evidence-round34).
+
+Previous baseline (round 33, 2026-11-05, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
 core v0.49.35; product code still `c096b8a68` — rounds 32 docs / 33 changed CI, scripts, the e2e
 checker and docs only; version **`0.49.35-dsh.7`** prepared in `e80118969`, **no tag**): `dsh-plugin`
 **643 pass**, `adapter-api` **15**, `contracts:dsh` **105** on rc.5 / alpha.3 / rc.1, typecheck 0,

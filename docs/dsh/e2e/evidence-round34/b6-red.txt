@@ -1,0 +1,16 @@
+# B6 RED (before the package.json change): bun test src/doctor/dsh-optional-peers.test.ts
+    "@deepseek-ai/dsh-token-meter": "0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1",
++   "react": "^18.2.0",
+  }
+
+- Expected  - 0
++ Received  + 4
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/doctor/dsh-optional-peers.test.ts:58:34)
+(fail) B6 option (a): no optional client peers (round 34) > every non-optional peer is unchanged (narrowing only) [3.14ms]
+(pass) B6 option (a): no optional client peers (round 34) > the client still asks DSH for the connection service by name (inject), not through a peer [0.19ms]
+
+ 1 pass
+ 3 fail
+ 4 expect() calls
+Ran 4 tests across 1 file. [2.17s]

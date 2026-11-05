@@ -19,8 +19,9 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   conflicted with the tree next to DSH rc.5 / alpha.3 (ERESOLVE). This narrows the declaration only:
   every required DSH / cordis peer is unchanged, no DSH version is added. The client bundle does not
   resolve them through Node (`react` comes from DSH's `__ModuleLoader__`, the connection service through
-  `dsh.client.inject`). Acceptance: `dsh-install.yml` on rc.5 / alpha.3 / rc.1 from `dsh/0.49.35-dsh.7`
-  (see `docs/DSH-MAINTENANCE.md`, round 34).
+  `dsh.client.inject`). Acceptance: `dsh-install.yml` from `dsh/0.49.35-dsh.7`, A0–A8 PASS on rc.5
+  42066064277 / alpha.3 42066083404 / rc.1 42066100857 — `npm install` of the tarball next to the
+  npm-installed DSH now resolves on all three (A5). `react` 19.2.7 is a devDependency (tests only).
 - CI / test layer only: duplicate ci-check ids renamed (judgement unchanged; old→new table in
   `docs/DSH-MAINTENANCE.md`); `dsh-soak.yml` unfrozen with `dsh_version` / `node_version` inputs
   (defaults unchanged; running it still needs the user's approval).
