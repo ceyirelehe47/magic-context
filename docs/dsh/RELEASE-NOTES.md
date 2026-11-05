@@ -7,7 +7,7 @@ adapter layer). Version `<upstream>-dsh.N`, git tag `dsh/<upstream>-dsh.N`
 (`bun pm pack` in `packages/dsh-plugin`, as `dsh-install.yml` does).
 Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-round*`.
 
-## 0.49.35-dsh.7 — 待发 / pending (rounds 31–33; NO tag, not published)
+## 0.49.35-dsh.7 (tag `dsh/0.49.35-dsh.7`, rounds 31–33, 2026-11-06)
 
 Version prepared in `packages/dsh-plugin/package.json` (commit `e80118969`, revert it alone to drop
 the bump). Product code = `c096b8a68` (no adapter / core source change after it). Core: upstream
@@ -21,7 +21,9 @@ this code: rc.5 133/0/2, alpha.3 134/0/1, rc.1 134/0/1).
   resolves (dsh.6: ERESOLVE). **Not fixed for rc.5 / alpha.3** (round 33): npm still fails ERESOLVE
   there because it resolves the plugin's ABSENT optional peer `@deepseek-ai/dsh-client-ui-primitives`
   to 0.2.2-rc.1, whose cordis peer `~4.1.0` conflicts (same for dsh.6). The documented install
-  path (`dsh plugin add`, pnpm) is unaffected on all three DSH versions. Fix pending a user decision.
+  path (`dsh plugin add`, pnpm) is unaffected on all three DSH versions. **Known issue in dsh.7**
+  (user released dsh.7 with B6 open, 2026-11-06): install with `dsh plugin add`; a plain `npm install`
+  next to rc.5 / alpha.3 is not supported in this release.
 - **`dsh-magic-context` bin through a symlink** (npm / bun `.bin`, global bin) runs under node
   instead of exiting silently.
 - **ctx_expand** no longer shows Magic's own injected `<session-history>` / `<project-memory>` / `<project-docs>` /
