@@ -107,7 +107,7 @@ import { unwrapImitatedReducedArgs } from "@magic-context/core/tools/unwrap-imit
 import { registerTool } from "../compat/dsh-0.1/tools";
 import { createWorkerSelftestTool, workerSelftestEnabled } from "./worker-selftest";
 import { sessionEvents, textBlock } from "../compat/dsh-0.1/session";
-import { convertDshEventsToRawMessages, readDshHistory } from "./transcript";
+import { convertDshEventsToRawMessages, readDshHistory, withoutInjectedText } from "./transcript";
 import { observedProtectionWindow } from "./protection";
 import { scanSessionMetrics } from "./nudge";
 import type { ProtectedTokensTierOverrides } from "@magic-context/core/config/project-security";
@@ -1272,16 +1272,18 @@ export function readRawMessagesFromAgent(agent: Agent): RawMessage[] {
   };
   // No surface (DSH 0.1-shaped test doubles): the whole-log walk, as before.
   if (!Array.isArray(session.surface?.nodes)) return convertDshEventsToRawMessages(sessionEvents(agent.session));
-  return [
-    ...readDshHistory({
+  // Round 31: Magic's OWN injected text (m0/m1 <session-history> /
+  // <project-memory>, <ctx-search-hint>) is not conversation — OpenCode/Pi
+  // never store it, so their ctx_expand never shows it. Same filter as the
+  // historian / FTS input (round 24c); ordinals and ids are unchanged.
+  return readDshHistory({
       session: {
         events: sessionEvents(agent.session),
         surface: session.surface,
         header: { cwd: session.header?.cwd },
       } as never,
       canonicalSessionId: "",
-    }).messages,
-  ];
+    }).messages.map(withoutInjectedText);
 }
 
 export function createCtxExpandTool(ctx: Context, opts: CtxToolsOptions): ToolDefinition {

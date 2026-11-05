@@ -21,8 +21,10 @@ Pinned versions: `@deepseek-ai/dsh*` **0.2.1-rc.5** (exact, devDependencies +
 lockfile = the default path); **declared** DSH releases (peers, rounds 29/30):
 exactly `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1` (`DSH_COMPAT_SUPPORTED_VERSIONS` in
 `src/doctor/env.ts`; any other DSH, e.g. 0.2.2-rc.2 or 0.2.2, is refused by DSH's plugin
-manager and by `doctor`; release tag `dsh/0.49.35-dsh.5` declares rc.5 + alpha.3 only,
-rc.1 is on the branch since round 30; DSH 0.2.2-* needs node ≥ 24.9.0), `@deepseek-ai/cordis ~4.0.5`, core = the upstream tag the branch is
+manager and by `doctor`; release tag `dsh/0.49.35-dsh.6` (round 31) declares all three,
+`dsh/0.49.35-dsh.5` rc.5 + alpha.3 only; DSH 0.2.2-* needs node ≥ 24.9.0), `@deepseek-ai/cordis`
+devDependency `~4.0.5` (peer since round 31: `~4.0.5 || 4.0.6-alpha.2 || ~4.1.0`, plugin-include
+`~1.0.10 || 1.0.11-alpha.2 || ~1.1.0` = what each declared DSH depends on), core = the upstream tag the branch is
 based on (currently **v0.49.35**, merged in round 16). `doctor` checks the installed DSH against
 `DSH_COMPAT_SUPPORTED_VERSIONS` (default `DSH_COMPAT_EXPECTED_VERSION`) in `src/doctor/env.ts`.
 
@@ -66,9 +68,9 @@ Supported DSH versions:
 
 | DSH | npm dist-tag | declared since | release tag carrying it | node | default path |
 |---|---|---|---|---|---|
-| 0.2.1-rc.5 | latest | pinned before dsh.1 | dsh.1 … dsh.5 | 22 (CI) | yes (devDependencies, lockfile, push CI, contracts) |
-| 0.2.2-alpha.3 | alpha | round 29 | dsh.5 | ≥ 24.9.0 (CI node 24 since round 30) | no |
-| 0.2.2-rc.1 | next | round 30 | none yet (branch only) | ≥ 24.9.0 (CI node 24) | no |
+| 0.2.1-rc.5 | latest | pinned before dsh.1 | dsh.1 … dsh.6 | 22 (CI) | yes (devDependencies, lockfile, push CI, contracts) |
+| 0.2.2-alpha.3 | alpha | round 29 | dsh.5, dsh.6 | ≥ 24.9.0 (CI node 24 since round 30) | no (push CI `contracts-dsh` since round 31) |
+| 0.2.2-rc.1 | next | round 30 | dsh.6 | ≥ 24.9.0 (CI node 24) | no (push CI `contracts-dsh` since round 31) |
 
 0.2.2-rc.1 vs 0.2.2-alpha.3 (静态, all 89 `@deepseek-ai/dsh-*` packages + cordis 4.1.0 /
 plugin-include 1.1.0 / plugin-loader 1.1.0 / schemastery 3.19.0): byte-identical apart
