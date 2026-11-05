@@ -395,7 +395,7 @@ def check_r17(c, out: Path, runs):
     else:
         c.add("U5", False, "/ctx-status text agrees with the DB and the live host", st)
     doc = (out / "doctor-after.txt").read_text(errors="replace") if (out / "doctor-after.txt").exists() else ""
-    # Round 29: on a DSH the package declares (0.2.1-rc.5, 0.2.2-alpha.3) U6 is
+    # Round 29/30: on a DSH the package declares (0.2.1-rc.5, 0.2.2-alpha.3, 0.2.2-rc.1) U6 is
     # strict (rc 0, no FAIL). Only on an UNDECLARED DSH (round 28b evaluation
     # lane, dsh_version input) doctor's version line FAILs by design (rc 1), and
     # U6 then requires that this is the ONLY FAIL line.

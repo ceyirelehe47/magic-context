@@ -2,7 +2,7 @@
  * doctor/doctor — `dsh-magic-context doctor` (Phase 2 slice C).
  *
  * Checklist (each item reports ok/warn/fail + a fix hint):
- *   1. DSH version vs the declared releases (exact 0.2.1-rc.5 or 0.2.2-alpha.3);
+ *   1. DSH version vs the declared releases (exact 0.2.1-rc.5, 0.2.2-alpha.3 or 0.2.2-rc.1);
  *   2. bundle install state (profile package.json `dsh.profile.bundles`);
  *   3. profile patch layer (DSH 0.2): the setup-managed block in each Magic
  *      profile's cordis.patch.yml matches the rows derived from the current

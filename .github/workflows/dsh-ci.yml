@@ -7,7 +7,7 @@
 #           tests → adapter-api tests → contracts:dsh
 #   e2e     ONLY on workflow_dispatch with input e2e=true (spends model quota):
 #           real @deepseek-ai/dsh 0.2.1-rc.5 (or input dsh_version, e.g. the
-#           declared 0.2.2-alpha.3) headless + OpenCode Go
+#           declared 0.2.2-alpha.3 / 0.2.2-rc.1) headless + OpenCode Go
 #           (secret OPENCODE_API_KEY): worker self-test (normal + 1500 ms
 #           timeout), one session over three processes (§N§ identity across
 #           restarts), round 17 real-use scenarios (main session past the 65 %
@@ -35,7 +35,7 @@ on:
         type: string
         default: ""
       dsh_version:
-        description: "Optional @deepseek-ai/dsh version for the e2e job. Declared releases (round 29): 0.2.1-rc.5 (default) and 0.2.2-alpha.3 run with no exemption; any other version is the evaluation lane (exact-version exemption). Empty = DSH_PINNED below. Only the e2e job uses it; checks always run on the repo lockfile's DSH."
+        description: "Optional @deepseek-ai/dsh version for the e2e job. Declared releases (rounds 29/30): 0.2.1-rc.5 (default, node 22), 0.2.2-alpha.3 and 0.2.2-rc.1 (node 24) run with no exemption; any other version is the evaluation lane (exact-version exemption). Empty = DSH_PINNED below. Only the e2e job uses it; checks always run on the repo lockfile's DSH."
         type: string
         default: ""
 
@@ -166,7 +166,7 @@ jobs:
           bash scripts/e2e/install-profile.sh test headless
           source scripts/e2e/env.sh
           # Round 29: the plugin declares the exact DSH releases in its peers
-          # (0.2.1-rc.5 || 0.2.2-alpha.3; src/doctor/env.ts
+          # (0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1; src/doctor/env.ts
           # DSH_COMPAT_SUPPORTED_VERSIONS). On a declared DSH the bundle boots
           # with no exemption and doctor must exit 0, exactly as on rc.5.
           # Round 28b evaluation lane, kept ONLY for a DSH the package does not

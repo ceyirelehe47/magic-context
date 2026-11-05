@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       dsh_version:
-        description: "Optional @deepseek-ai/dsh version for the accept job. Declared (round 29): 0.2.1-rc.5 (default), 0.2.2-alpha.3 — HEAD gets no exemption there; an exemption is granted only to a tarball that does not declare the DSH (the old dsh.2 off rc.5). Empty = DSH_PINNED."
+        description: "Optional @deepseek-ai/dsh version for the accept job. Declared (rounds 29/30): 0.2.1-rc.5 (default, node 22), 0.2.2-alpha.3, 0.2.2-rc.1 (node 24) — HEAD gets no exemption there; an exemption is granted only to a tarball that does not declare the DSH (the old dsh.2 off rc.5). Empty = DSH_PINNED."
         type: string
         default: ""
 

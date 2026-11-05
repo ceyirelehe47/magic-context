@@ -58,7 +58,7 @@ for l in open(sys.argv[1], errors="replace"):
   TFENCE="$(grep -ci 'schema' "$OUT/turn-$s.log" 2>/dev/null || true)"
 }
 # Round 29: a tarball DECLARES the DSH releases it supports in its peers
-# (HEAD: 0.2.1-rc.5 || 0.2.2-alpha.3; dsh.2: 0.2.1-rc.5 only), judged by
+# (HEAD: 0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1; dsh.2: 0.2.1-rc.5 only), judged by
 # dsh-declared.py the way DSH's plugin manager judges them. A tarball that
 # declares the running DSH gets NO exemption and its doctor must exit 0.
 # Round 28b evaluation lane, now ONLY for a tarball that leaves the running DSH
