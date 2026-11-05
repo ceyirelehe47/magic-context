@@ -1,0 +1,11 @@
+error: expect(received).toBe(expected)
+Expected: true
+Received: false
+(fail) setup / writeFileAtomic through a symlink (round 35 F2) > writeFileAtomic keeps a symlinked target a symlink and updates the real file [1.65ms]
+71 |       expect(report.steps.filter((s) => s.status === "fail")).toEqual([]);
+error: expect(received).toBe(expected)
+Expected: true
+Received: false
+(fail) setup / writeFileAtomic through a symlink (round 35 F2) > setup on a profile whose package.json and cordis.patch.yml are symlinks keeps both links [23.16ms]
+ 0 pass
+ 2 fail

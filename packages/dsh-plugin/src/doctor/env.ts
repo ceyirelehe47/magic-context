@@ -15,13 +15,15 @@
  *   - storage dir: `~/.local/share/cortexkit/magic-context/`       (§2.1)
  */
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -274,10 +276,14 @@ export function magicStandardPresetYamlPath(dshHome: string): string {
  * looser permissions (0600 for generated secrets/config).
  */
 export function writeFileAtomic(
-  target: string,
+  linkOrTarget: string,
   content: string,
   mode = 0o600,
 ): void {
+  // Round 35 (F2): rename over a symlink replaces the LINK with a regular file
+  // (a profile kept in a dotfiles repo silently diverged). Write next to the
+  // file the link names instead, so the link stays a link.
+  const target = resolveWriteTarget(linkOrTarget);
   const dir = dirname(target);
   mkdirSync(dir, { recursive: true });
   const tmp = join(
@@ -291,6 +297,27 @@ export function writeFileAtomic(
     rmSync(tmp, { force: true });
     throw error;
   }
+}
+
+/**
+ * The path a write to `path` should replace: `path` itself, or — when `path`
+ * is a symlink (chains followed, at most 32 hops) — the file it finally names,
+ * even when that file does not exist yet (dangling link).
+ */
+function resolveWriteTarget(path: string): string {
+  let current = path;
+  for (let hop = 0; hop < 32; hop += 1) {
+    let isLink = false;
+    try {
+      isLink = lstatSync(current).isSymbolicLink();
+    } catch {
+      return current; // does not exist: write it here
+    }
+    if (!isLink) return current;
+    const next = readlinkSync(current);
+    current = isAbsolute(next) ? next : resolve(dirname(current), next);
+  }
+  throw new Error(`too many levels of symbolic links: ${path}`);
 }
 
 /**
