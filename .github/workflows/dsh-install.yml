@@ -6,15 +6,26 @@
 #           install dsh.2 → upgrade HEAD (data kept) → disable → roll back dsh.2
 #           (data readable or an explicit schema refusal). Judged by
 #           install-accept-check.py. Mock model only: no secrets.
+# Round 33 (P0, dsh.7 candidate): the HEAD tarball is the dispatched ref's own
+# HEAD (never a tag); input old_ref picks the release it upgrades from / rolls
+# back to (default dsh.2; dsh/0.49.35-dsh.6 for the dsh.7 candidate). pack also
+# runs `npm pack` and judges the tarball against its source manifest
+# (scripts/ci/tarball-inspect.py); accept adds the npm path next to the
+# npm-installed DSH (npm-bin-accept.sh: B2 ERESOLVE, B4 bin symlink) and the
+# ctx_expand probe in install-accept.sh (B5), each with the OLD tarball as control.
 name: dsh-install
 
 on:
   workflow_dispatch:
     inputs:
       dsh_version:
-        description: "Optional @deepseek-ai/dsh version for the accept job. Declared (rounds 29/30): 0.2.1-rc.5 (default, node 22), 0.2.2-alpha.3, 0.2.2-rc.1 (node 24) — HEAD gets no exemption there; an exemption is granted only to a tarball that does not declare the DSH (the old dsh.2 off rc.5). Empty = DSH_PINNED."
+        description: "Optional @deepseek-ai/dsh version for the accept job. Declared (rounds 29/30): 0.2.1-rc.5 (default, node 22), 0.2.2-alpha.3, 0.2.2-rc.1 (node 24) — HEAD gets no exemption there; an exemption is granted only to a tarball that does not declare the DSH (e.g. the old dsh.2 off rc.5). Empty = DSH_PINNED."
         type: string
         default: ""
+      old_ref:
+        description: "Released tag the HEAD tarball upgrades from and rolls back to (round 33). Default dsh/0.49.35-dsh.2."
+        type: string
+        default: "dsh/0.49.35-dsh.2"
 
 permissions:
   contents: read
@@ -36,8 +47,8 @@ jobs:
         include:
           - name: head
             ref: ""
-          - name: dsh2
-            ref: dsh/0.49.35-dsh.2
+          - name: old
+            ref: ${{ inputs.old_ref || 'dsh/0.49.35-dsh.2' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,6 +61,7 @@ jobs:
           node-version: "22"
       - name: Filtered workspace install + build + pack
         run: |
+          set -o pipefail
           timeout 600 bun install --ignore-scripts --backend=hardlink \
             --filter '@cortexkit/opencode-magic-context' --filter '@cortexkit/retina-local-fs' \
             --filter 'dsh-magic-context-adapter' --filter 'dsh-magic-context'
@@ -62,6 +74,20 @@ jobs:
           tar -tzf "$RUNNER_TEMP/tgz/${{ matrix.name }}.tgz" | wc -l
           tar -xzOf "$RUNNER_TEMP/tgz/${{ matrix.name }}.tgz" package/package.json | python3 -c 'import json,sys; p=json.load(sys.stdin); print(p["name"], p["version"], p.get("dependencies"))'
           git rev-parse HEAD > "$RUNNER_TEMP/tgz/${{ matrix.name }}.sha"
+          echo "${{ matrix.name }}: ref '${{ matrix.ref || github.ref_name }}' = $(git rev-parse HEAD), tarball $(tar -xzOf "$RUNNER_TEMP/tgz/${{ matrix.name }}.tgz" package/package.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: npm pack + inspect the tarball (HEAD gates, OLD informational)
+        run: |
+          set -o pipefail
+          cd packages/dsh-plugin
+          mkdir -p "$RUNNER_TEMP/npmpack"
+          timeout 120 npm pack --pack-destination "$RUNNER_TEMP/npmpack" > "$RUNNER_TEMP/npmpack/npm-pack.log" 2>&1 || { cat "$RUNNER_TEMP/npmpack/npm-pack.log"; exit 1; }
+          N="$(ls "$RUNNER_TEMP"/npmpack/dsh-magic-context-*.tgz)"
+          rc=0
+          python3 scripts/ci/tarball-inspect.py "$RUNNER_TEMP/tgz/${{ matrix.name }}.tgz" package.json --npm "$N" > "$RUNNER_TEMP/tgz/${{ matrix.name }}-inspect.md" || rc=$?
+          { echo "node -v $(node -v) · bun $(bun --version) · npm $(npm --version) · GITHUB_SHA $GITHUB_SHA"; cat "$RUNNER_TEMP/tgz/${{ matrix.name }}-inspect.md"; } | tee -a "$GITHUB_STEP_SUMMARY"
+          cp "$N" "$RUNNER_TEMP/tgz/${{ matrix.name }}-npm.tgz"
+          if [ "${{ matrix.name }}" = head ]; then exit $rc; fi
+          [ "$rc" = 0 ] || echo "::warning::OLD tarball differs from its manifest (informational)"
       - uses: actions/upload-artifact@v4
         with:
           name: tgz-${{ matrix.name }}
@@ -91,6 +117,7 @@ jobs:
           merge-multiple: true
       - name: Clean env — DSH from npm only (no repo node_modules)
         run: |
+          set -o pipefail
           echo "E2E_ROOT=$RUNNER_TEMP/e2e" >> "$GITHUB_ENV"
           echo "CI_OUT=$RUNNER_TEMP/e2e/accept" >> "$GITHUB_ENV"
           test ! -d node_modules && echo "repo node_modules: absent"
@@ -100,14 +127,24 @@ jobs:
           timeout 300 npm install --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION"
           npm i -g pnpm@latest >/dev/null 2>&1
           echo "pnpm $(pnpm --version)"
-          echo "node $(node --version)" | tee -a "$GITHUB_STEP_SUMMARY"
+          # Round 33 (P1-B): what actually ran — installed DSH from its package.json (must be
+          # the requested one), node, the commit, the two tarballs.
+          got="$(node -p "require('./node_modules/@deepseek-ai/dsh/package.json').version")"
+          {
+            echo "DSH version (installed): $got (requested $DSH_VERSION) · node -v $(node -v) · npm $(npm --version) · pnpm $(pnpm --version) · GITHUB_SHA $GITHUB_SHA"
+            for t in head old; do echo "tarball $t: $(tar -xzOf "$RUNNER_TEMP/tgz/$t.tgz" package/package.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])') @ $(cat "$RUNNER_TEMP/tgz/$t.sha")"; done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$got" = "$DSH_VERSION" ] || { echo "::error::installed DSH $got, requested $DSH_VERSION"; exit 1; }
           node node_modules/@deepseek-ai/dsh/lib/bin.js --version || true
           ls -la "$RUNNER_TEMP/tgz"
       - name: install → upgrade → disable → roll back
         env:
           OPENCODE_API_KEY: unused-mock-only
         run: |
-          bash packages/dsh-plugin/scripts/e2e/install-accept.sh "$RUNNER_TEMP/tgz/dsh2.tgz" "$RUNNER_TEMP/tgz/head.tgz"
+          bash packages/dsh-plugin/scripts/e2e/install-accept.sh "$RUNNER_TEMP/tgz/old.tgz" "$RUNNER_TEMP/tgz/head.tgz"
+      - name: npm path next to the npm-installed DSH (B2 / B4; OLD = control)
+        run: |
+          bash packages/dsh-plugin/scripts/e2e/npm-bin-accept.sh "$RUNNER_TEMP/e2e/dsh" head="$RUNNER_TEMP/tgz/head.tgz" old="$RUNNER_TEMP/tgz/old.tgz"
       - name: Check
         run: |
           set -o pipefail
@@ -116,6 +153,8 @@ jobs:
         if: always()
         with:
           name: dsh-install-${{ github.run_id }}
-          path: ${{ runner.temp }}/e2e/accept
+          path: |
+            ${{ runner.temp }}/e2e/accept
+            ${{ runner.temp }}/tgz/*-inspect.md
           retention-days: 7
           if-no-files-found: warn

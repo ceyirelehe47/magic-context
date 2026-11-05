@@ -5,7 +5,7 @@
 # installed the documented way (`dsh plugin --profile <p> add <tgz>` = pnpm in
 # the profile directory).
 #
-#   install-accept.sh <old.tgz (dsh.2)> <new.tgz (HEAD)>
+#   install-accept.sh <old.tgz (a released tag, default dsh.2)> <new.tgz (HEAD)>
 #
 # Steps (each a real `dsh` headless turn on the deterministic mock model):
 #   a  install OLD → setup → doctor → turn (Magic active, DB written)
@@ -15,8 +15,12 @@
 #      write, managed block gone)
 #   d  roll back to OLD → setup → doctor → turn (or a visible schema-fence
 #      refusal — recorded, never silent)
-# Writes $OUT/accept.jsonl (one JSON line per step) + logs; the job judges it
-# with install-accept-check.py.
+# Round 33 (P0): step a writes a project memory (ctx_memory), steps b (NEW) and d
+# (OLD) call ctx_expand over the session's first ordinals: NEW must not show Magic's
+# own injected <session-history> / <project-memory> text (B5, 4a29a6bf5), OLD is the
+# control. Step b also runs the CLI through the profile's pnpm .bin shim.
+# Writes $OUT/accept.jsonl (one JSON line per step, plus a `meta` line with both
+# tarball versions) + logs; the job judges it with install-accept-check.py.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OLD="$(readlink -f "$1")"
@@ -41,12 +45,40 @@ PY
 }
 
 export MOCK_LLM_PORT=18595 MOCK_LLM_KEY=mock-not-a-secret
-echo '{"a":[{"text":"DONE a"}],"b":[{"text":"DONE b"}],"c":[{"text":"DONE c"}],"d":[{"text":"DONE d"}]}' > "$OUT/plans.json"
+cat > "$OUT/plans.json" <<'JSON'
+{"a":[{"tool":"ctx_memory","args":{"action":"write","category":"PROJECT_RULES","content":"Acceptance rule ACC-RULE-7731: the ledger has exactly one writer."},"once":true},{"text":"DONE a"}],
+ "b":[{"tool":"ctx_expand","args":{"start":1,"end":60},"once":true},{"text":"DONE b"}],
+ "c":[{"text":"DONE c"}],
+ "d":[{"tool":"ctx_expand","args":{"start":1,"end":60},"once":true},{"text":"DONE d"}]}
+JSON
+tgzver() { tar -xzOf "$1" package/package.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'; }
+rec step meta oldVersion "$(tgzver "$OLD")" newVersion "$(tgzver "$NEW")" dshInstalled "$(node -p "require('$DSH_INSTALL_DIR/package.json').version" 2>/dev/null || echo missing)"
+# tool <log> <tool-name> -> JSON {status, len, injected, user, needle} of the first result of that tool
+tool() { python3 - "$1" "$2" <<'PY'
+import json, sys
+calls, res = {}, None
+for l in open(sys.argv[1], errors="replace"):
+    try: o = json.loads(l)
+    except Exception: continue
+    if o.get("type") == "tool_call": calls[o.get("callId")] = o.get("tool")
+    elif o.get("type") == "tool_result" and calls.get(o.get("callId")) == sys.argv[2] and res is None:
+        r = o.get("result"); t = r if isinstance(r, str) else json.dumps(r, ensure_ascii=False)
+        res = {"status": o.get("status"), "len": len(t),
+               "injected": sum(t.count(m) for m in ("<session-history>", "<project-memory>", "<ctx-search-hint>")),
+               "user": t.count("MOCK:a"), "needle": t.count("ACC-RULE-7731")}
+print(json.dumps(res or {"status": "none"}))
+PY
+}
+J() { python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2], ""))' "$1" "$2"; }
 SID=""
+# Round 33: ONE mock session key for all four turns. The mock tracks plan progress
+# per key and follows the newest [[MOCK:x]] marker in a request; ctx_expand output
+# (b, d) quotes turn a's marker, so a per-turn key would replay plan a there.
+ACC_SESSION="acc-$(date +%s)"
 turn() { # turn <step>
   local s="$1"
   RUN_LOG="$OUT/turn-$s.log" PROFILE=$P EXTRA_PATCH="$HERE/model-mock.yml" MC_E2E_MAIN_PROVIDER=mock-24k \
-    OPENCODE_SESSION="acc-$s-$(date +%s)" RUN_TIMEOUT=180 \
+    OPENCODE_SESSION="$ACC_SESSION" RUN_TIMEOUT=180 \
     bash "$HERE/run-headless.sh" "Reply when done. [[MOCK:$s]]" ${SID:+"$SID"} > "$OUT/turn-$s.out" 2>&1
   [[ -z "$SID" ]] && SID="$(python3 -c 'import json,sys
 for l in open(sys.argv[1], errors="replace"):
@@ -103,7 +135,8 @@ CLI setup --profile $P > "$OUT/setup-a.log" 2>&1; rc_s=$?
 CLI doctor --profile $P > "$OUT/doctor-a.log" 2>&1; rc_d=$?; doctor_rc "$OUT/doctor-a.log" "$rc_d"; rc_d=$DRC; pin_a=$PIN_ONLY
 ver=$(CLI --version 2>/dev/null | tail -n 1)
 turn a
-rec step a install "$rc_i" setup "$rc_s" doctor "$rc_d" doctorPin "$pin_a" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" \
+TA="$(tool "$OUT/turn-a.log" ctx_memory)"
+rec step a memStatus "$(J "$TA" status)" install "$rc_i" setup "$rc_s" doctor "$rc_d" doctorPin "$pin_a" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" \
   db "$([[ -f "$DB" ]] && echo yes || echo no)" tags "$(dbq 'select count(*) from tags')" sid "$SID" \
   mock "$(head -c 120 "$OUT/mock.log")"
 
@@ -112,9 +145,13 @@ CUR_TGZ="$NEW"; rc_i=$(install_tgz "$NEW" b)
 CLI setup --profile $P > "$OUT/setup-b.log" 2>&1; rc_s=$?
 CLI doctor --profile $P > "$OUT/doctor-b.log" 2>&1; rc_d=$?; doctor_rc "$OUT/doctor-b.log" "$rc_d"; rc_d=$DRC; pin_b=$PIN_ONLY
 ver=$(CLI --version 2>/dev/null | tail -n 1)
+# the CLI through the profile's pnpm .bin shim (the npm/bun symlink path: npm-bin-accept.sh)
+binp=$( [[ -e "$PDIR/node_modules/.bin/dsh-magic-context" ]] && "$PDIR/node_modules/.bin/dsh-magic-context" --version 2>/dev/null | tail -n 1 || echo '<missing>')
 tags_before=$(dbq 'select count(*) from tags')
 turn b
-rec step b install "$rc_i" setup "$rc_s" doctor "$rc_d" doctorPin "$pin_b" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" \
+TB="$(tool "$OUT/turn-b.log" ctx_expand)"
+rec step b binPnpm "$binp" expandStatus "$(J "$TB" status)" expandLen "$(J "$TB" len)" expandInjected "$(J "$TB" injected)" expandUser "$(J "$TB" user)" \
+  install "$rc_i" setup "$rc_s" doctor "$rc_d" doctorPin "$pin_b" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" \
   tagsBefore "$tags_before" tags "$(dbq 'select count(*) from tags')" integrity "$(dbq 'pragma integrity_check')"
 
 # --- c: disable
@@ -133,7 +170,8 @@ CLI doctor --profile $P > "$OUT/doctor-d.log" 2>&1; rc_d=$?; doctor_rc "$OUT/doc
 ver=$(CLI --version 2>/dev/null | tail -n 1)
 tags_before=$(dbq 'select count(*) from tags')
 turn d
-rec step d install "$rc_i" setup "$rc_s" doctor "$rc_d" doctorPin "$pin_d" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" schemaLines "$TFENCE" \
+TD="$(tool "$OUT/turn-d.log" ctx_expand)"
+rec step d expandStatus "$(J "$TD" status)" expandLen "$(J "$TD" len)" expandInjected "$(J "$TD" injected)" expandUser "$(J "$TD" user)" install "$rc_i" setup "$rc_s" doctor "$rc_d" doctorPin "$pin_d" version "$ver" rc "${TRC:-x}" magicLines "$TMAGIC" schemaLines "$TFENCE" \
   tagsBefore "$tags_before" tags "$(dbq 'select count(*) from tags')" integrity "$(dbq 'pragma integrity_check')"
 
 kill "$MOCK_PID" 2>/dev/null; wait "$MOCK_PID" 2>/dev/null
