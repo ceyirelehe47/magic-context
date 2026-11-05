@@ -1,0 +1,64 @@
+{
+ "source": "dsh-e2e artifact of run 41842392546 (trimmed to what Y2 reads)",
+ "runs": {
+  "y-1": "rc=137 elapsed=1.3s log=~/work/_temp/e2e/logs/run-43.log",
+  "y-2": "rc=0 elapsed=1.5s log=~/work/_temp/e2e/logs/run-44.log",
+  "y-3": "rc=0 elapsed=3.2s log=~/work/_temp/e2e/logs/run-48.log"
+ },
+ "y-kill.json": {
+  "held": true,
+  "killedPid": 4789,
+  "at": 1793801152195
+ },
+ "y-2-status.jsonl": [
+  {
+   "at": 1793801153221,
+   "kind": "step",
+   "turn": 2,
+   "step": 1,
+   "historianBusy": true,
+   "leases": [
+    {
+     "holder_id": "dsh-historian:dsh:7114782d:session-ba5ec2b3-600f-415d-ad86-48dcadc0c455:4847:a8cca8e6",
+     "owner_pid": 4847,
+     "expires_at": 1793801453217
+    }
+   ]
+  }
+ ],
+ "db-y-1k.json": {
+  "historianRuns": [],
+  "leases": [
+   {
+    "holder_id": "dsh-historian:dsh:7114782d:session-ba5ec2b3-600f-415d-ad86-48dcadc0c455:4789:2fde4f4e",
+    "owner_pid": 4789,
+    "expires_at": 1793801451915,
+    "now": 1793801152274
+   }
+  ],
+  "compartments": []
+ },
+ "db-y-2.json": {
+  "historianRuns": [
+   {
+    "id": 43,
+    "status": "noop",
+    "failure_reason": "nothing to compact (eligibleEnd=1 <= offset=1)",
+    "created_at": 1793801153222
+   },
+   {
+    "id": 44,
+    "status": "noop",
+    "failure_reason": "nothing to compact (eligibleEnd=1 <= offset=1)",
+    "created_at": 1793801153316
+   }
+  ],
+  "leases": [],
+  "meta": {
+   "compartment_in_progress": 0,
+   "historian_failure_count": 0,
+   "last_context_percentage": 63
+  },
+  "compartments": []
+ }
+}
