@@ -1,0 +1,8 @@
+# node b-st1-cordis-yml-race-repro.mjs (round 27 mechanism repro, rerun round 33, 2 runs x 3 s)
+reads=508306 not-a-top-level-array=246118 sample=""
+reads=402476 not-a-top-level-array=151109 sample=""
+
+# DSH 0.2.2-rc.1 (npm pack @deepseek-ai/dsh@0.2.2-rc.1) lib/profile-boot-e2mS45fC.js, static:
+  in function prepareProfile -> writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
+  in function composeProfile -> writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
+  lock / pid-file mentions in profile-boot: 0

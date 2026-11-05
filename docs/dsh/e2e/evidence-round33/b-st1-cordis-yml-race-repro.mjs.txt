@@ -1,0 +1,21 @@
+// Mechanism repro for e2e ST1 (DSH-native): dsh/lib/profile-boot-*.js prepareProfile()
+// rewrites <profile>/cordis.yml IN PLACE with writeFileSync on every boot (O_TRUNC then write),
+// while a concurrent boot's dsh-app-boot Include.read() does readFile + yaml.load + Array.isArray.
+import { writeFileSync, readFileSync } from "node:fs";
+import { fork } from "node:child_process";
+import { createRequire } from "node:module";
+const require = createRequire("/workspace/work/e2e/dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js");
+const yaml = require("js-yaml");
+const F = "/tmp/r27c/cordis.yml";
+const ROOT = `# dsh profile root — an empty entry list. The tree is composed as patches:
+# each bundle in package.json's dsh.profile.bundles, then cordis.patch.yml, then any
+# --patch overlays. Edit cordis.patch.yml, not this file.
+[]
+`;
+if (process.argv[2] === "writer") { const end = Date.now() + 3000; while (Date.now() < end) writeFileSync(F, ROOT); process.exit(0); }
+writeFileSync(F, ROOT);
+const w = fork(new URL(import.meta.url).pathname, ["writer"]);
+let reads = 0, bad = 0, sample = null; const end = Date.now() + 3000;
+while (Date.now() < end) { const c = readFileSync(F, "utf8"); reads++; const d = yaml.load(c); if (!Array.isArray(d)) { bad++; sample ??= JSON.stringify(c.slice(0, 40)); } }
+await new Promise(r => w.on("exit", r));
+console.log(`reads=${reads} not-a-top-level-array=${bad} sample=${sample}`);

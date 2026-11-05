@@ -1,0 +1,26 @@
+// Round 33 C3 minimal repro (DSH 0.2.1-rc.5 @deepseek-ai/dsh-token-meter):
+// a plugin surface `replace` that shrinks a node is priced with zero delta
+// unless the immediately preceding event is a compaction/summary|prune
+// shadow-price claim for exactly that range.
+import { foldSurfaceProjection } from "./node_modules/@deepseek-ai/dsh-token-meter/lib/types/surface-projection.js";
+const big = "x".repeat(16884);          // the untruncated read result
+const small = "x".repeat(16884 - 13750); // Magic's pressure-truncated copy
+const msg = (seq: number, text: string, surfaceOp: unknown) => ({
+  type: "user/message", seq, time: 0, surfaceOp,
+  data: { content: [{ type: "text", text }], source: { kind: "magic-context" } },
+});
+let total = 0, claim: any;
+const step = (label: string, e: any) => {
+  const f = foldSurfaceProjection(claim, e as never); total += f.deltaTokens; claim = f.claim;
+  console.log(`${label.padEnd(48)} delta=${String(f.deltaTokens).padStart(6)} total=${total}`);
+};
+console.log("A) plugin replace WITHOUT a claim (what Magic's surface transaction produces):");
+step("append node 10 (16 884 chars)", msg(10, big, "append"));
+step("replace 10..10 with 3 134 chars (no claim)", msg(11, small, { op: "replace", startSeq: 10, endSeq: 10 }));
+const noClaim = total;
+total = 0; claim = undefined;
+console.log("B) same replace preceded by a compaction/prune shadow-price claim (DSH-native compaction path):");
+step("append node 10 (16 884 chars)", msg(10, big, "append"));
+step("compaction/prune claim 10..10", { type: "compaction/prune", seq: 11, time: 0, data: { shadowedRange: { start: 10, end: 10 }, shadowedTokenCount: Math.ceil(16884 / 4) } });
+step("replace 10..10 with 3 134 chars", msg(12, small, { op: "replace", startSeq: 10, endSeq: 10 }));
+console.log(`projection after the rewrite: A=${noClaim} tokens (unchanged), B=${total} tokens`);

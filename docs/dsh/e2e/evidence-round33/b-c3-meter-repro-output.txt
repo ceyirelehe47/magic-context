@@ -1,0 +1,11 @@
+# bun b-c3-meter-repro.ts (run from packages/dsh-plugin, DSH 0.2.1-rc.5 dsh-token-meter installed)
+A) plugin replace WITHOUT a claim (what Magic's surface transaction produces):
+append node 10 (16 884 chars)                    delta=  4229 total=4229
+replace 10..10 with 3 134 chars (no claim)       delta=     0 total=4229
+B) same replace preceded by a compaction/prune shadow-price claim (DSH-native compaction path):
+append node 10 (16 884 chars)                    delta=  4229 total=4229
+compaction/prune claim 10..10                    delta=     0 total=4229
+replace 10..10 with 3 134 chars                  delta= -3429 total=800
+projection after the rewrite: A=4229 tokens (unchanged), B=800 tokens
+
+# 0.2.2-rc.1 (npm pack @deepseek-ai/dsh-token-meter@0.2.2-rc.1): same fold — lib/index.js contains the identical 'if (claim === void 0) return { deltaTokens: 0 …' branch and the doc comment 'A replace with no claim folds with zero delta' (static grep; not executed: the packed copy has no dsh-session next to it)
