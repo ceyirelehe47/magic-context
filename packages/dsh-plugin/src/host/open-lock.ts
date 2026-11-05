@@ -20,7 +20,7 @@
  * on a real error). Only DSH processes honour this lock: a concurrent first
  * open by an OpenCode/Pi process is still core's race (documented).
  */
-import { linkSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { linkSync, lstatSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { isPidAlive } from "@magic-context/core/shared/rpc-utils";
 import { isPidNewerThan } from "../agent/lease-liveness";
@@ -75,6 +75,19 @@ function createExclusive(path: string, content: string): boolean {
   }
 }
 
+/** Does anything (file, directory, dangling symlink) exist at `path`? */
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    // Only "really gone" counts as released; any other stat error (EACCES on
+    // the directory, EIO) is an unreadable lock, not a free one.
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== "ENOENT" && code !== "ENOTDIR";
+  }
+}
+
 /** Age of the file in ms (Infinity when it cannot be read). */
 function fileAgeMs(path: string, now: number): number {
   try {
@@ -108,8 +121,10 @@ function staleReason(record: LockRecord, now: number, path?: string): string | n
 export async function acquireDshOpenLock(
   dbPath: string,
   log: (message: string) => void,
+  opts: { readonly maxWaitMs?: number } = {},
 ): Promise<() => void> {
   const path = dshOpenLockPath(dbPath);
+  const maxWaitMs = opts.maxWaitMs ?? MAX_WAIT_MS;
   const started = Date.now();
   const mine = JSON.stringify({ pid: process.pid, acquiredAt: started });
   let waitedFor: number | null = null;
@@ -121,7 +136,24 @@ export async function acquireDshOpenLock(
     if (createExclusive(path, mine)) break;
     const now = Date.now();
     const held = readLock(path);
-    if (held === null) continue; // released between our attempt and the read
+    if (held === null) {
+      if (!pathExists(path)) continue; // released between our attempt and the read
+      // Round 35 (F1): the path exists but cannot be read (a directory, a file
+      // without read permission, an I/O error). Retrying at once without an
+      // await spun synchronously forever and hung the DSH boot with no log.
+      // Treat it as a live holder we cannot identify: log once, poll, and open
+      // without the lock after the max wait. Never removed here.
+      if (waitedFor === null) {
+        waitedFor = -1;
+        log(`[magic-context] dsh open lock: ${path} exists but cannot be read; waiting up to ${maxWaitMs} ms`);
+      }
+      if (now - started > maxWaitMs) {
+        log(`[magic-context] dsh open lock: ${path} still unreadable after ${maxWaitMs} ms; opening without the lock`);
+        return () => {};
+      }
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      continue;
+    }
     const stale = staleReason(held.record, now, path);
     if (stale !== null) {
       // Round 27 C5: remove only the exact record we judged stale, and only
@@ -141,8 +173,8 @@ export async function acquireDshOpenLock(
       continue;
     }
     if (waitedFor === null) waitedFor = typeof held.record.pid === "number" ? held.record.pid : -1;
-    if (now - started > MAX_WAIT_MS) {
-      log(`[magic-context] dsh open lock: holder pid ${waitedFor} still live after ${MAX_WAIT_MS} ms; opening without the lock`);
+    if (now - started > maxWaitMs) {
+      log(`[magic-context] dsh open lock: holder pid ${waitedFor} still live after ${maxWaitMs} ms; opening without the lock`);
       return () => {};
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));

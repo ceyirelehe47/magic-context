@@ -1,0 +1,25 @@
+
+Expected: false
+Received: true
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/host/open-lock-unreadable.test.ts:49:24)
+(fail) dsh open lock: lock path exists but cannot be read (round 35 F1) > a directory at the lock path: bounded wait, logged, then opens without the lock (no spin) [15033.21ms]
+62 |     const e = env();
+63 |     try {
+64 |       writeFileSync(dshOpenLockPath(e.db), JSON.stringify({ pid: 1, acquiredAt: Date.now() }));
+65 |       chmodSync(dshOpenLockPath(e.db), 0o000);
+66 |       const r = await runChild(e.db, 400, 15_000);
+67 |       expect(r.killed).toBe(false);
+                            ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (/workspace/work/magic-context/packages/dsh-plugin/src/host/open-lock-unreadable.test.ts:67:24)
+(fail) dsh open lock: lock path exists but cannot be read (round 35 F1) > a lock file without read permission: same bounded wait (non-root only) [15012.54ms]
+
+ 0 pass
+ 2 fail
+ 2 expect() calls
+Ran 2 tests across 1 file. [30.80s]
