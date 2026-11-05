@@ -154,7 +154,7 @@ selftest; GitHub's default `run:` shell is `bash -e` without pipefail).
 | 11 | ci-check.py: 10 rows PASS on an empty CI_OUT | 已复现; **fixed this round** `25b43db8c` (above) |
 | 12 | skipped counted as passed | 非缺陷 |
 | 13 | stale dependencies / cache (no actions/cache; pnpm@latest floats) | 非缺陷; pinning pnpm is a possible follow-up |
-| 14 | dsh-soak.yml summary lacks DSH / node / SHA; per-segment `\|\| true` | 未修复 (frozen), `\|\| true` by design |
+| 14 | dsh-soak.yml summary lacks DSH / node / SHA; per-segment `\|\| true` | 未修复 (frozen) in round 33; **fixed in round 34** (summary + installed-version assert + pipefail), `\|\| true` by design |
 | 15 | job conclusion vs reality | 非缺陷 |
 
 "master overlay tests passed" ≠ "real DSH master app boot": `dsh-ref-eval.yml` never starts `dsh`.
@@ -1089,6 +1089,20 @@ contracts 98，两个 typecheck 0 错误）；dispatch run 41497195497（`e2e=tr
 首次结果（round 14）：push run 41464023149（`checks` 全绿：dsh-plugin 425 / adapter-api 15 /
 contracts 98，typecheck:dsh 和 core typecheck 均 0 错误）；dispatch run 41464255692
 （`e2e=true`，`checks` + `e2e` 全部 PASS，`T2` 在真实 rc.5 上确认了 `502d74b94` 的超时原因日志）。
+
+### `dsh-soak.yml`（可改，但运行需用户批准；第 34 轮）
+
+第 33 轮的任务约束把 `dsh-soak.yml` 冻结。用户 2026-11-06 00:09 CST 决定解冻：**文件可以改，但任何一次 soak 运行
+（包括短跑）都要用户先批准**。第 34 轮改动（未触发运行）：
+
+- `workflow_dispatch` 新输入 `dsh_version`（默认 `0.2.1-rc.5`）和 `node_version`（默认 `22`）。默认值下 DSH、node、
+  分段、超时、真实模型采样与之前完全一致。
+- `plan` job 先校验：`dsh_version` 必须是包声明的版本（`dsh-declared.py`；soak 没有豁免通道，不扩大支持范围）；
+  `0.2.2-alpha.3` / `0.2.2-rc.1` 要求 `node_version` ≥ 24.9（`24` = 最新 24.x 也接受；`22`、`24.8` 拒绝）。
+- 每个分段：bootstrap 之后读取实际安装的 DSH 版本，与请求不符直接失败；0.2.2 线再核对运行器上的 `node -v` ≥ 24.9；
+  job summary 写明 `DSH version (installed)`、`node -v`、`GITHUB_SHA`（第 33 轮 CI 审计 #14 的 REPORT WARN）。
+- `run` 步骤加 `set -o pipefail`。分段内 `soak-check.py … || true` 保持原设计（趋势由最后的 `check` job 判定）。
+- `wf-lint.py` 的 `FROZEN` 清空：soak 现在与其他 `dsh-*.yml` 一样按规则判 FAIL，当前 0 finding。
 
 ## Syncing with upstream
 

@@ -13,6 +13,15 @@
 #
 #   short check:  segments=2  segment_minutes=10
 #   12 h soak:    segments=4  segment_minutes=180
+#
+# Round 34 (user decision 2026-11-06 00:09 CST: unfrozen; RUNNING it still needs the
+# user's approval): inputs dsh_version (default 0.2.1-rc.5) and node_version (default
+# 22) — defaults reproduce the earlier behaviour exactly. dsh_version must be a DSH the
+# package declares (dsh-declared.py; no exemption lane here); DSH 0.2.2-alpha.3 /
+# 0.2.2-rc.1 need node >= 24.9 (checked on the input and on the installed node). Each
+# segment fails when the installed DSH is not the requested one, and its summary names
+# the installed DSH, node -v and GITHUB_SHA (round 33 CI audit finding 14); run steps
+# use pipefail.
 name: dsh-soak
 
 on:
@@ -27,6 +36,14 @@ on:
       real_every_minutes:
         description: "Real-model sample interval in minutes (0 = none)"
         default: "30"
+      dsh_version:
+        description: "@deepseek-ai/dsh version (round 34). Must be declared by the package: 0.2.1-rc.5 (default, node 22), 0.2.2-alpha.3, 0.2.2-rc.1 (node >= 24.9)"
+        type: string
+        default: "0.2.1-rc.5"
+      node_version:
+        description: "actions/setup-node version (round 34). Default 22; 0.2.2-alpha.3 / 0.2.2-rc.1 require >= 24.9 (e.g. 24 = newest 24.x)"
+        type: string
+        default: "22"
 
 permissions:
   contents: read
@@ -38,7 +55,8 @@ concurrency:
 
 env:
   BUN_VERSION: 1.4.2
-  DSH_VERSION: 0.2.1-rc.5
+  DSH_VERSION: ${{ inputs.dsh_version || '0.2.1-rc.5' }}
+  NODE_VERSION: ${{ inputs.node_version || '22' }}
 
 jobs:
   plan:
@@ -48,9 +66,28 @@ jobs:
       segs: ${{ steps.p.outputs.segs }}
       timeout: ${{ steps.p.outputs.timeout }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            packages/dsh-plugin/package.json
+            packages/dsh-plugin/scripts/e2e/dsh-declared.py
+          sparse-checkout-cone-mode: false
       - id: p
         run: |
+          set -o pipefail
           n='${{ inputs.segments }}'; m='${{ inputs.segment_minutes }}'
+          # Round 34: only a DSH the package declares (no support widening, no exemption lane),
+          # and node >= 24.9 for the 0.2.2 line (DSH engines).
+          python3 packages/dsh-plugin/scripts/e2e/dsh-declared.py packages/dsh-plugin/package.json "$DSH_VERSION" \
+            || { echo "::error::dsh_version $DSH_VERSION is not declared by packages/dsh-plugin/package.json"; exit 1; }
+          [[ "$NODE_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "::error::node_version must be N, N.M or N.M.P (got $NODE_VERSION)"; exit 1; }
+          case "$DSH_VERSION" in
+            0.2.2-alpha.3|0.2.2-rc.1)
+              IFS=. read -r nmaj nmin _ <<< "$NODE_VERSION"
+              if (( nmaj < 24 )) || { (( nmaj == 24 )) && [[ -n "$nmin" ]] && (( nmin < 9 )); }; then
+                echo "::error::DSH $DSH_VERSION needs node >= 24.9 (node_version $NODE_VERSION)"; exit 1
+              fi ;;
+          esac
           [[ "$n" =~ ^[0-9]+$ && "$n" -ge 1 && "$n" -le 8 ]] || { echo "::error::segments must be 1..8"; exit 1; }
           [[ "$m" =~ ^[0-9]+$ && "$m" -ge 1 && "$m" -le 300 ]] || { echo "::error::segment_minutes must be 1..300"; exit 1; }
           echo "segs=$(python3 -c "import json;print(json.dumps(list(range(1,$n+1))))")" >> "$GITHUB_OUTPUT"
@@ -80,14 +117,25 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Bootstrap + build + scratch profile
         working-directory: packages/dsh-plugin
         env:
           INSTALL_TIMEOUT: "600"
         run: |
+          set -o pipefail
           bash scripts/e2e/bootstrap.sh
+          # Round 34: fail here when the installed DSH / node is not what was asked for, and
+          # name what actually runs (CI audit finding 14).
+          got="$(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version")"
+          [ "$got" = "$DSH_VERSION" ] || { echo "::error::installed DSH $got, requested $DSH_VERSION"; exit 1; }
+          case "$DSH_VERSION" in
+            0.2.2-alpha.3|0.2.2-rc.1)
+              node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>24||(a===24&&b>=9)?0:1)' \
+                || { echo "::error::DSH $DSH_VERSION needs node >= 24.9, runner has $(node -v)"; exit 1; } ;;
+          esac
+          echo "### soak segment ${{ matrix.seg }}: DSH version (installed): $got (requested $DSH_VERSION) · node -v $(node -v) · GITHUB_SHA $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
           bun run build
           bash scripts/e2e/install-profile.sh test headless
           source scripts/e2e/env.sh
@@ -108,6 +156,7 @@ jobs:
           SOAK_MINUTES: ${{ inputs.segment_minutes }}
           SOAK_REAL_EVERY_MIN: ${{ inputs.real_every_minutes }}
         run: |
+          set -o pipefail
           if [ "${{ matrix.seg }}" -gt 1 ] && [ ! -f "$SOAK_STATE/state.tgz" ]; then
             echo "::error::segment ${{ matrix.seg }}: no state from segment $PREV"; exit 1
           fi

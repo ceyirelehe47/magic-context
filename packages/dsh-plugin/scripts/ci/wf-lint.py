@@ -22,7 +22,8 @@ Rules (each a way a job can end green although the thing it tests failed):
           ("DSH version (installed): <v>", read from the installed package.json), the node version (`node -v` / `node --version`) and GITHUB_SHA into
           $GITHUB_STEP_SUMMARY.
 
-Workflows the round may not change (dsh-soak.yml: round 33 constraint) are reported as WARN.
+Workflows the round may not change are listed in FROZEN and reported as WARN (none since round 34:
+dsh-soak.yml was unfrozen by the user 2026-11-06 and now passes every rule).
 Upstream workflows (not dsh-*.yml) are out of scope.
 """
 import json
@@ -35,7 +36,7 @@ from pathlib import Path
 
 import yaml
 
-FROZEN = {"dsh-soak.yml": "not changed in round 33 (soak frozen by the task constraints)"}
+FROZEN = {}  # round 33 froze dsh-soak.yml; unfrozen in round 34 (user decision 2026-11-06 00:09 CST)
 
 
 # ---------------------------------------------------------------- shell text helpers
