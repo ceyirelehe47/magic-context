@@ -104,6 +104,13 @@ All at `89dbfe543` (product code `c096b8a68`, version dsh.7). Every run's summar
   (b) keep them and document `dsh plugin add` / pnpm as the only supported install path;
   (c) leave the release note as corrected and fix after dsh.7.
 
+## Real e2e on the same product code (`c096b8a68`)
+
+rc.5 42037652492 (node 22) **133 / 0 / 2**, rc.1 42034156577 (node 24) **134 / 0 / 1**, alpha.3
+42051660209 (node 24.22.2, this round, slot a) **134 / 0 / 1** — WARNs: E2 (core RRF ranking with a
+real embedding model, upstream) on all three, T3 on rc.5 (model restated the constraint). Details:
+`a-compat-matrix.md`.
+
 ## dsh.7 candidate verdict
 
 - **No blocker on the documented install path**: on rc.5 (node 22), alpha.3 and rc.1 (node 24) the

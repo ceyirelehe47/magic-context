@@ -12,7 +12,9 @@ Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-roun
 Version prepared in `packages/dsh-plugin/package.json` (commit `e80118969`, revert it alone to drop
 the bump). Product code = `c096b8a68` (no adapter / core source change after it). Core: upstream
 v0.49.35, unchanged. DSH declared (unchanged since dsh.6): `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`.
-Release-candidate acceptance: `docs/dsh/e2e/evidence-round33/a-release-candidate.md`.
+Release-candidate acceptance: `docs/dsh/e2e/evidence-round33/a-release-candidate.md` (packed tarball,
+dsh.6 ⇄ dsh.7 install / upgrade / disable / rollback A0–A4 PASS on rc.5 · alpha.3 · rc.1; real e2e on
+this code: rc.5 133/0/2, alpha.3 134/0/1, rc.1 134/0/1).
 
 - **cordis peers** follow the declared DSH (`~4.0.5 || 4.0.6-alpha.2 || ~4.1.0`,
   `~1.0.10 || 1.0.11-alpha.2 || ~1.1.0`): `npm install` of the tarball next to DSH **0.2.2-rc.1**
