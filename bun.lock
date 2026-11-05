@@ -68,7 +68,7 @@
     },
     "packages/dsh-plugin": {
       "name": "dsh-magic-context",
-      "version": "0.49.35-dsh.7",
+      "version": "0.49.35-dsh.8",
       "bin": {
         "dsh-magic-context": "dist/cli.js",
       },
