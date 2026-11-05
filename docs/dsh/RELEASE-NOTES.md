@@ -38,8 +38,23 @@ this code: rc.5 133/0/2, alpha.3 134/0/1, rc.1 134/0/1).
   input `old_ref`, inspects the tarball (`npm pack` + `bun pm pack`), and adds the npm path (B2 /
   bin symlink) and a ctx_expand probe, each with the old tarball as control; CI false positives
   closed (contracts-dsh overlay without pipefail, A4 schema WARN, vacuous checks; `wf-lint.py`
-  gates the dsh-*.yml); summaries name the installed DSH, node and SHA. e2e checker R14 / Y2 judged
-  structurally (B line, `evidence-round33/b-*.md`).
+  gates the dsh-*.yml); summaries name the installed DSH, node and SHA. CI audit: 15 findings
+  (`evidence-round33/a-ci-audit.md`) — 已修复: contracts-dsh overlay pipefail, installed-DSH asserts
+  and report fields, stale local bootstrap, overlay-dsh-ref skip, A4 schema WARN, vacuous A0 / A8, and
+  (integration) ci-check.py's 10 vacuous PASS rows on empty input; dsh-soak.yml findings left as is
+  (frozen). **Test / CI layer only — no change to the shipped plugin.**
+- e2e checker (round 33, **test / CI layer only — no change to the shipped plugin**):
+  - **R14** judges the second native compaction's fold structurally (`shadowedSeqs` of a
+    `compaction/summary` + text not on the raw surface outside summary nodes) instead of "text absent
+    from the surface"; a checkpoint that restates a checksum no longer fails the non-vacuity guard,
+    and four sub-conditions are stricter (`evidence-round33/b-r14.md`).
+  - **Y2** accepts a busy first-step probe only for the restarted process's own fresh lease (pid,
+    holder, write time after the kill, recorded y-2 run); any lease attributable to the killed process
+    still fails (`evidence-round33/b-p2a.md`).
+  - **ci-check.py on missing data**: S3, S5, R5, R8, R10 (scenario P), R15, DN1, I1, I2 and P1 FAIL
+    when the data they judge is missing instead of passing vacuously; no other assertion changed, WARN
+    stays WARN.
+  - The three checker unit suites (R14, Y2, empty input; 30 cases) gate the push `checks` job.
 
 ## 0.49.35-dsh.6 (tag `dsh/0.49.35-dsh.6`, round 31, 2026-11-05)
 

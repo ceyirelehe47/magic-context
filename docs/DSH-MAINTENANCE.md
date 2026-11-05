@@ -48,7 +48,142 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 32, 2026-11-05, same declared DSH set, core v0.49.35; code HEAD `c096b8a68`,
+Baseline (round 33, 2026-11-05, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
+core v0.49.35; product code still `c096b8a68` — rounds 32 docs / 33 changed CI, scripts, the e2e
+checker and docs only; version **`0.49.35-dsh.7`** prepared in `e80118969`, **no tag**): `dsh-plugin`
+**643 pass**, `adapter-api` **15**, `contracts:dsh` **105** on rc.5 / alpha.3 / rc.1, typecheck 0,
+**new gating step: ci-check.py unit tests 30** (R14 14 + Y2 12 + empty input 4), wf-lint 0 FAIL
+(push 42055877063 @ `25b43db8c`); real-model `e2e` **135 judged** (unchanged): rc.5 42050071694
+**134/0/1**, alpha.3 42051660209 **134/0/1** (E2 WARN, upstream core ranking, in both). Evidence and
+index: `docs/dsh/e2e/evidence-round33/README.md` (`a-*` lane A, `b-*` lane B, `c-*` integration).
+
+| run id | kind | DSH | node | PASS / FAIL / WARN | notes |
+|---|---|---|---|---|---|
+| 42049424622 | push @ `98fa03b9b` (B: R14 fix) | lockfile rc.5 (+ alpha.3 / rc.1 contracts) | — / 24 | success | |
+| 42050273426 | push @ `e80118969` (A: dsh.7 version, wf-lint gate) | same | — / 24 | success | wf-lint selftest PASS, 0 FAIL |
+| 42050669304 | push @ `80f52b940` (B: Y2 fix) | same | — / 24 | success | |
+| 42050071694 | e2e slot b @ `98fa03b9b` | rc.5 | 22 | **134 / 0 / 1** (E2) | first structural `history-lock.json`; R14 PASS structural; T3, C3, Y2 PASS |
+| 42050286656 / 42050293048 / 42050299481 | dsh-install, first pass of the HEAD lane | rc.5 / alpha.3 / rc.1 | 22 / 24 / 24 | failure | A6 masked by A5; rc.1 checker crash (harness, fixed `89dbfe543`); exposed audit finding 9 |
+| 42051595084 | dsh-install @ `89dbfe543`, old = dsh.6 | rc.5 | 22.23.4 | A0–A4, A6–A8 PASS; **A5 FAIL** | B6 |
+| 42051600910 | dsh-install @ `89dbfe543`, old = dsh.6 | alpha.3 | 24.22.2 | A0–A4, A6–A8 PASS; **A5 FAIL** | B6 |
+| 42051607781 | dsh-install @ `89dbfe543`, old = dsh.6 | rc.1 | 24.22.1 | **A0–A8 PASS** | |
+| 42051660209 | e2e slot a @ `89dbfe543` | alpha.3 | 24.22.2 | **134 / 0 / 1** (E2) | the gap: alpha.3 had no e2e on the current product code; judged with the R14 / Y2 changes |
+| 42052963848 | push @ `9136032d6` | lockfile rc.5; alpha.3; rc.1 | — / 24 | success 643/15/105; contracts-dsh 105 + 105 | |
+| 42055877063 | push @ `25b43db8c` (integration: ci-check empty input, unit tests wired) | same | — / 24 | success 643/15/105 + ci-check unit 30/0; contracts-dsh success | |
+
+Reused on the same product code: rc.5 42037652492 133/0/2, rc.1 42034156577 134/0/1 (round 32).
+
+**R14 judgement change (B, RED `573d01342` → `98fa03b9b`, `b-r14.md`).** "Folded" was "the text is
+no longer anywhere on the surface"; a checkpoint that restates a checksum (42034146821: the model
+stored it with ctx_memory, the historian quoted it) made the non-vacuity guard fail although the fold
+happened. Now: folded = a `compaction/summary`'s `shadowedSeqs` holds the read's raw event or a node
+derived from it, **and** the text is not on the raw surface outside the summary nodes' own text
+(`ci-history.ts` writes `originSeqs` / `shadowedBy` / `onRawSurface` / `inSummaryText`). Stricter in
+four sub-conditions: `lost` and "summary reaches" use the raw surface (a summary quoting the text no
+longer rescues an item), an item gone without a history ordinal FAILs (`unplaced`), a
+`history-lock.json` without the structural fields FAILs (no fallback). Replays: 42034146821 FAIL → PASS,
+6 other artifacts unchanged.
+
+**Y2 judgement change (B, RED `e0c8a7bbf` → `80f52b940`, `b-p2a.md`).** The first-step busy probe of
+the restarted process may read `historianBusy: true` only when every lease it saw belongs to the new
+process: one common owner ≠ the killed pid, `holder_id` names that pid, written (`expires_at − 5 min`
+TTL) after the kill and not after the probe, and a y-2 historian run recorded at/after that write.
+Everything else is unchanged (no killed-pid lease at the probe, no live lease / in-progress flag after
+the turn, no TTL wait). This is the alpha.3 / node 22 4/4 case (own fresh lease); 10 negative unit
+cases keep every lease attributable to the dead holder a FAIL. Depends on core's
+`COMPARTMENT_LEASE_TTL_MS` (copied with a pointer; a change can only make Y2 FAIL).
+
+**ci-check.py empty input (integration, RED `7c1c6158a` → `25b43db8c`, CI audit finding 11).** On an
+empty CI_OUT 10 "nothing bad happened" rows read PASS on no data (S3, S5, R5, R8, R10/scenario P, R15,
+DN1, I1, I2, P1). Each now FAILs when the data it judges is missing (child compaction/summary; r17
+snapshots; run logs; pnew + pold logs; lock-a main pressure checks; model text; read tool calls;
+`leftover-procs.txt`). No other assertion changed and WARN stays WARN (`test_ci_check_empty.py` pins
+both). Empty CI_OUT: PASS 10 → 0 (FAIL 54 → 64). The 10 rows are identical old vs new on 8 real full
+artifacts (`c-empty-input-green.txt`). The three checker unit tests (`test_ci_check_r14.py`,
+`test_ci_check_y2.py`, `test_ci_check_empty.py`) are a gating step of the `checks` job.
+
+**B6 (new, 已复现, not fixed; user decision).** `npm install <tgz>` of the dsh.7 candidate next to an
+npm-installed DSH **rc.5 or alpha.3** fails ERESOLVE: npm resolves the plugin's ABSENT optional peer
+`@deepseek-ai/dsh-client-ui-primitives` to its highest version 0.2.2-rc.1, whose peer cordis `~4.1.0`
+conflicts with the tree's cordis 4.0.5 / 4.0.6-alpha.2. On rc.1 it resolves. **dsh.6 fails the same
+way** (C5 control). The documented path (`dsh plugin add`, pnpm) is unaffected on all three DSH (A0–A4
+PASS). X5 (informational, not shipped): without the four optional peers npm resolves next to rc.5 and
+alpha.3. Options: **(a)** drop the optional client peers (client-connection / client-ui-primitives /
+client-ui-slots / react; X5 proves npm then resolves); **(b)** keep them and document `dsh plugin add`
+/ pnpm as the only supported install path; **(c)** leave the corrected release note and fix after dsh.7.
+Peers are not changed without the user. Evidence `a-release-candidate.md`, `a-npm-eresolve-*.txt`.
+
+**ST1 — several `dsh` processes on one profile (user guidance; DSH-native, not fixed, `b-p2b-st1.md`).**
+DSH rewrites `<profile>/cordis.yml` on every start. Two processes started within a few milliseconds on
+one profile can make one exit at once with `dsh: startup failed … include (required) … config file must
+be a top-level array of entries: …/cordis.yml`. This is a DSH start-up race, not a Magic Context error,
+and nothing is lost: the file is valid again as soon as the other process finishes starting.
+- Start the failed process again.
+- Scripts that launch several sessions at once: stagger the starts (≈ 1 s is plenty), or give each
+  concurrent launcher its own profile (`--profile <name>`; copies of one profile share the Magic Context
+  database and sessions directory as long as `DSH_HOME` / the storage path is the same).
+- Once started, several processes on one profile are fine for Magic Context (shared SQLite with leases
+  and an open lock).
+- Upstream fix would be an atomic write (temp + rename) of `cordis.yml` — draft only
+  (`b-upstream-issue-drafts.md` §3). e2e reports it as DN1 (WARN).
+
+**Soak freshness (`b-p2c-soak.md`).** The 12 h soak 41775904921 ran round-26 code (`901fb7874`); core
+is unchanged since, the adapter changed +832/−105 in 17 source files, and three changed paths are on
+the soak's hot path (per-start open-lock sweep, per-step fold text, embed-deferral rows). It remains
+evidence for the unchanged core paths only. Recommended before the next tag meant to be soak-backed:
+`dsh-soak.yml` on HEAD, rc.5, `segments=2 segment_minutes=120 real_every_minutes=30` (≈ 4 700 runs,
+≈ 5 h 20 min wall), judged with K1–K9 against 41775904921's slopes. alpha.3 / rc.1 on node 24 are
+covered by no soak: `dsh-soak.yml` has no `dsh_version` input and pins node 22 (a workflow change, user
+decision; dsh-soak.yml was not touched this round). Not triggered.
+
+**CI audit (A, `a-ci-audit.md`, 15 findings).** New gate `scripts/ci/wf-lint.py` (lint / simulate /
+selftest; GitHub's default `run:` shell is `bash -e` without pipefail).
+
+| # | finding | status |
+|---|---|---|
+| 1 | contracts-dsh overlay piped to `tee` without pipefail: a failed overlay ran on rc.5 and passed | 已复现并修复 `0e128bb9e` (latent: all 14 earlier jobs really overlaid) |
+| 2 | other informational pipelines without pipefail | 非缺陷 (pipefail added anyway) |
+| 3 | e2e printed the input DSH version, not the installed one; no SHA | 已修复 `0e128bb9e` (installed ≠ requested fails the step) |
+| 4 | dsh-install did not check the installed DSH | 已修复 `093bf7b79` |
+| 5 | checks / contracts-dsh / ref-eval summaries lacked installed DSH / node / SHA | 已修复 |
+| 6 | `bootstrap.sh` reused a stale local DSH of another version | 已修复 `0e128bb9e` (reinstall + assert) |
+| 7 | `overlay-dsh-ref.sh` skipped a missing package and stayed green | 已修复 `0e128bb9e` |
+| 8 | ref-eval tolerates DSH-source tsc errors | 非缺陷 (evaluation lane, count printed) |
+| 9 | install A4 "schema refusal" WARN matched any line with `schema` | 已复现并修复 `89dbfe543` |
+| 10 | install-accept-check A0 / A8 PASS on an empty accept.jsonl | 已复现并修复 `dfc649e0f` |
+| 11 | ci-check.py: 10 rows PASS on an empty CI_OUT | 已复现; **fixed this round** `25b43db8c` (above) |
+| 12 | skipped counted as passed | 非缺陷 |
+| 13 | stale dependencies / cache (no actions/cache; pnpm@latest floats) | 非缺陷; pinning pnpm is a possible follow-up |
+| 14 | dsh-soak.yml summary lacks DSH / node / SHA; per-segment `\|\| true` | 未修复 (frozen), `\|\| true` by design |
+| 15 | job conclusion vs reality | 非缺陷 |
+
+"master overlay tests passed" ≠ "real DSH master app boot": `dsh-ref-eval.yml` never starts `dsh`.
+
+**Compatibility matrix summary (`a-compat-matrix.md`, product code `c096b8a68`).** rc.5 (node 22),
+alpha.3 and rc.1 (node 24): plugin registration & boot, setup / doctor, config read/write & disable,
+tool calls & context recovery, integrity after /compact, crash recovery — **PASS** (real boot, real model
++ mock scenarios; T3 WARN on rc.5 is model behaviour). Install & rollback: rc.1 PASS; rc.5 / alpha.3
+**PASS on the pnpm path, FAIL on the npm path (B6)** — the only FAIL in the matrix. DSH master
+`fcc0ad4621`: WARN everywhere — type / contract / unit level only, no real boot, no install (unpublished).
+Soak is round-26 code and rc.5 only (supporting evidence).
+
+**Duplicate check ids (noted, not renamed).** `T3` is both the worker 1500 ms timeout row (child has 0
+Magic rows) and scenario T's tail row; `R10` is both scenario P's ctx_reduce row and the lock-a backstop
+deferral row. In this document "T3 WARN" and "R10-P" mean scenario T and scenario P.
+
+**Pending user decisions (round 33):**
+1. B6: option (a) drop the optional client peers / (b) document pnpm-only / (c) ship dsh.7 as is and fix later.
+2. Whether to release **dsh.7** (`0.49.35-dsh.7` is in package.json; no tag).
+3. T3: keep the WARN (accurate; reasoning replay on the wire 待验证) or change scenario T / the judgement.
+4. C3: optional narrowing to the read phase (would flip 41842386831), or keep (DSH token-meter, upstream).
+5. Whether to run the 2 × 120 min rc.5 regression soak, and whether to add a `dsh_version` input to dsh-soak.yml.
+6. Whether to file the upstream issue drafts (`b-upstream-issue-drafts.md` §1 core ranking, §2 DSH token-meter, §3 DSH cordis.yml race).
+7. Whether to rename the duplicate check ids T3 / R10.
+
+Round 33 integration commits: `7c1c6158a` RED test (empty input), `25b43db8c` ci-check.py fix + CI
+wiring of the three checker tests, and the docs commit (this section, evidence README, RELEASE-NOTES).
+
+Previous baseline (round 32, 2026-11-05, same declared DSH set, core v0.49.35; code HEAD `c096b8a68`,
 CI lane `49b83e250`): `dsh-plugin` **643 pass** (+3: subagent-spec), `adapter-api` **15**,
 `contracts:dsh` **105** on rc.5 / alpha.3 / rc.1, typecheck 0 (push 42033679422 @ `fb8621502`,
 42035083245 @ `49b83e250`); real-model `e2e` **135 judged** (unchanged): rc.5 42034146821 133/1/1 (R14 FAIL — checker
@@ -858,7 +993,7 @@ DSH 自己的 CI，只在本 fork 运行（`if: github.repository == 'ceyirelehe
 
 | job | 何时运行 | 做什么 |
 |---|---|---|
-| `checks` | push 到 `dsh-integration` / `dsh-sync/**`，以及每次手动触发 | bun 1.4.2（与 `packageManager` 一致）→ filtered install（同 `upstream-sync.yml`）→ `typecheck:dsh` → core typecheck（`packages/plugin`）→ dsh-plugin 测试 → adapter-api 测试 → `contracts:dsh`；各步 `continue-on-error`，最后的 Summary 步骤汇总结果和 pass/fail 数，任何一步失败则 job 失败 |
+| `checks` | push 到 `dsh-integration` / `dsh-sync/**`，以及每次手动触发 | bun 1.4.2（与 `packageManager` 一致）→ filtered install（同 `upstream-sync.yml`）→ `typecheck:dsh` → core typecheck（`packages/plugin`）→ dsh-plugin 测试 → adapter-api 测试 → `contracts:dsh` → ci-check.py 单测（`test_ci_check_r14.py` / `test_ci_check_y2.py` / `test_ci_check_empty.py`，第 33 轮起必过）→ wf-lint；各步 `continue-on-error`，最后的 Summary 步骤汇总结果和 pass/fail 数，任何一步失败则 job 失败 |
 | `e2e` | **只在** `workflow_dispatch` 且输入 `e2e=true` 时运行（消耗模型额度） | 真实 `@deepseek-ai/dsh` 0.2.1-rc.5 headless + OpenCode Go（与本地 r9–r13 相同的 `model-opencode-go.yml`：24k 主路由 + 200k historian 路由），见下文 |
 
 `e2e` 的步骤（脚本都在 `packages/dsh-plugin/scripts/e2e/`）：
