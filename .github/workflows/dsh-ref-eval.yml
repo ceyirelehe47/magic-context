@@ -55,34 +55,37 @@ jobs:
             --filter 'dsh-magic-context-adapter' \
             --filter 'dsh-magic-context'
       - name: Overlay DSH ${{ inputs.base }} + packages from ${{ inputs.dsh_ref }}
+        id: overlay
         env:
           DSH_REF: ${{ inputs.dsh_ref }}
           DSH_BASE: ${{ inputs.base }}
           DSH_PKGS: ${{ inputs.packages }}
         run: |
+          set -o pipefail
           # shellcheck disable=SC2086
           bash packages/dsh-plugin/scripts/e2e/overlay-dsh-ref.sh "$DSH_BASE" "$DSH_REF" "$RUNNER_TEMP/dsh-overlay" $DSH_PKGS | tee -a "$GITHUB_STEP_SUMMARY"
       - name: typecheck:dsh
         id: tc
-        if: always()
+        if: always() && steps.overlay.outcome == 'success'
         run: bun run typecheck:dsh
       - name: dsh-plugin test-file typecheck
         id: tct
-        if: always()
+        if: always() && steps.overlay.outcome == 'success'
         run: bun run --cwd packages/dsh-plugin tsc --noEmit -p tsconfig.test.json
       - name: contracts:dsh
         id: contracts
-        if: always()
+        if: always() && steps.overlay.outcome == 'success'
         run: bun run contracts:dsh
       - name: dsh-plugin tests
         id: tests
-        if: always()
-        run: bun run --cwd packages/dsh-plugin test 2>&1 | tee "$RUNNER_TEMP/tests.log"; exit "${PIPESTATUS[0]}"
+        if: always() && steps.overlay.outcome == 'success'
+        run: set -o pipefail; bun run --cwd packages/dsh-plugin test 2>&1 | tee "$RUNNER_TEMP/tests.log"; exit "${PIPESTATUS[0]}"
       - name: Summary
         if: always()
         run: |
           {
             echo "| step | outcome |"; echo "|---|---|"
+            echo "| overlay (base + ref build) | ${{ steps.overlay.outcome }} |"
             echo "| typecheck:dsh | ${{ steps.tc.outcome }} |"
             echo "| test-file typecheck | ${{ steps.tct.outcome }} |"
             echo "| contracts:dsh | ${{ steps.contracts.outcome }} |"

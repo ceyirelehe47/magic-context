@@ -43,7 +43,15 @@ for v in cordis:cordis loader:cordis-plugin-loader include:cordis-plugin-include
 done
 TSC="$ROOT/packages/dsh-plugin/node_modules/.bin/tsc"
 TYPES_NODE="$(cd "$(dirname "$(readlink -f "$ROOT/packages/dsh-plugin/node_modules/@types/node/package.json")")/.." && pwd)"
-B="$S/ref-build"; mkdir -p "$B"
+# Compile in a trimmed tree (the adapter's DSH packages + their peers, no
+# @deepseek-ai/dsh meta package): next to the full <base> tree tsc follows far
+# more declarations — run 42033780423 hit node's ~4 GB heap on dsh-agent. The
+# output is then copied into the full tree.
+BB="$S/build-base"; mkdir -p "$BB"
+( cd "$BB" && echo '{"name":"dsh-ref-build","private":true}' > package.json && \
+  npm install --ignore-scripts --no-audit --no-fund \
+    $(for p in agent compaction compaction-basic llm session subagent token-meter tools typert-protocol typert-registry agent-preset-registry permission-presets sandbox-policy session-persistence session-query workspace; do printf '@deepseek-ai/dsh-%s@%s ' "$p" "$BASE"; done) >/dev/null )
+B="$BB/ref-build"; mkdir -p "$B"
 for d in "$@"; do
   name="$(node -p "require('$SRC/packages/$d/package.json').name")"; short="${name#@deepseek-ai/}"
   dst="$NM/$short"
@@ -58,8 +66,8 @@ for d in "$@"; do
   "typeRoots": ["$TYPES_NODE"], "types": ["node"], "noEmitOnError": false, "jsx": "react-jsx" },
   "include": ["src"], "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts", "src/client/**"] }
 J
-  # The build tree must resolve the base tree's packages: place it under $S.
-  (cd "$w" && "$TSC" -p tsconfig.json > tsc.log 2>&1) || true
+  # The build dir sits under $BB so its imports resolve to the trimmed <base> tree.
+  (cd "$w" && NODE_OPTIONS="--max-old-space-size=${DSH_REF_TSC_HEAP_MB:-8192}" "$TSC" -p tsconfig.json > tsc.log 2>&1) || true
   errs="$(grep -c 'error TS' "$w/tsc.log" || true)"
   [ -f "$w/lib/types/index.js" ] || { echo "dsh-ref: $name produced no lib/types/index.js" >&2; cat "$w/tsc.log" >&2; exit 1; }
   echo "export * from './types/index.js';" > "$w/lib/index.js"
