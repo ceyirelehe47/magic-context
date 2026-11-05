@@ -92,6 +92,7 @@
         "@types/node": "^22.20.0",
         "dsh-magic-context-adapter": "workspace:*",
         "js-yaml": "^4.1.0",
+        "react": "19.2.7",
         "typescript": "^5.8.0",
       },
       "peerDependencies": {
