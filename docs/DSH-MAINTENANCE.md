@@ -48,7 +48,25 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 34, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
+Baseline (round 35, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
+core v0.49.35 unchanged; version still **`0.49.35-dsh.8`, untagged**). Scan + fix of the adapter layer
+(user request 00:29 CST). Fixed (RED → GREEN each): **F1** open lock — a lock path that exists but cannot
+be read (directory / no read permission / I/O error) spun synchronously forever at DSH boot
+(`88f2ac2ef`); **F1b** a stale lock whose `.takeover` mutex can never be taken waited forever
+(`1f9941f8d`); **F2** setup's `writeFileAtomic` replaced a symlinked profile `package.json` /
+`cordis.patch.yml` with a regular file (`936ce4521`); **F3** `migrate-legacy` value flags without a
+value fell back to the default storage DB (`7f3e6d451`). Not fixed: **P1** `dsh-tools` / `dsh-subagent`
+are runtime imports of `dist/entries/*` but not declared (resolve as hoisted DSH deps on every supported
+path; declaring them as exact-list peers would recreate the B6 "highest listed version" resolution —
+user decision; known limitation 28). Push CI 42069775942 @ `7f3e6d451`: `dsh-plugin` **660** (+13),
+`adapter-api` **15**, `contracts:dsh` **105** (rc.5 / alpha.3 / rc.1), typecheck 0, ci-check unit **33**,
+wf-lint 0. Install acceptance from `dsh/0.49.35-dsh.7` (setup is on the install path), **A0–A8 PASS on
+all three**: rc.5 42070371822, alpha.3 42070380440, rc.1 42070387621. Real-model e2e rc.5 (also the
+pre-dsh.8 e2e round 34 recommended): 42070363765 E2E_RESULT. No rc.1 e2e (no 0.2.2-specific change).
+Client bundle after B6 checked: react / jsx-runtime / react-dom / dsh-client-store come from the web
+boot `staticModules` of all three DSH (非缺陷). Evidence: `docs/dsh/e2e/evidence-round35/README.md`.
+
+Previous baseline (round 34, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
 core v0.49.35 unchanged). **dsh.7 released** (user-approved 2026-11-06 00:09 CST): annotated tag
 `dsh/0.49.35-dsh.7` = tag object `c53d95218` → commit `d76150f60` (CI 42062657884, dsh-ci
 workflow_dispatch checks, green: 643 / 15 / 105 + ci-check unit 30 — the push of `d76150f60` went
@@ -2494,6 +2512,31 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       it is published and passes install + e2e); vendor packages are not rebuilt by the lane
       (it reports a version difference instead); real `dsh` app boot / e2e on master not run;
       the subagent `name` field (optional, `agent-N` default) is not set by the worker.
+
+28. **Round 35 (2026-11-06) — scan + fix; dsh.8 still untagged.**
+    - **F1 / F1b (fixed):** `acquireDshOpenLock` now treats a lock path that exists but cannot be
+      read as an unidentifiable live holder (logged once, polled, opened without the lock after
+      `MAX_WAIT_MS`); a path that is really gone keeps the immediate retry. The stale-takeover
+      branch is bounded by the same `MAX_WAIT_MS`. Neither path ever removes the lock / mutex.
+    - **F2 (fixed):** `writeFileAtomic` follows a symlink chain (≤ 32 hops; a dangling link is
+      written to the path it names) and renames next to the real file; the link stays a link. POSIX
+      tested; on Windows a symlinked profile file behaves the same (the rename still targets the
+      real file) but is not covered by a test.
+    - **F3 (fixed):** `migrate-legacy` refuses `--db` / `--storage-dir` / `--restore` with no value
+      (end of argv, `--name=`, or followed by another `--flag`) with exit 2 before opening any DB.
+      Unknown flags (typos such as `--aply`) still fall through to the read-only scan.
+    - **P1 (open, user decision):** `dist/entries/*` import `@deepseek-ai/dsh-tools` (tools, worker
+      self-test) and `@deepseek-ai/dsh-subagent` (subagent compat) at runtime; neither is a peer
+      or dependency. They resolve because DSH depends on them and npm / pnpm (default hoist) expose
+      them; a strict layout (`hoist=false`, Yarn PnP) would fail to load those entries. Options:
+      (a) leave as is (documented), (b) declare them as exact-list peers — risk: npm / pnpm
+      `auto-install-peers` may resolve the highest listed version (rc.1) next to rc.5 / alpha.3,
+      the B6 pattern; needs install acceptance on all three before shipping, (c) bundle them —
+      not acceptable (a second module instance next to DSH's own).
+    - **Noted, not changed:** `restoreDatabase` overwrites with `copyFileSync` (a crash mid-copy
+      tears the DB; the pre-restore safety copy is taken first); `bootstrapMagicHost` does not
+      close the DB handle when `initializeDshAdapterTables` throws after a successful open (the
+      process continues without Magic) — 待验证, no reproduction.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

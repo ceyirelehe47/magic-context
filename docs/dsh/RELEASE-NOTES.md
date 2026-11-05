@@ -7,7 +7,7 @@ adapter layer). Version `<upstream>-dsh.N`, git tag `dsh/<upstream>-dsh.N`
 (`bun pm pack` in `packages/dsh-plugin`, as `dsh-install.yml` does).
 Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-round*`.
 
-## 0.49.35-dsh.8 — 待发 (pending, round 34; no tag)
+## 0.49.35-dsh.8 — 待发 (pending, rounds 34–35; no tag)
 
 Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unchanged):
 `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`.
@@ -22,6 +22,18 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   `dsh.client.inject`). Acceptance: `dsh-install.yml` from `dsh/0.49.35-dsh.7`, A0–A8 PASS on rc.5
   42066064277 / alpha.3 42066083404 / rc.1 42066100857 — `npm install` of the tarball next to the
   npm-installed DSH now resolves on all three (A5). `react` 19.2.7 is a devDependency (tests only).
+- **Round 35 fixes (adapter only, core unchanged):** DSH no longer hangs at boot when the shared
+  DB's open-lock path exists but cannot be read (a directory, a file without read permission, an I/O
+  error) — it logs, waits at most the usual 120 s and opens without the lock; a stale open lock whose
+  takeover mutex can never be taken is bounded the same way. `dsh-magic-context setup` keeps a
+  symlinked profile `package.json` / `cordis.patch.yml` a symlink and updates the file it points to
+  (it used to replace the link with a regular file). `migrate-legacy` rejects `--db` /
+  `--storage-dir` / `--restore` without a value (exit 2) instead of falling back to the default
+  storage DB. Acceptance at `7f3e6d451`: `dsh-install.yml` from `dsh/0.49.35-dsh.7`, A0–A8 PASS on
+  rc.5 42070371822 / alpha.3 42070380440 / rc.1 42070387621; push CI 42069775942 (660 / 15 / 105).
+- Known (unchanged by dsh.8): `@deepseek-ai/dsh-tools` and `@deepseek-ai/dsh-subagent` are loaded
+  from DSH's own tree without being declared (works with npm and pnpm's default hoisting; not with a
+  strict non-hoisting layout).
 - CI / test layer only: duplicate ci-check ids renamed (judgement unchanged; old→new table in
   `docs/DSH-MAINTENANCE.md`); `dsh-soak.yml` unfrozen with `dsh_version` / `node_version` inputs
   (defaults unchanged; running it still needs the user's approval).

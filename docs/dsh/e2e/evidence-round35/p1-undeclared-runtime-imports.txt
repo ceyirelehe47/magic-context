@@ -1,0 +1,11 @@
+Round 35 P1 (static, fresh `bun run build` at 7f3e6d451): bare runtime imports of @deepseek-ai/* left in dist/ (externals) vs the manifest
+dependencies+peerDependencies: ['@deepseek-ai/cordis', '@deepseek-ai/cordis-plugin-include', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-compaction', '@deepseek-ai/dsh-compaction-basic', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-token-meter', 'ai-tokenizer']
+  @deepseek-ai/cordis                        declared  imports=2  e.g. ['agent-tq8wt317.js', 'meter.js']
+  @deepseek-ai/cordis-plugin-include         declared  imports=1  e.g. ['preset-include.js']
+  @deepseek-ai/dsh-compaction                declared  imports=1  e.g. ['compaction.js']
+  @deepseek-ai/dsh-compaction-basic          declared  imports=1  e.g. ['compaction.js']
+  @deepseek-ai/dsh-llm                       declared  imports=1  e.g. ['agent-y0jy8431.js']
+  @deepseek-ai/dsh-session                   declared  imports=2  e.g. ['agent-y0jy8431.js']
+  @deepseek-ai/dsh-subagent                  NOT DECLARED (phantom)  imports=1  e.g. ['agent-ympnrgwg.js']
+  @deepseek-ai/dsh-token-meter               declared  imports=1  e.g. ['meter.js']
+  @deepseek-ai/dsh-tools                     NOT DECLARED (phantom)  imports=3  e.g. ['agent-ympnrgwg.js']
