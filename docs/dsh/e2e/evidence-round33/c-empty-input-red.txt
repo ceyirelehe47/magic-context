@@ -1,0 +1,20 @@
+# RED @ eb8a1b9dd (ci-check.py unchanged) — python3 packages/dsh-plugin/scripts/e2e/test_ci_check_empty.py -v
+test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) ... 
+  test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) (cid='DN1') ... FAIL
+  test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) (cid='I1') ... FAIL
+  test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) (cid='I2') ... FAIL
+  test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) (cid='P1') ... FAIL
+  test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) (cid='R15') ... FAIL
+  test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) (cid='R5') ... FAIL
+  test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) (cid='R8') ... FAIL
+  test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) (cid='S3') ... FAIL
+  test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) (cid='S5') ... FAIL
+test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) ... FAIL
+test_empty_dir_no_row_passes (__main__.EmptyInput.test_empty_dir_no_row_passes) ... FAIL
+test_bad_data_keeps_warn_and_fail (__main__.WithData.test_bad_data_keeps_warn_and_fail) ... ok
+test_clean_data_passes (__main__.WithData.test_clean_data_passes) ... ok
+    self.assertEqual(passed, [], f"rows PASS on an empty CI_OUT: {passed}")
+AssertionError: Lists differ: ['DN1', 'I1', 'I2', 'P1', 'R10', 'R15', 'R5', 'R8', 'S3', 'S5'] != []
++ [] : rows PASS on an empty CI_OUT: ['DN1', 'I1', 'I2', 'P1', 'R10', 'R15', 'R5', 'R8', 'S3', 'S5']
+Ran 4 tests in 0.016s
+FAILED (failures=11)
