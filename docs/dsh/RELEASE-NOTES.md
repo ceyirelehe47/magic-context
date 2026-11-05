@@ -7,6 +7,24 @@ adapter layer). Version `<upstream>-dsh.N`, git tag `dsh/<upstream>-dsh.N`
 (`bun pm pack` in `packages/dsh-plugin`, as `dsh-install.yml` does).
 Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-round*`.
 
+## 0.49.35-dsh.8 — 待发 (pending, round 34; no tag)
+
+Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unchanged):
+`0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`.
+
+- **B6 fixed (option a, user-approved 2026-11-06 00:09 CST):** the four OPTIONAL peers
+  `@deepseek-ai/dsh-client-connection`, `@deepseek-ai/dsh-client-ui-primitives`,
+  `@deepseek-ai/dsh-client-ui-slots` and `react` (and their `peerDependenciesMeta` entries) are no
+  longer declared. npm resolved the absent `dsh-client-ui-primitives` to 0.2.2-rc.1, whose cordis peer
+  conflicted with the tree next to DSH rc.5 / alpha.3 (ERESOLVE). This narrows the declaration only:
+  every required DSH / cordis peer is unchanged, no DSH version is added. The client bundle does not
+  resolve them through Node (`react` comes from DSH's `__ModuleLoader__`, the connection service through
+  `dsh.client.inject`). Acceptance: `dsh-install.yml` on rc.5 / alpha.3 / rc.1 from `dsh/0.49.35-dsh.7`
+  (see `docs/DSH-MAINTENANCE.md`, round 34).
+- CI / test layer only: duplicate ci-check ids renamed (judgement unchanged; old→new table in
+  `docs/DSH-MAINTENANCE.md`); `dsh-soak.yml` unfrozen with `dsh_version` / `node_version` inputs
+  (defaults unchanged; running it still needs the user's approval).
+
 ## 0.49.35-dsh.7 (tag `dsh/0.49.35-dsh.7`, rounds 31–33, 2026-11-06)
 
 Version prepared in `packages/dsh-plugin/package.json` (commit `e80118969`, revert it alone to drop
