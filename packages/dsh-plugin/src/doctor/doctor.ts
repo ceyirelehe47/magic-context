@@ -25,6 +25,7 @@ import {
   getMigrationOnOpenRefusal,
   getPersistedSchemaVersion,
   getSchemaFenceRejection,
+  closeDatabase,
   openDatabaseAsync,
 } from "@magic-context/core/features/magic-context/storage-db";
 import type { Database } from "@magic-context/core/shared/sqlite";
@@ -538,7 +539,14 @@ export async function runDshDoctor(
     const outcome = await classifyDatabaseOpen(dbPath);
     switch (outcome.kind) {
       case "ok": {
-        outcome.db?.close();
+        // Round 30: close through core's closeDatabase(), never db.close().
+        // openDatabaseAsync caches the handle per path; a bare close left the
+        // CLOSED handle in that cache, so a later open of the same path in the
+        // same process got "Cannot use a closed database" (push checks
+        // 41974187111: doctor.test → host-unload-release on the default test
+        // path). doctor runs as its own CLI process, so closing every cached
+        // handle is its normal teardown.
+        if (outcome.db) await closeDatabase();
         checks.push({
           id: "shared-db",
           title: "Shared DB",
