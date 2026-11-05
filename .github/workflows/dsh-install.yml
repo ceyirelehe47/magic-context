@@ -78,7 +78,9 @@ jobs:
           sparse-checkout: packages/dsh-plugin/scripts/e2e
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # Round 30: DSH 0.2.2-* (alpha.3, rc.1) declare engines node >= 24.9.0; the default
+          # 0.2.1-rc.5 path stays on node 22 (unchanged). setup-node '24' = newest 24.x.
+          node-version: ${{ env.DSH_VERSION == '0.2.1-rc.5' && '22' || '24' }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
@@ -98,6 +100,7 @@ jobs:
           timeout 300 npm install --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION"
           npm i -g pnpm@latest >/dev/null 2>&1
           echo "pnpm $(pnpm --version)"
+          echo "node $(node --version)" | tee -a "$GITHUB_STEP_SUMMARY"
           node node_modules/@deepseek-ai/dsh/lib/bin.js --version || true
           ls -la "$RUNNER_TEMP/tgz"
       - name: install → upgrade → disable → roll back
