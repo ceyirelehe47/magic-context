@@ -428,8 +428,11 @@ def check_r17_child(c, out: Path, runs):
           "child reached the stock compaction-basic SUMMARIZER (compaction/summary, not only prune; no error)",
           {"compaction/start": starts, "compaction/summary": summaries, "compaction/prune": prunes,
            "errors": errors[:2], "childPromptTokens": usage})
-    c.add("S3", all("<compartment" not in s and "§" not in s for s in summary_texts),
-          "child summary is not MC historian output (no <compartment>, no §N§)", [s[:200] for s in summary_texts[:2]])
+    # Round 33 (CI audit #11): every "nothing bad" row needs the data it looked at;
+    # no data is FAIL, never a vacuous PASS (S3, S5, R5, R8, R10/P, R15, DN1, I1, I2, P1).
+    c.add("S3", bool(summary_texts) and all("<compartment" not in s and "§" not in s for s in summary_texts),
+          "child summary is not MC historian output (no <compartment>, no §N§)",
+          [s[:200] for s in summary_texts[:2]] if summary_texts else "no child compaction/summary (no data)")
     dbk = load_json(out / "db-child.json") or {}
     counts = (dbk.get(kid) or {}).get("counts") if kid else None
     c.add("S4", kid != "" and counts == {}, "child has 0 rows in every Magic table", counts)
@@ -438,9 +441,11 @@ def check_r17_child(c, out: Path, runs):
     pdump = load_json(out / "db-child-parent.json") or {}
     delta = {t: (s1.get("counts", {}).get(t, 0) - s0.get("counts", {}).get(t, 0)) for t in MC_SESSION_TABLES}
     pcomp = len(pdump.get("compartments") or []) if isinstance(pdump.get("compartments"), list) else 0
-    c.add("S5", delta.get("compartments", 0) == pcomp and delta.get("compartment_state_lease", 0) <= 0
+    snaps = isinstance(s0.get("counts"), dict) and isinstance(s1.get("counts"), dict)
+    c.add("S5", snaps and delta.get("compartments", 0) == pcomp and delta.get("compartment_state_lease", 0) <= 0
           and delta.get("dsh_context_compaction_marker", 0) <= (1 if pcomp else 0),
-          "MC table growth during the child run is the parent's own only", {"delta": delta, "parentCompartments": pcomp})
+          "MC table growth during the child run is the parent's own only",
+          {"delta": delta, "parentCompartments": pcomp} if snaps else "r17-snap-s0/s1 missing (no data)")
     c.add("S6", isinstance(turn_end[-1] if turn_end else None, dict) and turn_end[-1].get("kind") == "completed",
           "child turn completed", turn_end[-1:] if turn_end else None)
     # S7 (round 18): the child read eight generated files whose CHECKSUM line
@@ -519,7 +524,8 @@ def check_r19(c, out: Path, runs):
           {"firstNativePct": onative[0][1] if onative else None, "nativeRegions": onative[:4],
            "compactionStartEvents": [e.get("type") for e in osev].count("compaction/start"), "oldDefaultPct": old_pct})
     nobudget = {}
-    for p_ in sorted(out.glob("*.log")):
+    all_logs = sorted(out.glob("*.log"))
+    for p_ in all_logs:
         n = p_.read_text(errors="replace").count(NO_BUDGET)
         if n:
             nobudget[p_.name] = n
@@ -548,7 +554,8 @@ def check_r19(c, out: Path, runs):
     c.add("R7", bool(ends) and not errs and unresolvable == 0,
           "main-session native compaction completed through the MC summarize hook (no compaction/end error)",
           {"compactionEnds": len(ends), "errors": errs[:3], "unresolvableInLogs": unresolvable})
-    c.add("R5", not nobudget, "no TargetPressureConfigError ('leaving no pressure budget') in any run log", nobudget or "clean")
+    c.add("R5", bool(all_logs) and not nobudget, "no TargetPressureConfigError ('leaving no pressure budget') in any run log",
+          nobudget or ("clean" if all_logs else "no run logs (no data)"))
     # R10 (round 28b, diagnostic) the model calling ctx_reduce in scenario P
     # although every batch prompt forbids it: pnew before MC's first fire, pold
     # at any time. It cost the pressure the scenario needs (41832534523 pnew
@@ -556,13 +563,14 @@ def check_r19(c, out: Path, runs):
     # scenario now adds batches instead, so the drop itself is reported here.
     # Rounds 21-28 v1 (26 runs): 0 pnew pre-fire drops; round 28 v2: 1 of 5.
     # WARN = model behaviour, never FAIL.
-    selfdrops = []
+    selfdrops, p_logs = [], {"pnew": 0, "pold": 0}
     for names, until_fire in ((pnew, True), (pold, False)):
         fired = False
         for n in names:
             p_ = out / f"{n}.log"
             if not p_.exists():
                 continue
+            p_logs["pnew" if until_fire else "pold"] += 1
             for line in p_.read_text(errors="replace").splitlines():
                 m = TRIGGER.search(line)
                 if m and m.group(5) == "true":
@@ -573,9 +581,9 @@ def check_r19(c, out: Path, runs):
                     except ValueError:
                         drop = "?"
                     selfdrops.append({"run": n, "drop": drop})
-    c.add("R10", True if not selfdrops else "warn",
+    c.add("R10", "warn" if selfdrops else (p_logs["pnew"] > 0 and p_logs["pold"] > 0),
           "scenario P: the model did not call ctx_reduce against the prompt (pnew before MC fired, pold at all)",
-          selfdrops or "none")
+          selfdrops or ("none" if p_logs["pnew"] and p_logs["pold"] else {"logs (no data)": p_logs}))
     # R8 (round 21) a historian pass holding the compartment lease must never
     # turn a native compaction into an error: the 90 % backstop defers while the
     # lease is held and /compact waits for it. No compaction/end error and no
@@ -587,10 +595,11 @@ def check_r19(c, out: Path, runs):
                 for e in (session_events(p_) if p_.name != "lock-session.jsonl" else lock_events_before_c(out))
                 if e.get("type") == "compaction/end"]
     busy_errs = [str(d.get("error"))[:160] for d in all_ends if d.get("error") and "lease busy" in str(d.get("error"))]
-    busy_logs, deferred, waited, pct_unknown = {}, 0, 0, 0
+    busy_logs, deferred, waited, pct_unknown, scanned = {}, 0, 0, 0, 0
     for p_ in sorted(out.glob("*.log")):
         if p_.name == "lock-c.log":
             continue
+        scanned += 1
         t = p_.read_text(errors="replace")
         n = len(re.findall(r"summarize mini-historian lease busy", t))
         if n:
@@ -598,10 +607,11 @@ def check_r19(c, out: Path, runs):
         deferred += t.count("native pressure backstop deferred")
         waited += t.count("summarize: lease wait ended")
         pct_unknown += len(re.findall(r"native pressure check: child=false pct=\?", t))
-    c.add("R8", not busy_errs and not busy_logs,
+    c.add("R8", scanned > 0 and not busy_errs and not busy_logs,
           "no native compaction failed on a busy historian lease (backstop defers, /compact waits)",
           {"compactionEnds": len(all_ends), "leaseBusyErrors": busy_errs[:3], "leaseBusyLogLines": busy_logs or "none",
-           "backstopDeferrals": deferred, "compactLeaseWaits": waited, "mainChecksWithPctUnknown": pct_unknown})
+           "backstopDeferrals": deferred, "compactLeaseWaits": waited, "mainChecksWithPctUnknown": pct_unknown,
+           "logsScanned": scanned})
 
 
 
@@ -644,9 +654,9 @@ def check_r22_lock(c, out: Path, runs):
     silent = [x for x in over if x[2] not in ("compacted", "deferred:historian-busy", "skipped:would-not-shrink")]
     skipped = [x for x in over if x[2] == "skipped:would-not-shrink"]
     skip_lines = re.findall(r"native pressure backstop skipped: (.*?) — the summary would not shrink", text_a)
-    c.add("R15", not silent and len(skip_lines) >= len(skipped) and not errs,
+    c.add("R15", bool(checks) and not silent and len(skip_lines) >= len(skipped) and not errs,
           "every lock-a pressure check at/above the backstop compacted, deferred or was skipped with a visible 'backstop skipped' line (no silent check, no failed compaction/end)",
-          {"overBackstop": len(over), "outcomes": sorted({o for _, _, o in over}), "silent": silent[:4],
+          {"mainChecks": len(checks), "overBackstop": len(over), "outcomes": sorted({o for _, _, o in over}), "silent": silent[:4],
            "skipped": len(skipped), "skipLines": [l[:160] for l in skip_lines[:3]], "errors": errs[:3]})
     last_def = text_a.rfind("native pressure backstop deferred")
     after = [x for x in checks if x[0] > last_def] if last_def >= 0 else []
@@ -1835,11 +1845,12 @@ def check(out: Path) -> int:
     # 41787740600 sw-1-3/sw-2-3). Not Magic and not fixed here (DSH-MAINTENANCE
     # "不修"). WARN with the runs that hit it; the affected scenario's own check
     # (e.g. ST1) still FAILs on its own terms.
-    dn = sorted(f.stem for f in out.glob("*.log")
+    logs = sorted(out.glob("*.log"))
+    dn = sorted(f.stem for f in logs
                 if "config file must be a top-level array of entries" in f.read_text(errors="replace"))
-    c.add("DN1", True if not dn else "warn",
+    c.add("DN1", "warn" if dn else bool(logs),
           "no run hit the DSH-native cordis.yml boot race (WARN = DSH prepareProfile in-place rewrite read empty by a concurrent boot on the same profile)",
-          {"runs": dn})
+          {"runs": dn} if logs else "no run logs (no data)")
 
     # --- I1 (round 27 C1, limitation 21): the model writing Magic's folded tool
     # record as its own TEXT (old `[tool: read #call_N]` form, or the new
@@ -1849,13 +1860,14 @@ def check(out: Path) -> int:
     # already ran …") + tagged result text; a model TEXT carrying a Magic note is
     # the same imitation, so it is detected too (all generations stay detected).
     imit = re.compile(r"(?m)^\s*\[tool( result)?: [\w.-]+ #|<recorded-tool-activity|^\s*- called [\w.-]+ \(id |Magic Context note: ")
-    hits = []
+    hits, ntexts = [], 0
     for p in sorted(out.glob("*.log")):
         for t in visible_texts(p):
+            ntexts += 1
             if imit.search(t or ""):
                 hits.append({"run": p.stem, "chars": len(t), "head": (t or "")[:160]})
-    c.add("I1", True if not hits else "warn",
-          "no model TEXT imitates the folded tool record (limitation 21)", hits or "none")
+    c.add("I1", "warn" if hits else ntexts > 0,
+          "no model TEXT imitates the folded tool record (limitation 21)", hits or ("none" if ntexts else "no model text (no data)"))
 
     # --- I2 (round 28): the model re-reading the SAME file again and again in one
     # run. Round 28 v1's fold note named no targets ("1 file was read") and the
@@ -1864,7 +1876,7 @@ def check(out: Path) -> int:
     # every file x5), which then failed T1/T2/U7/U8/U10 through max-tokens.
     # Baseline before the change: at most 2 reads of one file per run
     # (41792968900). WARN (model behaviour) when any run reads one file >= 4 times.
-    rereads = []
+    rereads, nreads = [], 0
     for p in sorted(out.glob("*.log")):
         counts = {}
         for ev in events(p):
@@ -1873,17 +1885,20 @@ def check(out: Path) -> int:
             inp = ev.get("input") or {}
             fp = str(inp.get("file_path") or inp.get("filePath") or inp.get("path") or "")
             if fp:
+                nreads += 1
                 key = fp.rsplit("/", 1)[-1]
                 counts[key] = counts.get(key, 0) + 1
         worst = {k: v for k, v in counts.items() if v >= 4}
         if worst:
             rereads.append({"run": p.stem, "reads": worst})
-    c.add("I2", True if not rereads else "warn",
-          "no run re-reads one file 4+ times (round 28: the fold note must say what already ran)", rereads or "none")
+    c.add("I2", "warn" if rereads else nreads > 0,
+          "no run re-reads one file 4+ times (round 28: the fold note must say what already ran)",
+          rereads or ("none" if nreads else "no read tool calls (no data)"))
 
     # --- P: process hygiene
-    left = (out / "leftover-procs.txt").read_text().split() if (out / "leftover-procs.txt").exists() else []
-    c.add("P1", not left, "no leftover dsh processes", len(left))
+    lp = out / "leftover-procs.txt"
+    left = lp.read_text().split() if lp.exists() else []
+    c.add("P1", lp.exists() and not left, "no leftover dsh processes", len(left) if lp.exists() else "leftover-procs.txt missing (no data)")
 
     lines = ["# DSH e2e (CI)", "", "| check | result | what | detail |", "|---|---|---|---|"]
     for cid, res, what, detail in c.rows:

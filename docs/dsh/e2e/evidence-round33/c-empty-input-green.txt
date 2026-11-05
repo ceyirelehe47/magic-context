@@ -1,0 +1,30 @@
+# GREEN (ci-check.py fixed) — python3 packages/dsh-plugin/scripts/e2e/test_ci_check_empty.py -v
+test_empty_dir_each_vacuous_row_fails (__main__.EmptyInput.test_empty_dir_each_vacuous_row_fails) ... ok
+test_empty_dir_no_row_passes (__main__.EmptyInput.test_empty_dir_no_row_passes) ... ok
+test_bad_data_keeps_warn_and_fail (__main__.WithData.test_bad_data_keeps_warn_and_fail) ... ok
+test_clean_data_passes (__main__.WithData.test_clean_data_passes) ... ok
+Ran 4 tests in 0.014s
+OK
+
+# R14 / Y2 suites after the fix
+test_ci_check_r14.py: Ran 14 tests in 0.045s OK 
+test_ci_check_y2.py: Ran 12 tests in 0.020s OK 
+
+# empty CI_OUT: ci-check.py check <empty dir>
+PASS 0 FAIL 64 (before: PASS 10 FAIL 54, a-ci-check-empty-dir.txt)
+
+# no regression on 8 real full e2e artifacts (local copies, rounds 22-27): old vs new ci-check.py, the 10 rows
+a87740600 same | new: S3|PASS S5|PASS R5|PASS R10|PASS R8|PASS R10|PASS R15|PASS DN1|WARN I1|PASS I2|PASS P1|PASS 
+a84617324 same | new: S3|PASS S5|PASS R5|PASS R10|PASS R8|PASS R10|PASS R15|PASS DN1|PASS I1|PASS I2|PASS P1|PASS 
+a96491092 same | new: S3|PASS S5|PASS R5|PASS R10|WARN R8|PASS R10|PASS R15|PASS DN1|PASS I1|PASS I2|PASS P1|PASS 
+a93402758 same | new: S3|PASS S5|PASS R5|PASS R10|PASS R8|PASS R10|PASS R15|PASS DN1|PASS I1|PASS I2|PASS P1|PASS 
+a88260239 same | new: S3|PASS S5|PASS R5|PASS R10|PASS R8|PASS R10|PASS R15|PASS DN1|PASS I1|PASS I2|PASS P1|PASS 
+a82984222 same | new: S3|PASS S5|PASS R5|PASS R10|PASS R8|PASS R10|PASS R15|PASS DN1|PASS I1|PASS I2|PASS P1|PASS 
+a79402115 same | new: S3|PASS S5|PASS R5|PASS R10|PASS R8|PASS R10|PASS R15|PASS DN1|PASS I1|PASS I2|PASS P1|PASS 
+a72370986 same | new: S3|PASS S5|PASS R5|PASS R10|PASS R8|PASS R10|PASS R15|PASS DN1|PASS I1|PASS I2|PASS P1|PASS 
+
+# wf-lint simulate: the new checks step with python3 stubbed to fail -> step exit code 1
+(names = local artifact directories /workspace/work/r23c/a*, r23b/a*; every one identical old vs new.)
+Older artifacts whose lock-a.log predates the round-24 `outcome=` field (art22/r1, r20/art) now read R15 FAIL instead of PASS:
+R15 had zero main pressure checks to judge there, i.e. exactly the vacuous PASS this fix removes. Partial R14-only extracts
+(r33b-out/r14alpha-*, only history-lock.json + lock-d.log) now FAIL S3/S5/R8/R15/P1 for the same reason.

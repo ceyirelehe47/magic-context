@@ -4,7 +4,8 @@
 #
 #   checks  every push to dsh-integration / dsh-sync/** and every dispatch:
 #           filtered install → typecheck:dsh → core typecheck → dsh-plugin
-#           tests → adapter-api tests → contracts:dsh
+#           tests → adapter-api tests → contracts:dsh → ci-check.py unit tests
+#           (R14 / Y2 / empty input, round 33) → wf-lint
 #   e2e     ONLY on workflow_dispatch with input e2e=true (spends model quota):
 #           real @deepseek-ai/dsh 0.2.1-rc.5 (or input dsh_version, e.g. the
 #           declared 0.2.2-alpha.3 / 0.2.2-rc.1) headless + OpenCode Go
@@ -104,6 +105,18 @@ jobs:
         continue-on-error: true
         run: bun run contracts:dsh 2>&1 | tee "$RUNNER_TEMP/contracts.log"; exit ${PIPESTATUS[0]}
 
+      - name: ci-check.py unit tests (R14, Y2, empty input; round 33, gating)
+        id: t_cicheck
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          rc=0
+          for t in test_ci_check_r14.py test_ci_check_y2.py test_ci_check_empty.py; do
+            echo "== $t"
+            python3 "packages/dsh-plugin/scripts/e2e/$t" -v 2>&1 | tee -a "$RUNNER_TEMP/ci-check-tests.log" || rc=1
+          done
+          exit $rc
+
       - name: workflow false-positive lint (dsh-*.yml; round 33)
         id: wf_lint
         continue-on-error: true
@@ -132,10 +145,11 @@ jobs:
             echo "| dsh-plugin | ${{ steps.t_dsh.outcome }} | $(count dsh-plugin pass) | $(count dsh-plugin fail) |"
             echo "| adapter-api | ${{ steps.t_api.outcome }} | $(count adapter-api pass) | $(count adapter-api fail) |"
             echo "| contracts:dsh | ${{ steps.t_contracts.outcome }} | $(count contracts pass) | $(count contracts fail) |"
+            echo "| ci-check.py unit tests | ${{ steps.t_cicheck.outcome }} | $(grep -cE '\.\.\. ok$' "$RUNNER_TEMP/ci-check-tests.log" 2>/dev/null) | $(grep -cE '\.\.\. (FAIL|ERROR)$' "$RUNNER_TEMP/ci-check-tests.log" 2>/dev/null) |"
             echo "| wf-lint (dsh-*.yml) | ${{ steps.wf_lint.outcome }} | | $(grep -c '| FAIL |' "$RUNNER_TEMP/wf-lint.log" 2>/dev/null) |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           for o in "${{ steps.tc_dsh.outcome }}" "${{ steps.tc_tests.outcome }}" "${{ steps.tc_core.outcome }}" "${{ steps.t_dsh.outcome }}" \
-                   "${{ steps.t_api.outcome }}" "${{ steps.t_contracts.outcome }}" "${{ steps.wf_lint.outcome }}"; do
+                   "${{ steps.t_api.outcome }}" "${{ steps.t_contracts.outcome }}" "${{ steps.t_cicheck.outcome }}" "${{ steps.wf_lint.outcome }}"; do
             [ "$o" = "success" ] || exit 1
           done
 
