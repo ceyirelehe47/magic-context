@@ -21,6 +21,9 @@ import { runMigrateLegacy, setLegacyIdentityResolver } from "./migrate-legacy";
 // Single source of truth: the package version (bundled into dist/cli.js by
 // `bun build`), never a hand-kept copy that drifts on a release bump.
 import packageJson from "../../package.json";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const VERSION: string = packageJson.version;
 
@@ -104,16 +107,44 @@ export async function main(argv: string[]): Promise<number> {
 }
 
 // Direct execution (also used by the built dist/cli.js bin).
-function isDirectEntry(): boolean {
-  const entry = process.argv[1];
-  if (entry === undefined) return false;
-  const normalized = entry.replace(/\\/g, "/");
+/**
+ * Is `argv1` (process.argv[1]) this module (`metaUrl` = import.meta.url)?
+ * Round 31: npm / bun install the bin on POSIX as a symlink
+ * (node_modules/.bin/dsh-magic-context → …/dist/cli.js); node keeps the link
+ * in argv[1] while import.meta.url is the real file, so both sides are
+ * compared by realpath first. The tail comparisons stay as the fallback
+ * (bun's absolute-path import.meta.url, unresolvable paths).
+ */
+export function isDirectEntryFor(argv1: string | undefined, metaUrl: string): boolean {
+  if (argv1 === undefined || argv1 === "") return false;
+  const real = (p: string): string => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  let self: string | undefined;
+  try {
+    self = metaUrl.startsWith("file:") ? fileURLToPath(metaUrl) : metaUrl;
+  } catch {
+    self = undefined;
+  }
+  if (self !== undefined) {
+    try {
+      if (real(argv1) === real(self)) return true;
+    } catch {
+      // fall through to the tail comparison
+    }
+  }
+  const normalized = argv1.replace(/\\/g, "/");
   // Under node ESM import.meta.url is file:///<path>; under bun it is the
   // absolute path. Comparing the tail keeps both runtimes working.
-  return (
-    import.meta.url.endsWith(normalized) ||
-    import.meta.url.endsWith(normalized.split("/").pop() ?? "")
-  );
+  return metaUrl.endsWith(normalized) || metaUrl.endsWith(normalized.split("/").pop() ?? "");
+}
+
+function isDirectEntry(): boolean {
+  return isDirectEntryFor(process.argv[1], import.meta.url);
 }
 
 if (isDirectEntry()) {
