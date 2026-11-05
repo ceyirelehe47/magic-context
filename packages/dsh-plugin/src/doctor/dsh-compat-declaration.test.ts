@@ -8,8 +8,11 @@
  * `semver.satisfies(runtime, range, { includePrerelease: true })`.
  *
  * The declaration is an explicit list of exact versions joined by `||`, so
- * an untested DSH (0.2.2-rc.1, the next alpha, 0.2.2 final …) is NOT
- * accepted. The default path stays on 0.2.1-rc.5 (devDependencies + lockfile).
+ * an untested DSH (0.2.2-rc.2, the next alpha, 0.2.2 final …) is NOT
+ * accepted. Round 30 adds 0.2.2-rc.1 (npm dist-tag `next`; every
+ * @deepseek-ai/dsh-* package and cordis / cordis-plugin-include / -loader /
+ * schemastery is byte-identical to 0.2.2-alpha.3 apart from package.json
+ * version strings). The default path stays on 0.2.1-rc.5 (devDependencies + lockfile).
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -22,9 +25,10 @@ const pkg = JSON.parse(readFileSync(join(import.meta.dir, "..", "..", "package.j
   engines?: Record<string, string>;
 };
 
-const SUPPORTED = ["0.2.1-rc.5", "0.2.2-alpha.3"];
+const SUPPORTED = ["0.2.1-rc.5", "0.2.2-alpha.3", "0.2.2-rc.1"];
 const UNTESTED = [
-  "0.2.2-rc.1",
+  "0.2.2-rc.2",
+  "0.2.2-rc.0",
   "0.2.2-alpha.2",
   "0.2.2-alpha.4",
   "0.2.2",
@@ -68,7 +72,7 @@ describe("DSH version declaration (round 29)", () => {
     expect(pkg.engines?.dsh).toBeUndefined();
   });
 
-  test("DSH's own rule accepts 0.2.1-rc.5 and 0.2.2-alpha.3", () => {
+  test("DSH's own rule accepts 0.2.1-rc.5, 0.2.2-alpha.3 and 0.2.2-rc.1", () => {
     for (const v of SUPPORTED) expect(`${v}: ${unmet(v).join(",")}`).toBe(`${v}: `);
   });
 
