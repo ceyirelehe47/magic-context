@@ -1,0 +1,7 @@
+(pass) dsh open lock: lock path exists but cannot be read (round 35 F1) > a directory at the lock path: bounded wait, logged, then opens without the lock (no spin) [472.52ms]
+(pass) dsh open lock: lock path exists but cannot be read (round 35 F1) > a lock file without read permission: same bounded wait (non-root only) [481.29ms]
+Expected: false
+Received: true
+(fail) dsh open lock: lock path exists but cannot be read (round 35 F1) > a stale lock whose takeover mutex can never be taken (unreadable .takeover): bounded by MAX_WAIT too (F1b) [15007.30ms]
+ 2 pass
+ 1 fail

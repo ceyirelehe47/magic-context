@@ -169,6 +169,13 @@ export async function acquireDshOpenLock(
           log(`[magic-context] dsh open lock: took over a stale lock (${stale})`);
         }
       })) continue;
+      // Round 35 (F1b): the takeover mutex is busy. A mutex that can never be
+      // taken (an unreadable / non-file `.takeover`, which no stale rule can
+      // remove) kept this branch polling forever; it is bounded like any wait.
+      if (now - started > maxWaitMs) {
+        log(`[magic-context] dsh open lock: stale lock (${stale}) not taken over after ${maxWaitMs} ms (takeover mutex busy); opening without the lock`);
+        return () => {};
+      }
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       continue;
     }

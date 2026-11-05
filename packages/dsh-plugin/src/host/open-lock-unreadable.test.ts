@@ -19,7 +19,7 @@ import { describe, expect, it } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dshOpenLockPath } from "./open-lock";
+import { dshOpenLockPath, dshOpenLockTakeoverPath } from "./open-lock";
 
 const FIXTURE = join(import.meta.dir, "open-lock-unreadable.fixture.ts");
 
@@ -70,6 +70,21 @@ describe("dsh open lock: lock path exists but cannot be read (round 35 F1)", () 
       expect(existsSync(dshOpenLockPath(e.db))).toBe(true);
     } finally {
       try { chmodSync(dshOpenLockPath(e.db), 0o600); } catch {}
+      e.cleanup();
+    }
+  }, 30_000);
+
+  it("a stale lock whose takeover mutex can never be taken (unreadable .takeover): bounded by MAX_WAIT too (F1b)", async () => {
+    const e = env();
+    try {
+      // dead holder far past STALE_MS: judged stale, but the takeover mutex path is a directory
+      writeFileSync(dshOpenLockPath(e.db), JSON.stringify({ pid: 999_999_999, acquiredAt: Date.now() - 3_600_000 }));
+      mkdirSync(dshOpenLockTakeoverPath(dshOpenLockPath(e.db)));
+      const r = await runChild(e.db, 400, 15_000);
+      expect(r.killed).toBe(false);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("opening without the lock");
+    } finally {
       e.cleanup();
     }
   }, 30_000);
