@@ -7,6 +7,15 @@ adapter layer). Version `<upstream>-dsh.N`, git tag `dsh/<upstream>-dsh.N`
 (`bun pm pack` in `packages/dsh-plugin`, as `dsh-install.yml` does).
 Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-round*`.
 
+## Unreleased (branch `dsh-integration` after dsh.5, round 30; no tag — dsh.6 is a user decision)
+
+- DSH declared: `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1` (adds 0.2.2-rc.1, npm
+  `next`; byte-identical to alpha.3 apart from version strings). Verified with no
+  exemption on node 24: install A0 WARN (old dsh.2 only) A1–A4 PASS, e2e 133/0/2 and
+  134/0/1. package.json still reads `0.49.35-dsh.5` until a release bumps it.
+- CI: node 24 for every DSH other than 0.2.1-rc.5; e2e scenario Y kill lookup works on
+  node ≥ 24; doctor closes its DB check through core `closeDatabase()` (test isolation).
+
 ## 0.49.35-dsh.5 (tag `dsh/0.49.35-dsh.5`, round 30, 2026-11-05)
 
 - Core: upstream **v0.49.35**, unchanged.

@@ -1,0 +1,10 @@
+# dsh-soak 41775904921 final check job 126723801142 (12.04 h, 4 x 180 min segments @ 901fb7874 = round 26 code; 14001 mock + 24 real-model runs; finished 2026-11-05 00:58 CST). Redacted CI log, no keys.
+| K1 | PASS | mock runs exit 0 (>= 99.5 %), no breaker stop | 14001/14001; breaker=no |
+| K2 | PASS | no leftover dsh process after a run | max 0 |
+| K3 | PASS | residue (lease / in-progress / outbox / open lock) <= 1 % of runs, none at the end | 0 of 14025 runs; last=0; first=[] |
+| K4 | PASS | max RSS: last 10 % median <= 1.25 x first 10 % | 305460 KB -> 345828 KB (1.13x, n=1399) |
+| K5 | PASS | wall time: last 10 % median <= 1.5 x first 10 % | 3.06s -> 2.65s (0.87x) |
+| K6 | PASS | WAL <= 64 MiB; DB growth per run not accelerating (2nd half <= 1.5 x 1st); DB <= 512 MiB | wal max 0; growth/run 14142 -> 14178 B; db 1097728 -> 199344128 B |
+| K7 | PASS | historian failures <= 5 % of historian runs during the soak | 0 failed of 71929 |
+| K8 | PASS | no mock request over the enforced window | 0 |
+| K9 | PASS | real-model samples exit 0 (>= 80 %) | 24/24 |

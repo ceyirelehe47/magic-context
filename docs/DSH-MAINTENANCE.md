@@ -18,10 +18,11 @@ Provenance: imported verbatim from the community port
 `THIRD_PARTY_NOTICES.md` are kept in both packages; see `IMPORTED.md`.
 
 Pinned versions: `@deepseek-ai/dsh*` **0.2.1-rc.5** (exact, devDependencies +
-lockfile = the default path); **declared** DSH releases (peers, round 29):
-exactly `0.2.1-rc.5 || 0.2.2-alpha.3` (`DSH_COMPAT_SUPPORTED_VERSIONS` in
-`src/doctor/env.ts`; any other DSH, e.g. 0.2.2-rc.1, is refused by DSH's plugin
-manager and by `doctor`), `@deepseek-ai/cordis ~4.0.5`, core = the upstream tag the branch is
+lockfile = the default path); **declared** DSH releases (peers, rounds 29/30):
+exactly `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1` (`DSH_COMPAT_SUPPORTED_VERSIONS` in
+`src/doctor/env.ts`; any other DSH, e.g. 0.2.2-rc.2 or 0.2.2, is refused by DSH's plugin
+manager and by `doctor`; release tag `dsh/0.49.35-dsh.5` declares rc.5 + alpha.3 only,
+rc.1 is on the branch since round 30; DSH 0.2.2-* needs node ≥ 24.9.0), `@deepseek-ai/cordis ~4.0.5`, core = the upstream tag the branch is
 based on (currently **v0.49.35**, merged in round 16). `doctor` checks the installed DSH against
 `DSH_COMPAT_SUPPORTED_VERSIONS` (default `DSH_COMPAT_EXPECTED_VERSION`) in `src/doctor/env.ts`.
 
@@ -45,7 +46,73 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 29, 2026-11-04/05, DSH **0.2.1-rc.5 (default) + 0.2.2-alpha.3
+Baseline (round 30, 2026-11-05, DSH **0.2.1-rc.5 (default) + 0.2.2-alpha.3 +
+0.2.2-rc.1 declared**, core v0.49.35; code HEAD `5daa53311`): `typecheck:dsh` **0 errors**,
+`dsh-plugin` **633 pass** (+2 over round 29's 631: doctor rc.1 case +1,
+doctor-shared-handle +1), `adapter-api` **15**, `contracts:dsh` **105**, 0 fail
+(push 41974989721 @ `5daa53311`); real-model `e2e` **135 judged** (unchanged).
+Evidence: `docs/dsh/e2e/evidence-round30/` (run table in its README).
+
+**Release (A, user-approved 2026-11-05 12:57 CST):** `dsh/0.49.35-dsh.5` — annotated
+tag object `f32dce2a1cfa8d32978f4855fae667ba61d284d2` → commit
+`9206770c330824c59b95953ecf95d761e84e0552` (round 29 code `2d7130339` + version bump +
+`docs/dsh/RELEASE-NOTES.md`); push CI 41971621725 green (631/15/105); install acceptance
+on the tag: rc.5 41971919183 A0–A4 PASS, alpha.3 41971923016 A0 WARN (old dsh.2 only)
+A1–A4 PASS. No GitHub release (none for dsh.1–4 either), no npm, no `v*` tag. Round 30 B
+(rc.1) is NOT in dsh.5 and has no tag (dsh.6 = user decision); package.json on the branch
+still reads `0.49.35-dsh.5`.
+
+Supported DSH versions:
+
+| DSH | npm dist-tag | declared since | release tag carrying it | node | default path |
+|---|---|---|---|---|---|
+| 0.2.1-rc.5 | latest | pinned before dsh.1 | dsh.1 … dsh.5 | 22 (CI) | yes (devDependencies, lockfile, push CI, contracts) |
+| 0.2.2-alpha.3 | alpha | round 29 | dsh.5 | ≥ 24.9.0 (CI node 24 since round 30) | no |
+| 0.2.2-rc.1 | next | round 30 | none yet (branch only) | ≥ 24.9.0 (CI node 24) | no |
+
+0.2.2-rc.1 vs 0.2.2-alpha.3 (静态, all 89 `@deepseek-ai/dsh-*` packages + cordis 4.1.0 /
+plugin-include 1.1.0 / plugin-loader 1.1.0 / schemastery 3.19.0): byte-identical apart
+from package.json version strings, so no adapter code change was needed.
+
+| run id | kind | DSH | node | exemption | PASS / FAIL / WARN | FAIL classification | I1 | I2 | R10 (P / backstop) |
+|---|---|---|---|---|---|---|---|---|---|
+| 41971621725 | push checks @ `9206770c3` (dsh.5) | lockfile rc.5 | — | — | success 631/15/105 | — | | | |
+| 41971919183 | install @ tag dsh.5 | rc.5 | 22 | none | A0–A4 PASS | — | | | |
+| 41971923016 | install @ tag dsh.5 | alpha.3 | 22 | old dsh.2 a/d only | A0 WARN, A1–A4 PASS | — | | | |
+| 41971926453 | e2e r30r5 @ `9206770c3` | rc.5 | 22 | none | 133 / 1 / 1 (E2) | C3: peak at the last step (待验证, see evidence) | PASS | PASS | PASS / PASS |
+| 41972038622 | install @ `91fdde883` | rc.1 | 24 | eval lane (HEAD undeclared) | A0 FAIL (expected), A1–A4 PASS | — | | | |
+| 41972042372 | e2e r30c1a @ `91fdde883` | rc.1 | 24 | eval lane | 132 / 1 / 2 (T3, E2) | Y1: harness, node 24 comm `MainThread` (fixed `a2f503dc6`) | PASS | PASS | PASS / PASS |
+| 41972046384 | e2e r30c1b @ `91fdde883` | rc.1 | 24 | eval lane | 133 / 1 / 1 (E2) | Y1: same harness bug | PASS | PASS | PASS / PASS |
+| 41972435035 | push checks @ `60b078463` | lockfile rc.5 | — | — | success 632/15/105 | — | | | |
+| 41972809339 | install @ `60b078463` | rc.1 | 24 | HEAD none; old dsh.2 a/d only | A0 WARN, A1–A4 PASS | — | | | |
+| 41972814902 | install @ `60b078463` | rc.5 | 22 | none | A0–A4 PASS | — | | | |
+| 41972820096 | install @ `60b078463` | alpha.3 | 24 | HEAD none; old dsh.2 a/d only | A0 WARN, A1–A4 PASS | — | | | |
+| 41974187111 | push checks @ `a2f503dc6` | lockfile rc.5 | — | — | failure 631/1 | host-unload-release closed DB (test isolation; fixed `5daa53311`) | | | |
+| 41974240164 | e2e r30e1a @ `a2f503dc6` | rc.1 | 24 | **none** | 133 / 0 / 2 (T3, E2) | — | PASS | PASS | PASS / PASS |
+| 41974243694 | e2e r30e1b @ `a2f503dc6` | rc.1 | 24 | **none** | 134 / 0 / 1 (E2) | — | PASS | PASS | PASS / PASS |
+| 41974247003 | e2e r30a3m @ `a2f503dc6` | alpha.3 | 24 | **none** | 133 / 0 / 2 (T3, E2) | — (Y2 PASS) | PASS | PASS | PASS / PASS |
+| 41974989721 | push checks @ `5daa53311` | lockfile rc.5 | — | — | success 633/15/105 | — | | | |
+
+Three e2e dispatches at `60b078463` (41972825602 / 41972830751 / 41972834893) were
+cancelled once the Y1 harness bug was known and re-dispatched at `a2f503dc6`.
+
+Round 30 commits (no core change; red test first):
+- `9206770c3` release: `0.49.35-dsh.5` version bump + `docs/dsh/RELEASE-NOTES.md` (tagged `dsh/0.49.35-dsh.5`).
+- `91fdde883` CI: dsh-ci e2e / dsh-install accept run node 24 when the DSH is not 0.2.1-rc.5 (rc.5 stays node 22).
+- `de3a76717` RED: real app-boot rc.1 rejects the manifest; compat-declaration / doctor expect rc.1 declared, rc.2 refused.
+- `60b078463` peers `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`, `DSH_COMPAT_SUPPORTED_VERSIONS` + rc.1, READMEs / CI descriptions.
+- `a2f503dc6` e2e harness: scenario Y picks the node pid by `/proc/<pid>/exe` (node ≥ 24 comm is `MainThread`).
+- `9edc285bc` RED: doctor leaves a closed handle in core's per-path DB cache (push 41974187111 flake).
+- `5daa53311` doctor closes through core `closeDatabase()`.
+
+**Soak 41775904921 (final, round 26 code):** 12.04 h, K1–K9 all PASS (14001/14001 mock,
+24/24 real, residue 0, RSS 1.13×, wall 0.87×, WAL 0, 0 historian failures of 71 929);
+see limitation 22 and `evidence-round30/c1-soak-41775904921-final.txt`.
+
+**Y2 / T3 — still 待用户决定.** Y2 PASSed on node 24 (alpha.3 ×1, rc.1 ×2) after 4/4
+FAIL on alpha.3 under node 22; not treated as resolved.
+
+Previous baseline (round 29, 2026-11-04/05, DSH **0.2.1-rc.5 (default) + 0.2.2-alpha.3
 declared**, core v0.49.35; release tags unchanged — no dsh.5; code HEAD
 `0ef173b60`): `typecheck:dsh` **0 errors**, `dsh-plugin` **631 pass** (+7 over
 round 28's 624: `dsh-compat-declaration` 5, doctor 2), `adapter-api` **15**,
@@ -853,7 +920,12 @@ All `@deepseek-ai/*` vocabulary is supposed to live behind
 `src/compat/dsh-0.1/` (name kept for history; it now targets 0.2). A DSH bump:
 
 1. bump the exact versions in `packages/dsh-plugin/package.json`
-   (dev + peer) and `DSH_COMPAT_EXPECTED_VERSION`;
+   (dev + peer) and `DSH_COMPAT_EXPECTED_VERSION`; to only **declare** an extra DSH
+   release next to the default (rounds 29/30), append it to every `@deepseek-ai/dsh-*`
+   peer (`a || b || c`, exact versions) and to `DSH_COMPAT_SUPPORTED_VERSIONS`, add it to
+   `dsh-compat-declaration.test.ts`, check it with the real app-boot
+   (`evidence-round30/a2-real-eval.mjs.txt`), then run dsh-install + e2e with
+   `dsh_version` (evaluation lane first, then with no exemption);
 2. `bun install` → `bun run typecheck:dsh`. `src/contracts/dsh-api.contract.ts`
    pins every DSH interface shape the adapter relies on; a failing
    `Assert<…>` line names the exact contract that moved;
@@ -1971,8 +2043,12 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       none of the round 27 fixes):** segment 1 of 4 finished 2026-11-04 15:54 CST,
       K1–K9 PASS (3310/3310 mock runs, residue 0 of 3316, RSS 303 156 → 309 692 KB
       1.02×, wall 3.06 → 3.05 s, WAL max 0, DB 1.1 → 48 MB with flat growth per
-      run, 0 historian failures of 16 958, real samples 6/6). Segments 2–4 still
-      running (3 × ~3.3 h, ETA ≈ 02:00 CST 2026-11-05); the final K1–K9 over the whole CSV is pending.
+      run, 0 historian failures of 16 958, real samples 6/6). **Final (round 30
+      read-out, finished 2026-11-05 00:58 CST): 12.04 h, K1–K9 all PASS over the
+      whole CSV** — 14001/14001 mock runs, no leftover process, residue 0 of 14025,
+      RSS 305 460 → 345 828 KB (1.13×), wall 3.06 → 2.65 s, WAL max 0, DB growth/run
+      14 142 → 14 178 B (1.1 → 199 MB), 0 historian failures of 71 929, real samples
+      24/24 (`evidence-round30/c1-soak-41775904921-final.txt`).
 
 23. **Round 28 (2026-11-04) — status (28 / 28b / 28c).**
     - **Limitations 21/22 (model imitates the folded tool record).**
@@ -2055,9 +2131,31 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       (`compat-upgrade.test.ts`, `dsh-api.contract.ts`) still runs only against
       the lockfile's rc.5 packages; alpha.3 is covered by the e2e / install runs
       and the round 28b preset-include check, not by the type-level contracts.
-    - **Release:** no tag; `package.json` is still `0.49.35-dsh.4`, whose tag
-      (`dsh/0.49.35-dsh.4`) declares rc.5 only. Shipping the declaration needs
-      dsh.5 (user approval).
+    - **Release:** shipped in `dsh/0.49.35-dsh.5` (round 30). The node ≥ 24.9
+      gap is closed for CI in round 30 (alpha.3 install + e2e on node 24, see 25).
+
+25. **Round 30 (2026-11-05) — dsh.5 released; DSH 0.2.2-rc.1 declared on the branch.**
+    - **dsh.5:** tag `dsh/0.49.35-dsh.5` (object `f32dce2a1`) → `9206770c3`; declares
+      `0.2.1-rc.5 || 0.2.2-alpha.3`. Notes: `docs/dsh/RELEASE-NOTES.md`.
+    - **rc.1:** peers `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1` (exact, no range);
+      real app-boot rc.5 / alpha.3 / rc.1 accept, 0.2.2-rc.2 / alpha.2 / alpha.4 / 0.2.2
+      refused. rc.1 is byte-identical to alpha.3 (静态). install + e2e ×2 with no
+      exemption on node 24: A0 WARN (old dsh.2 only) A1–A4 PASS, e2e 133/0/2 and 134/0/1.
+      No tag (dsh.6 = user decision).
+    - **Node 24 lane:** dsh-ci e2e and dsh-install accept use node 24 for any DSH other
+      than 0.2.1-rc.5 (alpha.3 and rc.1 declare `engines.node >=24.9.0`); the rc.5 default
+      path stays node 22. Tags dsh.5 and older still run node 22 for alpha.3 when
+      dispatched on the tag ref (their own workflow file).
+    - **Fixed:** e2e scenario Y kill-target lookup on node ≥ 24 (`MainThread` comm);
+      push-check flake host-unload-release / doctor closed handle (round 27 C3 recurrence).
+    - **Open:** rc.5 C3 2 FAIL in 4 runs since 28c (peak at the last step, 待验证, check
+      unchanged); Y2 / T3 pending the user (Y2 PASS on node 24 — observation only); the
+      cordis peer stays `~4.0.5`, which semver does not satisfy with rc.1's cordis 4.1.0
+      (DSH's plugin manager judges only `@deepseek-ai/dsh-*` peers; in install 41972809339
+      pnpm added only the plugin — `Packages: +1`, no second cordis copy — and printed
+      the same generic "Issues with peer dependencies" warning it prints on rc.5; the
+      cordis code is byte-identical — 静态推断, not changed);
+      type-level contracts still run only against the lockfile's rc.5 packages.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
