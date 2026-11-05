@@ -176,8 +176,15 @@ for i in $(seq 1 240); do
   sleep 0.25
 done
 NODEPID=""
+# Round 30: pick the node process by its executable, not by comm. Node >= 24
+# names its main thread "MainThread", so /proc/<pid>/comm (ps -o comm=) is no
+# longer "node" on the node 24 lane (DSH 0.2.2-*): e2e 41972046384 found the
+# hold but no pid and never killed (Y1 FAIL, killedPid null). Reproduced
+# locally: node v24.22.1 comm=[MainThread], v22 comm=[node].
 for p in $(pgrep -f "$YMARK" 2>/dev/null); do
-  [[ "$(ps -o comm= -p "$p" 2>/dev/null)" == node ]] && NODEPID="$p"
+  exe="$(readlink "/proc/$p/exe" 2>/dev/null || true)"
+  comm="$(ps -o comm= -p "$p" 2>/dev/null || true)"
+  if [[ "${exe##*/}" == node || "$comm" == node || "$comm" == MainThread ]]; then NODEPID="$p"; fi
 done
 if [[ -n "$held" && -n "$NODEPID" ]]; then
   kill -9 "$NODEPID"

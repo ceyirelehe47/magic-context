@@ -1,0 +1,6 @@
+# Y1 kill-target selection, node 22 vs node 24 (local, aarch64). Old rule: ps -o comm= == node. Node >= 24 names its main thread 'MainThread':
+5877 comm=[MainThread] exe=/workspace/work/r30/node-v24.22.1-linux-arm64/bin/node
+5878 comm=[node] exe=/usr/bin/node
+# new rule (exe basename node, or comm node|MainThread):
+v22.23.3 NODEPID=5841 comm=node
+v24.22.1 NODEPID=5857 comm=MainThread
