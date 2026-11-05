@@ -733,6 +733,8 @@ def check_r23_history(c, out: Path, runs):
 
 
 X_WINDOW = 24000
+# core packages/plugin/src/features/magic-context/compartment-lease.ts COMPARTMENT_LEASE_TTL_MS
+COMPARTMENT_LEASE_TTL_MS = 5 * 60 * 1000
 
 
 def x_requests(out: Path):
@@ -910,12 +912,31 @@ def check_y(c, out: Path, runs):
     comps2 = d["y-2"].get("compartments") or []
     live2 = [l for l in (d["y-2"].get("leases") or []) if (l.get("expires_at") or 0) > (l.get("now") or 0)]
     still_dead = [l for l in (first.get("leases") or []) if l.get("owner_pid") == pid]
+    # Round 33: the first-step busy probe may read busy only when EVERY lease it
+    # saw is provably the new process's own fresh one (alpha.3 / node 22 4/4:
+    # the y-2 pass wrote it 4 ms before the probe): owner_pid is not the killed
+    # pid and is the pid named in holder_id (one owner for all of them), it was written (expires_at - TTL)
+    # after the kill and not after the probe, and a y-2 historian run was
+    # recorded at or after that write. The dead holder's lease must still be
+    # gone (still_dead) and nothing may stay live after the turn (live2).
+    first_leases = first.get("leases") or []
+    kill_at = kill.get("at")
+
+    def own_fresh(l):
+        written = (l.get("expires_at") or 0) - COMPARTMENT_LEASE_TTL_MS
+        holder_pid = (str(l.get("holder_id") or "").split(":")[-2:-1] or [None])[0]
+        return (l.get("owner_pid") is not None and l.get("owner_pid") != pid and holder_pid == str(l.get("owner_pid"))
+                and kill_at is not None and kill_at < written <= (first.get("at") or 0)
+                and any((r.get("created_at") or 0) >= written for r in runs2))
+    busy_probe = "false" if first.get("historianBusy") is False else (
+        "own fresh lease of the new process" if first.get("historianBusy") is True and first_leases
+        and len({l.get("owner_pid") for l in first_leases}) == 1 and all(own_fresh(l) for l in first_leases) else "busy (not explained by an own fresh lease)")
     c.add("Y2", rc["y-2"].startswith("rc=0") and bool(runs2) and all(r.get("status") in ("noop", "success") for r in runs2)
-          and first.get("historianBusy") is False and not still_dead and not live2
+          and busy_probe != "busy (not explained by an own fresh lease)" and not still_dead and not live2
           and (d["y-2"].get("meta") or {}).get("compartment_in_progress") in (0, None)
           and el is not None and el < 120,
-          "y-2 (new process, dead holder's lease still unexpired): historian passes take the lease and run (noop/success, none reported busy), the busy probe reads false, no live lease or in-progress flag left, no 5-min TTL wait",
-          {"rc": rc["y-2"], "historianRunsInY2": [(r.get("status"), r.get("failure_reason")) for r in runs2],
+          "y-2 (new process, dead holder's lease still unexpired): historian passes take the lease and run (noop/success, none reported busy), the busy probe reads false or sees only the new process's own fresh lease (never the dead holder's), no live lease or in-progress flag left, no 5-min TTL wait",
+          {"rc": rc["y-2"], "busyProbe": busy_probe, "killedPid": pid, "historianRunsInY2": [(r.get("status"), r.get("failure_reason")) for r in runs2],
            "firstStep": {"historianBusy": first.get("historianBusy"), "leases": first.get("leases")},
            "compartments": [[x.get("start_message"), x.get("end_message")] for x in comps2], "liveLeases": live2,
            "meta": d["y-2"].get("meta")})

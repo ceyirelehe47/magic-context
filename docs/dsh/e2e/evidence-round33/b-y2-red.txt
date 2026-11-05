@@ -1,0 +1,37 @@
+test_alpha3_own_fresh_lease_passes (__main__.Y2.test_alpha3_own_fresh_lease_passes) ... FAIL
+test_busy_with_a_second_unexplained_lease_fails (__main__.Y2.test_busy_with_a_second_unexplained_lease_fails) ... ok
+test_busy_with_holder_pid_mismatch_fails (__main__.Y2.test_busy_with_holder_pid_mismatch_fails) ... ok
+test_busy_with_lease_of_killed_pid_fails (__main__.Y2.test_busy_with_lease_of_killed_pid_fails) ... ok
+test_busy_with_lease_written_before_kill_fails (__main__.Y2.test_busy_with_lease_written_before_kill_fails) ... ok
+test_busy_with_no_lease_listed_fails (__main__.Y2.test_busy_with_no_lease_listed_fails) ... ok
+test_busy_without_a_y2_run_after_the_write_fails (__main__.Y2.test_busy_without_a_y2_run_after_the_write_fails) ... ok
+test_failed_pass_fails (__main__.Y2.test_failed_pass_fails) ... ok
+test_in_progress_left_fails (__main__.Y2.test_in_progress_left_fails) ... ok
+test_own_lease_still_live_after_turn_fails (__main__.Y2.test_own_lease_still_live_after_turn_fails) ... ok
+test_rc5_probe_not_busy_passes (__main__.Y2.test_rc5_probe_not_busy_passes) ... ERROR
+test_ttl_wait_fails (__main__.Y2.test_ttl_wait_fails) ... ok
+
+======================================================================
+ERROR: test_rc5_probe_not_busy_passes (__main__.Y2.test_rc5_probe_not_busy_passes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/r33b/packages/dsh-plugin/scripts/e2e/test_ci_check_y2.py", line 69, in test_rc5_probe_not_busy_passes
+    self.assertEqual(detail["busyProbe"], "false")
+                     ~~~~~~^^^^^^^^^^^^^
+KeyError: 'busyProbe'
+
+======================================================================
+FAIL: test_alpha3_own_fresh_lease_passes (__main__.Y2.test_alpha3_own_fresh_lease_passes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/r33b/packages/dsh-plugin/scripts/e2e/test_ci_check_y2.py", line 75, in test_alpha3_own_fresh_lease_passes
+    self.assertEqual(res, "PASS", (name, detail))
+AssertionError: 'FAIL' != 'PASS'
+- FAIL
++ PASS
+ : ('alpha3-41859577345-own-fresh-lease.json', {'rc': 'rc=0 elapsed=1.5s log=~/work/_temp/e2e/logs/run-43.log', 'historianRunsInY2': [('noop', 'nothing to compact (eligibleEnd=1 <= offset=1)'), ('noop', 'nothing to compact (eligibleEnd=1 <= offset=1)')], 'firstStep': {'historianBusy': True, 'leases': [{'holder_id': 'dsh-historian:dsh:7114782d:session-839a4e9b-9885-46e6-ad32-a8b879965dbf:4933:0fd842e6', 'owner_pid': 4933, 'expires_at': 1793807797040}]}, 'compartments': [], 'liveLeases': [], 'meta': {'compartment_in_progress': 0, 'historian_failure_count': 0, 'last_context_percentage': 64}})
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.031s
+
+FAILED (failures=1, errors=1)

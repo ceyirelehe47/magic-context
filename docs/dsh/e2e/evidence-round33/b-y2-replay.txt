@@ -1,0 +1,31 @@
+Y2 replay: round 33 ci-check.py check on copies of real dsh-e2e artifacts (busyProbe + full Y2 row).
+Per run: new Y2 verdict + busyProbe basis, and the run's own (old) Y2 verdict. All other rows unchanged except R14 on the four alpha.3 artifacts (their uploaded history-lock.json predates the round-33 structural fields -> FAIL by design; regenerated from their lock-session.jsonl all four PASS, see b-r14.md) and U6 wording (round-29 declaration, not this lane).
+
+== 41842392546
+ Y2 PASS
+  "busyProbe": "own fresh lease of the new process", "killedPid": 4789
+  old: | Y2 | FAIL 
+== 41842397847
+ Y2 PASS
+  "busyProbe": "own fresh lease of the new process", "killedPid": 4718
+  old: | Y2 | FAIL 
+== 41859567651
+ Y2 PASS
+  "busyProbe": "own fresh lease of the new process", "killedPid": 5153
+  old: | Y2 | FAIL 
+== 41859577345
+ Y2 PASS
+  "busyProbe": "own fresh lease of the new process", "killedPid": 4875
+  old: | Y2 | FAIL 
+== 42034146821
+ Y2 PASS
+  "busyProbe": "false", "killedPid": 4797
+  old: | Y2 | PASS 
+== 42037652492
+ Y2 PASS
+  "busyProbe": "false", "killedPid": 5994
+  old: | Y2 | PASS 
+== 42034156577
+ Y2 PASS
+  "busyProbe": "false", "killedPid": 5023
+  old: | Y2 | PASS 
