@@ -14,7 +14,7 @@ ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
 PKGS=(dsh agent compaction compaction-basic llm session subagent token-meter tools typert-protocol typert-registry client-connection client-ui-primitives client-ui-slots)
 mkdir -p "$S"; cd "$S"; echo '{"name":"dsh-overlay","private":true}' > package.json
 specs=(); for p in "${PKGS[@]}"; do [ "$p" = dsh ] && specs+=("@deepseek-ai/dsh@$V") || specs+=("@deepseek-ai/dsh-$p@$V"); done
-npm install --ignore-scripts --no-audit --no-fund --legacy-peer-deps "${specs[@]}" >/dev/null
+npm install --ignore-scripts --no-audit --no-fund "${specs[@]}" >/dev/null
 SRC="$S/node_modules/@deepseek-ai"
 replaced=0
 for dir in "$ROOT"/node_modules/@deepseek-ai "$ROOT"/packages/*/node_modules/@deepseek-ai; do
