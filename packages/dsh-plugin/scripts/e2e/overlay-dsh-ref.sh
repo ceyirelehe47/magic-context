@@ -55,7 +55,9 @@ B="$BB/ref-build"; mkdir -p "$B"
 for d in "$@"; do
   name="$(node -p "require('$SRC/packages/$d/package.json').name")"; short="${name#@deepseek-ai/}"
   dst="$NM/$short"
-  [ -d "$dst" ] || { echo "dsh-ref: $name is not in the $BASE tree; skipped" >&2; continue; }
+  # Round 33 (P1-B): a requested package that cannot be overlaid fails the lane
+  # (it used to be skipped on stderr only, and the lane stayed green on <base>).
+  [ -d "$dst" ] || { echo "dsh-ref: $name is not in the $BASE tree; cannot evaluate it at $REF" | tee /dev/stderr; exit 1; }
   w="$B/$short"; rm -rf "$w"; mkdir -p "$w"
   cp -r "$SRC/packages/$d/src" "$w/src"; cp "$SRC/packages/$d/package.json" "$w/package.json"
   cat > "$w/tsconfig.json" <<J

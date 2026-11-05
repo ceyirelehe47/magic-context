@@ -83,7 +83,11 @@ jobs:
       - name: Summary
         if: always()
         run: |
+          set -o pipefail
           {
+            # Round 33 (P1-B): what actually ran (base tree from the installed package.json).
+            echo "DSH version (installed): base $(node -p "require('$RUNNER_TEMP/dsh-overlay/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || echo unknown) + packages built from ${{ inputs.dsh_ref }} · node -v $(node -v) · GITHUB_SHA $GITHUB_SHA"
+            echo "Not a real DSH app boot: the overlay is type/contract/unit level only."
             echo "| step | outcome |"; echo "|---|---|"
             echo "| overlay (base + ref build) | ${{ steps.overlay.outcome }} |"
             echo "| typecheck:dsh | ${{ steps.tc.outcome }} |"

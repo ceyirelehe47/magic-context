@@ -24,8 +24,17 @@ fi
   --filter 'dsh-magic-context-adapter' --filter 'dsh-magic-context')
 
 mkdir -p "$E2E_ROOT/dsh" "$E2E_ROOT/home" "$E2E_ROOT/xdg"/{config,data,state,cache}
+# Round 33 (P1-B): an existing install is reused only when it IS the requested
+# DSH (a reused E2E_ROOT used to keep whatever version was there first).
+have="$(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || echo none)"
+if [[ -x "$E2E_ROOT/dsh/node_modules/.bin/dsh" && "$have" != "$DSH_VERSION" ]]; then
+  echo "bootstrap: $E2E_ROOT/dsh holds DSH $have, requested $DSH_VERSION: reinstalling"
+  rm -rf "$E2E_ROOT/dsh/node_modules" "$E2E_ROOT/dsh/package.json" "$E2E_ROOT/dsh/bun.lock" "$E2E_ROOT/dsh/bun.lockb"
+fi
 if [[ ! -x "$E2E_ROOT/dsh/node_modules/.bin/dsh" ]]; then
   echo '{"name":"dsh-e2e","private":true}' > "$E2E_ROOT/dsh/package.json"
   (cd "$E2E_ROOT/dsh" && timeout "${INSTALL_TIMEOUT:-100}" bun add --backend=hardlink "@deepseek-ai/dsh@$DSH_VERSION")
 fi
-echo "bootstrap ok: repo=$REPO e2e=$E2E_ROOT"
+have="$(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || echo none)"
+[[ "$have" == "$DSH_VERSION" ]] || { echo "bootstrap: installed DSH $have, requested $DSH_VERSION" >&2; exit 1; }
+echo "bootstrap ok: repo=$REPO e2e=$E2E_ROOT DSH $have"

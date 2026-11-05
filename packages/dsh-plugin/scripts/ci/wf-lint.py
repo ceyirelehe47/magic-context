@@ -25,6 +25,7 @@ Rules (each a way a job can end green although the thing it tests failed):
 Workflows the round may not change (dsh-soak.yml: round 33 constraint) are reported as WARN.
 Upstream workflows (not dsh-*.yml) are out of scope.
 """
+import json
 import os
 import re
 import subprocess
@@ -174,7 +175,7 @@ def lint_workflow(path):
                 gated = sid and re.search(rf"steps\.{re.escape(sid)}\.(outcome|conclusion)", later) and "exit" in later
                 if not gated:
                     rows.append((name, jid, label, "COE", f"continue-on-error without a later gate on steps.{sid}"))
-        text = yaml.safe_dump(job)
+        text = json.dumps(job)
         installs = re.search(r"@deepseek-ai/dsh@|bootstrap\.sh|overlay-dsh-|install-accept\.sh", text)
         if installs:
             missing = [w for w, rx in (("DSH version (installed)", r"DSH version \(installed\)"), ("node -v", r"node (-v|--version)"),
