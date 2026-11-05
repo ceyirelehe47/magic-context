@@ -1,0 +1,14 @@
+e2e 42050071694 (dsh-ci, rc.5, node 22, slot b) @ 98fa03b9b — first CI run of the round-33 ci-history.ts + R14 checker
+summary.md: 134 PASS / 0 FAIL / 1 WARN (E2) of 135 rows
+
+| R14 | PASS | second native compaction (lock-d): lock-c's prompt and checksums are folded by a compaction (shadowedSeqs) or still on the raw surface; whatever left the raw surface is inside a compartment (recoverable by ctx_expand) and reached by the summary; at least one item folded | {"lockD": "rc=0 elapsed=17.0s log=~/work/_temp/e2e/logs/run-29.log", "done": ["[magic-context] e2e: /compact at  …
+
+history-lock.json (as uploaded by CI):
+  {'file': None, 'historyOrdinal': 35, 'coveredBy': '32-43', 'onSurface': True, 'originSeqs': [157], 'shadowedBy': [216], 'onRawSurface': False, 'inSummaryText': True}
+  {'file': 'p27.txt', 'historyOrdinal': 37, 'coveredBy': '32-43', 'onSurface': False, 'originSeqs': [162], 'shadowedBy': [216], 'onRawSurface': False, 'inSummaryText': False}
+  {'file': 'p28.txt', 'historyOrdinal': 38, 'coveredBy': '32-43', 'onSurface': False, 'originSeqs': [169], 'shadowedBy': [216], 'onRawSurface': False, 'inSummaryText': False}
+  {'file': 'p29.txt', 'historyOrdinal': 39, 'coveredBy': '32-43', 'onSurface': False, 'originSeqs': [176], 'shadowedBy': [216], 'onRawSurface': False, 'inSummaryText': False}
+  {'file': 'p30.txt', 'historyOrdinal': 40, 'coveredBy': '32-43', 'onSurface': False, 'originSeqs': [183], 'shadowedBy': [216], 'onRawSurface': False, 'inSummaryText': False}
+  {'file': 'p31.txt', 'historyOrdinal': 41, 'coveredBy': '32-43', 'onSurface': False, 'originSeqs': [190], 'shadowedBy': [216], 'onRawSurface': False, 'inSummaryText': False}
+  last compaction/summary seq 216 summaryMaxEnd 43 lastCompartmentEnd 43 compactions 8
+history-lock.err: ''
