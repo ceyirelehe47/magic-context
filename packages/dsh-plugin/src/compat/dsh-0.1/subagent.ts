@@ -97,18 +97,26 @@ export function magicWorkerActivation(
     opts.systemPrompt === undefined || opts.systemPrompt.length === 0
       ? opts.prompt
       : [{ type: "text", text: `<system>\n${opts.systemPrompt}\n</system>` }, ...opts.prompt];
-  return {
+  // Every released DSH the plugin declares (0.2.1-rc.5, 0.2.2-alpha.3,
+  // 0.2.2-rc.1) reads the task from `spec.request`. DSH master after rc.1
+  // (deepseek-harness fcc0ad4621) flattened the spec — `SubagentActivationSpec
+  // extends Omit<SubagentStartRequest, 'label' | 'signal'>` — and reads
+  // `spec.parent` / `spec.prompt` / `spec.maxDepth`, so the old shape threw
+  // `spec.parent.id` there (round 32). Carry the same task in both places; each
+  // runtime ignores the copy it does not read. Built as a variable (not a fresh
+  // literal) so either declaration type-checks without an excess-property
+  // error for the other shape's field.
+  const request = { prompt, parent, maxDepth: opts.maxDepth ?? 1 };
+  const spec = {
     provider: opts.provider ?? MAGIC_WORKER_PROVIDER,
     label: opts.label,
     signal: opts.signal,
-    delivery: "caller",
+    delivery: "caller" as const,
     ...(opts.childId !== undefined ? { childId: opts.childId as SubagentActivationSpec["childId"] } : {}),
-    request: {
-      prompt,
-      parent,
-      maxDepth: opts.maxDepth ?? 1,
-    },
+    ...request,
+    request,
   };
+  return spec;
 }
 
 /**
