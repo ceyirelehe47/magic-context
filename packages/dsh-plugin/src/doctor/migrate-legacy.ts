@@ -830,7 +830,35 @@ function flag(argv: readonly string[], name: string): string | undefined {
   return pref?.slice(name.length + 1);
 }
 
+/** Flags that take a value (round 35 F3). */
+const VALUE_FLAGS = ["--db", "--storage-dir", "--restore"] as const;
+
+/**
+ * Round 35 (F3): a value flag at the end, followed by another flag, or given
+ * as `--name=` has no value. `flag()` alone returned `undefined` (→ the DEFAULT
+ * storage DB was used) or the next flag (`--db --apply` → db path "--apply").
+ */
+function missingFlagValue(argv: readonly string[]): string | null {
+  for (const name of VALUE_FLAGS) {
+    for (let i = 0; i < argv.length; i += 1) {
+      const token = argv[i];
+      if (token === name) {
+        const next = argv[i + 1];
+        if (next === undefined || next === "" || next.startsWith("--")) return name;
+      } else if (token === `${name}=`) {
+        return name;
+      }
+    }
+  }
+  return null;
+}
+
 export async function runMigrateLegacy(argv: readonly string[], io: MigrateCliIo): Promise<number> {
+  const missing = missingFlagValue(argv);
+  if (missing !== null) {
+    io.out(`${missing} needs a value (e.g. ${missing} ${missing === "--storage-dir" ? "<dir>" : "<file.db>"}); nothing was opened or written`);
+    return 2;
+  }
   const storageDir = flag(argv, "--storage-dir") ?? io.storageDir();
   const dbPath = flag(argv, "--db") ?? join(storageDir, "context.db");
   const json = argv.includes("--json");

@@ -1,0 +1,10 @@
+(fail) migrate-legacy: value flags need a value (round 35 F3) > --apply --db → usage error, nothing opened or written [13.76ms]
+(fail) migrate-legacy: value flags need a value (round 35 F3) > --db --apply → usage error, nothing opened or written [4.70ms]
+(fail) migrate-legacy: value flags need a value (round 35 F3) > --db= → usage error, nothing opened or written [0.72ms]
+(fail) migrate-legacy: value flags need a value (round 35 F3) > --backup --storage-dir → usage error, nothing opened or written [5.73ms]
+(fail) migrate-legacy: value flags need a value (round 35 F3) > --storage-dir --apply → usage error, nothing opened or written [1.04ms]
+(fail) migrate-legacy: value flags need a value (round 35 F3) > --restore → usage error, nothing opened or written [4.47ms]
+(fail) migrate-legacy: value flags need a value (round 35 F3) > --restore --force → usage error, nothing opened or written [1.24ms]
+(pass) migrate-legacy: value flags need a value (round 35 F3) > a value flag with a value still works (--db <path> scan) [0.85ms]
+ 1 pass
+ 7 fail
