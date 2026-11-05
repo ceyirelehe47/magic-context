@@ -124,6 +124,41 @@ jobs:
             [ "$o" = "success" ] || exit 1
           done
 
+  # Round 31: the compile-time DSH API contract (typecheck:dsh) and the runtime
+  # contracts (contracts:dsh) against every declared DSH other than the
+  # lockfile's 0.2.1-rc.5 — the @deepseek-ai packages are swapped in a throwaway
+  # checkout by overlay-dsh-types.sh (lockfile / package.json untouched).
+  contracts-dsh:
+    if: github.repository == 'ceyirelehe47/magic-context'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        dsh: ["0.2.2-alpha.3", "0.2.2-rc.1"]
+    name: contracts (DSH ${{ matrix.dsh }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install the DSH lane (filtered, no lifecycle scripts)
+        run: |
+          bun install --ignore-scripts \
+            --filter '@cortexkit/opencode-magic-context' \
+            --filter '@cortexkit/retina-local-fs' \
+            --filter 'dsh-magic-context-adapter' \
+            --filter 'dsh-magic-context'
+      - name: Overlay DSH ${{ matrix.dsh }} (@deepseek-ai/*)
+        run: bash packages/dsh-plugin/scripts/e2e/overlay-dsh-types.sh "${{ matrix.dsh }}" "$RUNNER_TEMP/dsh-overlay" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: typecheck:dsh against DSH ${{ matrix.dsh }}
+        run: bun run typecheck:dsh
+      - name: contracts:dsh against DSH ${{ matrix.dsh }}
+        run: bun run contracts:dsh
+
   e2e:
     if: >-
       github.repository == 'ceyirelehe47/magic-context' &&
