@@ -1,0 +1,36 @@
+# Round 36 cache bench (dsh-cache-bench.yml): identical in BOTH groups.
+# Routes go through the local recording proxy (proxy.mjs, port 18731) to
+# OpenCode Go, model deepseek-v4.1-flash, 100k main window (the scenario P
+# route: DSH's native compaction-basic default fires at
+# min(0.8w, w-4096-65536) = 30 368 tokens there; MC's shipped execute
+# threshold is 65 %). /r/<tag>/ only labels the route for the proxy.
+# Key from OPENCODE_API_KEY (never written here).
+- id: llm-pi-ai
+  config:
+    providers:
+      bench:
+        displayName: OpenCode Go via bench proxy (100k)
+        apiKeyEnv: OPENCODE_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:18731/r/main/zen/go/v1
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: deepseek-v4.1-flash
+            contextWindow: 100000
+            maxTokens: 4096
+      bench-hist:
+        displayName: OpenCode Go via bench proxy (200k, historian)
+        apiKeyEnv: OPENCODE_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:18731/r/hist/zen/go/v1
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: deepseek-v4.1-flash
+            contextWindow: 200000
+            maxTokens: 16384
+- id: agent-default-model
+  config:
+    provider: bench
+    model: deepseek-v4.1-flash

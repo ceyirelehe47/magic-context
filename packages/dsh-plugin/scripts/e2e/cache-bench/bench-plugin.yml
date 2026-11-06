@@ -1,0 +1,8 @@
+# Round 36 cache bench, plugin group only: the historian (which needs a large
+# window for its ~18k prompt) uses the 200k bench-hist route, so the proxy can
+# tag its first request as the compaction cutoff. Everything else is the
+# shipped Magic Context default (execute threshold 65 %, not lowered).
+- id: magic-agent
+  config:
+    historian:
+      model: bench-hist/deepseek-v4.1-flash

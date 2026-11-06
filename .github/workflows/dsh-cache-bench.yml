@@ -1,0 +1,162 @@
+# DSH fork, round 36 line B: DeepSeek prompt-cache hit rate before the FIRST
+# compaction, Magic Context plugin vs. DSH's own compaction (no plugin).
+# Manual dispatch only (spends OPENCODE_API_KEY quota). See
+# packages/dsh-plugin/scripts/e2e/cache-bench/ and
+# docs/dsh/e2e/evidence-round36/cache-bench.md.
+#
+#   plugin    profile "test": dsh-magic-context from this checkout + `setup`
+#             (shipped defaults: MC execute 65 %, native backstop 90 %)
+#   baseline  profile "base": the shipped DSH headless template, no plugin
+#             (compaction-basic defaults)
+# Same DSH, model (deepseek-v4.1-flash via OpenCode Go, 100k route), task,
+# fixtures and nonce rule in both groups; every run gets a fresh nonce, a
+# fresh x-opencode-session and a fresh XDG data dir (Magic DB).
+# New file, DSH branches only; upstream workflows untouched.
+name: dsh-cache-bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      dsh_version:
+        description: "@deepseek-ai/dsh version"
+        type: string
+        default: "0.2.1-rc.5"
+      mode:
+        description: "plugin | baseline | both (matrix, both groups in parallel)"
+        type: choice
+        options: [both, plugin, baseline]
+        default: both
+      runs:
+        description: "Runs per group (sequential within a group)"
+        type: string
+        default: "3"
+      slot:
+        description: "Concurrency slot (use cache-*; never the e2e line's slots)"
+        type: string
+        default: "cache-1"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: dsh-cache-bench-${{ inputs.slot }}
+  cancel-in-progress: false
+
+env:
+  BUN_VERSION: 1.4.2
+  DSH_VERSION: ${{ inputs.dsh_version }}
+
+jobs:
+  bench:
+    if: github.repository == 'ceyirelehe47/magic-context'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: ${{ inputs.mode == 'both' && fromJSON('["plugin","baseline"]') || fromJSON(format('["{0}"]', inputs.mode)) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scratch dirs
+        run: |
+          echo "E2E_ROOT=$RUNNER_TEMP/e2e" >> "$GITHUB_ENV"
+          echo "BENCH_OUT=$RUNNER_TEMP/bench/${{ matrix.mode }}" >> "$GITHUB_ENV"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.DSH_VERSION == '0.2.1-rc.5' && '22' || '24' }}
+
+      - name: Bootstrap (filtered install + local DSH ${{ env.DSH_VERSION }})
+        working-directory: packages/dsh-plugin
+        env:
+          INSTALL_TIMEOUT: "600"
+        run: |
+          bash scripts/e2e/bootstrap.sh
+          got="$(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version")"
+          [ "$got" = "$DSH_VERSION" ] || { echo "::error::installed DSH $got, requested $DSH_VERSION"; exit 1; }
+
+      - name: Profile (${{ matrix.mode }})
+        working-directory: packages/dsh-plugin
+        run: |
+          source scripts/e2e/env.sh
+          if [ "${{ matrix.mode }}" = plugin ]; then
+            bun run build
+            bash scripts/e2e/install-profile.sh test headless
+            node dist/cli.js setup --profile test
+            node dist/cli.js doctor --profile test || true
+          else
+            timeout 60 node "$DSH_BIN" --profile headless --dump-default-config >/dev/null
+            rm -rf "$DSH_HOME/profiles/base"
+            cp -r "$DSH_HOME/profiles/headless" "$DSH_HOME/profiles/base"
+            sed -i 's/dsh-profile-headless/dsh-profile-base/' "$DSH_HOME/profiles/base/package.json"
+            if grep -rq magic-context "$DSH_HOME/profiles/base" --include='*.yml' --include='package.json'; then
+              echo "::error::baseline profile mentions magic-context"; exit 1
+            fi
+          fi
+
+      - name: Bench runs
+        working-directory: packages/dsh-plugin
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          if [ -z "$OPENCODE_API_KEY" ]; then echo "::error::secret OPENCODE_API_KEY is not set"; exit 1; fi
+          mkdir -p "$BENCH_OUT"
+          for i in $(seq 1 "${{ inputs.runs }}"); do
+            E2E_XDG_DATA_HOME="$E2E_ROOT/xdg/data-run$i" bash scripts/e2e/cache-bench/bench.sh "${{ matrix.mode }}" "run$i" "$BENCH_OUT/run$i"
+          done
+
+      - name: Analyze + redact
+        if: always()
+        working-directory: packages/dsh-plugin
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          mkdir -p "$BENCH_OUT"
+          python3 scripts/e2e/cache-bench/analyze.py "$BENCH_OUT/summary.md" "$BENCH_OUT"/run* || true
+          python3 scripts/e2e/ci-check.py redact "$BENCH_OUT"
+          echo "### dsh-cache-bench ${{ matrix.mode }} · DSH version (installed): $(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || echo unknown) · plugin $(node -p "require('./package.json').version") · node $(node -v) · GITHUB_SHA $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          cat "$BENCH_OUT/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-e2e-cachebench-${{ matrix.mode }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/bench/${{ matrix.mode }}
+          retention-days: 7
+          if-no-files-found: warn
+
+  compare:
+    needs: bench
+    if: always() && inputs.mode == 'both'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packages/dsh-plugin/scripts/e2e/cache-bench
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dsh-e2e-cachebench-*-${{ github.run_id }}
+          path: ${{ runner.temp }}/all
+      - name: Compare both groups
+        run: |
+          dirs=$(ls -d "$RUNNER_TEMP"/all/*/run* 2>/dev/null)
+          [ -n "$dirs" ] || { echo "::error::no runs"; exit 1; }
+          python3 packages/dsh-plugin/scripts/e2e/cache-bench/analyze.py "$RUNNER_TEMP/compare.md" $dirs
+          cat "$RUNNER_TEMP/compare.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-e2e-cachebench-compare-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/compare.md
+            ${{ runner.temp }}/compare.md.json
+          retention-days: 7
