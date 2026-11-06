@@ -71,8 +71,28 @@ printf '__pycache__/\n*.pyc\n.pytest_cache/\n*.egg-info/\n' > "$SNAP/info/exclud
 snap add -A >/dev/null 2>&1; snap -c user.name=bench -c user.email=bench@local commit -q -m base >/dev/null
 BASE_SNAP="$(snap rev-parse HEAD)"
 
+# --- sanitized test image. The instance image's /testbed ships the FULL upstream git history
+# (later release tags included): in smoke 42238241963 the fold agent ran
+# `docker run IMG git log 2.0.2..2.0.3`, git-showed the upstream commits and applied them.
+# The agent needs docker (evo-pytest), so the pristine image must not be on this machine
+# during the run: flatten a copy without /testbed (the agent's tree is mounted there) and
+# without any .git dir (export | import: no lower layers to dig in), keep the image ENV,
+# remove the original (the Score step re-pulls it after the run) and block the registries.
+SAN="evo-san-$GROUP-$LABEL:run"
+TMPS="evo-san-$$"
+docker run --name "$TMPS" --network none --entrypoint bash "$IMG" -c 'rm -rf /testbed && mkdir /testbed && find / -xdev -name .git -prune -exec rm -rf {} + 2>/dev/null; true'
+CHG=()
+while IFS= read -r ev; do [[ "$ev" == *=* ]] && CHG+=(--change "ENV ${ev%%=*}=\"${ev#*=}\""); done < <(docker image inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$IMG")
+docker export "$TMPS" | docker import "${CHG[@]}" --change 'WORKDIR /testbed' - "$SAN" >/dev/null
+docker rm -f "$TMPS" >/dev/null
+docker rmi -f "$IMG" >/dev/null; docker image prune -f >/dev/null 2>&1
+if docker image inspect "$IMG" >/dev/null 2>&1; then echo "::error::pristine image still present"; exit 1; fi
+GITS=$(docker run --rm --network none --entrypoint bash "$SAN" -c 'find / -xdev -name .git 2>/dev/null | wc -l')
+echo "{\"sanitized_image\":\"$SAN\",\"pristine_removed\":true,\"git_dirs_in_sanitized\":$GITS}" > "$OUT/image.json"
+[[ "$GITS" == 0 ]] || { echo "::error::.git left in the sanitized image"; exit 1; }
+
 # --- test container: the agent's tree mounted at /testbed (its editable install path)
-docker run -d --network none --name "$CT" -v "$WS:/testbed" "$IMG" sleep infinity >/dev/null
+docker run -d --network none --name "$CT" -v "$WS:/testbed" "$SAN" sleep infinity >/dev/null
 cat > "$SCR/bin/evo-pytest" <<WRAP
 #!/usr/bin/env bash
 # pytest in the instance image (conda env "testbed"), run in the matching directory under /testbed
@@ -82,16 +102,20 @@ WRAP
 chmod +x "$SCR/bin/evo-pytest"
 export PATH="$SCR/bin:$PATH"
 (cd "$WS" && timeout 300 evo-pytest --version > "$OUT/evo-pytest-version.txt" 2>&1); echo "evo-pytest: $(tail -n 2 "$OUT/evo-pytest-version.txt" | tr '\n' ' ')"
+grep -q "^pytest " "$OUT/evo-pytest-version.txt" || { echo "::error::evo-pytest does not run in the sanitized image"; exit 1; }
 
 # --- anti-shortcut network block for the run (the model API goes through the proxy to
 # opencode.ai, which stays reachable). Exact hostnames only; restored on exit.
-BLOCK="github.com api.github.com raw.githubusercontent.com codeload.github.com objects.githubusercontent.com gist.github.com gist.githubusercontent.com pypi.org files.pythonhosted.org pypi.python.org conan.io docs.conan.io center.conan.io datasets-server.huggingface.co gitlab.com bitbucket.org"
+BLOCK="github.com api.github.com raw.githubusercontent.com codeload.github.com objects.githubusercontent.com gist.github.com gist.githubusercontent.com pypi.org files.pythonhosted.org pypi.python.org conan.io docs.conan.io center.conan.io datasets-server.huggingface.co huggingface.co cdn-lfs.huggingface.co gitlab.com bitbucket.org registry-1.docker.io auth.docker.io index.docker.io registry.hub.docker.com hub.docker.com docker.io production.cloudflare.docker.com mirror.gcr.io ghcr.io quay.io"
 if [[ "${EVO_NET_BLOCK:-1}" == 1 ]]; then
   sudo cp /etc/hosts "$SCR/hosts.orig"
   trap 'sudo cp "$SCR/hosts.orig" /etc/hosts' EXIT
   { echo "# evo-bench block"; for h in $BLOCK; do echo "0.0.0.0 $h"; echo ":: $h"; done; } | sudo tee -a /etc/hosts >/dev/null
   curl -s -m 5 -o /dev/null -w '%{http_code}' https://api.github.com/ > "$OUT/netblock-check.txt" 2>&1; echo " exit=$?" >> "$OUT/netblock-check.txt"
   echo "net block: $(cat "$OUT/netblock-check.txt") (api.github.com, expect 000)"
+  timeout 90 docker pull -q "$IMG" > "$OUT/pullblock-check.txt" 2>&1; echo "exit=$?" >> "$OUT/pullblock-check.txt"
+  if docker image inspect "$IMG" >/dev/null 2>&1; then echo "::error::pristine image pullable during the run"; exit 1; fi
+  echo "pull block: $(tail -n 1 "$OUT/pullblock-check.txt") (expect non-zero)"
 fi
 
 node "$CB/proxy.mjs" 18731 "$OUT" > "$OUT/proxy.out" 2>&1 &
@@ -131,7 +155,7 @@ for k in $(seq 1 "$NT"); do
   if [[ -z "$SID" ]]; then STOP="no-session"; break; fi
 done
 sleep 2; kill "$PROXY" 2>/dev/null; wait "$PROXY" 2>/dev/null
-docker rm -f "$CT" >/dev/null 2>&1
+docker rm -f "$CT" >/dev/null 2>&1; docker rmi -f "$SAN" >/dev/null 2>&1
 if [[ -n "$SID" ]]; then
   f="$(ls "$DSH_HOME"/sessions/*/"$SID"/session.v4.jsonl.zstd 2>/dev/null | head -n 1)"
   [[ -n "$f" ]] && zstd -qdc "$f" > "$OUT/session.jsonl" 2>/dev/null

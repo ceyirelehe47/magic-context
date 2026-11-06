@@ -197,6 +197,8 @@ jobs:
         run: |
           [ -f "$BENCH_OUT/final.patch" ] || { echo "::error::no final.patch"; exit 1; }
           python3 prepare.py "${{ inputs.transition }}" "$RUNNER_TEMP/evo-score-task" --max-items "${{ inputs.max_items }}"
+          # run.sh removed the pristine instance image for the run (it ships the upstream history); re-pull it
+          docker pull -q "$(jq -r .image "$RUNNER_TEMP/evo-score-task/instance.json")"
           python3 score.py "$RUNNER_TEMP/evo-score-task" "$BENCH_OUT/final.patch" "$BENCH_OUT/score" --label "${{ matrix.group }}-run${{ matrix.run }}"
 
       - name: Analyze + redact

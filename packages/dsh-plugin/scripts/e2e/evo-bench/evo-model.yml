@@ -5,10 +5,13 @@
 # min(0.8w, w-4096-65536) = 30 368 tokens, below a single conan read/test burst;
 # in the pipeline run 42229338110 the baseline compacted 59 times in ~110 main
 # calls and the prompt right after each compaction was back above the trigger
-# (thrash). At 200k native fires at 130 368 (65.2 %) and Magic Context's shipped
-# execute threshold is 65 % (130 000): the same trigger point for both systems.
-# maxTokens 32768 (cache-bench: 4096): in smoke 42235538885 every fold turn ended
-# with turn_end reason max-tokens after a 4096-token reasoning step (rc 1, no edits).
+# (thrash). At 200k Magic Context's shipped execute threshold is 65 % (130 000).
+# DSH compaction-basic fires at min(0.8w, w - maxTokens - headroom 65536)
+# (dsh-compaction-basic resolveCompactSpec): with maxTokens 32768 that is 101 696
+# (50.8 %), NOT the same point as Magic Context (smoke 42238241963: baseline
+# compactions at ~100k). maxTokens 32768 (cache-bench: 4096): in smoke
+# 42235538885 every fold turn ended with turn_end reason max-tokens after a
+# 4096-token reasoning step (rc 1, no edits).
 - id: llm-pi-ai
   config:
     providers:
