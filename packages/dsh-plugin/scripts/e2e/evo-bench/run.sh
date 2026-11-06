@@ -30,29 +30,42 @@ CB="$HERE/../cache-bench"
 source "$HERE/../env.sh"
 GROUP="$1"; LABEL="$2"; OUT="$(mkdir -p "$3" && cd "$3" && pwd)"; TD="$(cd "$4" && pwd)"
 RUN_TIMEOUT="${EVO_RUN_TIMEOUT:-1800}"
+# Model route: EVO_MODEL_PATCH (file in this dir). Default evo-model.yml = the shipped
+# opencode-go catalog route, nothing overridden but the proxy baseURL (1M window, catalog
+# maxTokens, default historian = main model, no historian await). evo-model-200k-stress.yml
+# reproduces the smoke-2 stress setting (200k, maxTokens 32768, historian on the 200k
+# bench-hist route via cache-bench/bench-plugin.yml, historian awaited 60 s at turn end).
+MODEL_PATCH="${EVO_MODEL_PATCH:-evo-model.yml}"
+STRESS=0; [[ "$MODEL_PATCH" == evo-model-200k-stress.yml ]] && STRESS=1
+PATCHES=(--patch "$HERE/$MODEL_PATCH")
 case "$GROUP" in
-  baseline) PROFILE=base; PATCHES=(--patch "$HERE/evo-model.yml"); unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
-  fold) PROFILE=test; PATCHES=(--patch "$HERE/evo-model.yml" --patch "$CB/bench-plugin.yml"); unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
-  native) PROFILE=test; PATCHES=(--patch "$HERE/evo-model.yml" --patch "$CB/bench-plugin.yml"); export MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 ;;
+  baseline) PROFILE=base; unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
+  fold) PROFILE=test; unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
+  native) PROFILE=test; export MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 ;;
   *) echo "group must be baseline|fold|native" >&2; exit 2 ;;
 esac
+[[ "$STRESS" == 1 && "$GROUP" != baseline ]] && PATCHES+=(--patch "$CB/bench-plugin.yml")
 PATCHES+=(--patch "$HERE/bench-evo.yml")
 [[ -n "${EVO_BENCH_PATCH:-}" ]] && PATCHES+=(--patch "$EVO_BENCH_PATCH")
 export DSH_PERMISSION_MODE="${EVO_SANDBOX:-danger-full-access}"
 export BENCH_ABLATE=""
 export BENCH_NONCE="$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
 export OPENCODE_SESSION="mc-evo-$GROUP-$LABEL-$(python3 -c 'import secrets; print(secrets.token_hex(4))')"
-export MAGIC_CONTEXT_DEBUG_HISTORIAN=1
-# Each turn is its own process: the historian must finish before it exits (as in cache-bench).
-export MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS=60000
+export MAGIC_CONTEXT_DEBUG_HISTORIAN=1  # stderr diagnostics only (pressure / trigger lines), no behaviour change
+if [[ "$STRESS" == 1 ]]; then
+  # stress setting only (as in cache-bench): each turn is its own process, the historian is awaited
+  export MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS=60000
+else
+  unset MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS  # shipped default (off)
+fi
 
 IMG="$(jq -r .image "$TD/instance.json")"; BASE="$(jq -r .base_commit "$TD/instance.json")"
 REPO_NAME="$(jq -r '.repo|split("/")[1]' "$TD/instance.json")"
 SCR="${RUNNER_TEMP:-/tmp}/evo/$GROUP-$LABEL"; rm -rf "$SCR"; mkdir -p "$SCR/bin"
 WS="$SCR/$REPO_NAME"; SNAP="$SCR/snap.git"; CT="evo-$GROUP-$LABEL-$$"
 NT=$(jq length "$TD/requests.json")
-printf '{"group":"%s","label":"%s","nonce":"%s","session_header":"%s","profile":"%s","native_roles":"%s","image":"%s","base_commit":"%s","turns_planned":%s,"run_timeout":%s,"cost_cap":"%s","sandbox":"%s","start":%s}\n' \
-  "$GROUP" "$LABEL" "$BENCH_NONCE" "$OPENCODE_SESSION" "$PROFILE" "${MAGIC_CONTEXT_DSH_NATIVE_ROLES-}" "$IMG" "$BASE" "$NT" "$RUN_TIMEOUT" "${EVO_COST_CAP:-0}" "$DSH_PERMISSION_MODE" "$(date +%s%3N)" > "$OUT/meta.json"
+printf '{"group":"%s","label":"%s","nonce":"%s","session_header":"%s","profile":"%s","native_roles":"%s","image":"%s","base_commit":"%s","turns_planned":%s,"run_timeout":%s,"cost_cap":"%s","sandbox":"%s","model_patch":"%s","historian_await":"%s","start":%s}\n' \
+  "$GROUP" "$LABEL" "$BENCH_NONCE" "$OPENCODE_SESSION" "$PROFILE" "${MAGIC_CONTEXT_DSH_NATIVE_ROLES-}" "$IMG" "$BASE" "$NT" "$RUN_TIMEOUT" "${EVO_COST_CAP:-0}" "$DSH_PERMISSION_MODE" "$MODEL_PATCH" "${MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS-}" "$(date +%s%3N)" > "$OUT/meta.json"
 
 # --- workspace: the image's /testbed at base_commit, git history and tags removed
 docker pull -q "$IMG" >/dev/null

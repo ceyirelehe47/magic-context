@@ -1,0 +1,43 @@
+# Round 36 line I evo bench, STRESS route (smoke 42238241963; select with the workflow input model_patch=evo-model-200k-stress.yml):
+# routes as cache-bench/bench-model.yml (recording proxy on 18731 -> OpenCode Go,
+# deepseek-v4.1-flash; the key from OPENCODE_API_KEY), but a 200k MAIN window.
+# Why not cache-bench's 100k: there DSH's native compaction-basic fires at
+# min(0.8w, w-4096-65536) = 30 368 tokens, below a single conan read/test burst;
+# in the pipeline run 42229338110 the baseline compacted 59 times in ~110 main
+# calls and the prompt right after each compaction was back above the trigger
+# (thrash). At 200k Magic Context's shipped execute threshold is 65 % (130 000).
+# DSH compaction-basic fires at min(0.8w, w - maxTokens - headroom 65536)
+# (dsh-compaction-basic resolveCompactSpec): with maxTokens 32768 that is 101 696
+# (50.8 %), NOT the same point as Magic Context (smoke 42238241963: baseline
+# compactions at ~100k). maxTokens 32768 (cache-bench: 4096): in smoke
+# 42235538885 every fold turn ended with turn_end reason max-tokens after a
+# 4096-token reasoning step (rc 1, no edits).
+- id: llm-pi-ai
+  config:
+    providers:
+      bench:
+        displayName: OpenCode Go via bench proxy (200k, evo main)
+        apiKeyEnv: OPENCODE_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:18731/r/main/zen/go/v1
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: deepseek-v4.1-flash
+            contextWindow: 200000
+            maxTokens: 32768
+      bench-hist:
+        displayName: OpenCode Go via bench proxy (200k, historian)
+        apiKeyEnv: OPENCODE_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:18731/r/hist/zen/go/v1
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: deepseek-v4.1-flash
+            contextWindow: 200000
+            maxTokens: 16384
+- id: agent-default-model
+  config:
+    provider: bench
+    model: deepseek-v4.1-flash

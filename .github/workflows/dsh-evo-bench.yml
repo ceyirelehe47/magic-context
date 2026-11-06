@@ -5,7 +5,7 @@
 #   fold      profile "test": dsh-magic-context from this checkout + `setup` (defaults)
 #   native    same as fold + MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 (round 36 G, plan N)
 # Same DSH, model route (evo-bench/evo-model.yml: deepseek-v4.1-flash via
-# OpenCode Go, 200k main window), requests, workspace, test wrapper, permission
+# OpenCode Go; default route = shipped opencode-go catalog, 1M window), requests, workspace, test wrapper, permission
 # mode, web tools off (bench-evo.yml) and network block in every group. Each (group, run) is its own job (6 h cap).
 # Manual dispatch only (spends OPENCODE_API_KEY quota). See
 # packages/dsh-plugin/scripts/e2e/evo-bench/ and
@@ -43,10 +43,10 @@ on:
         description: "Per-turn timeout, seconds (SIGKILL 30 s after SIGTERM)"
         type: string
         default: "1200"
-      extra_patch:
-        description: "Optional DSH --patch file (repo path) applied to ALL groups, e.g. a smaller window / threshold; empty = none"
+      model_patch:
+        description: "Model route file in scripts/e2e/evo-bench, ALL groups: evo-model.yml (shipped opencode-go catalog route, 1M, default maxTokens / historian) or evo-model-200k-stress.yml (smoke-2 stress setting)"
         type: string
-        default: ""
+        default: "evo-model.yml"
       validate:
         description: "Also score the gold patch and the empty patch (harness check, no model calls)"
         type: boolean
@@ -185,10 +185,10 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           EVO_COST_CAP: ${{ inputs.cost_cap }}
           EVO_RUN_TIMEOUT: ${{ inputs.turn_timeout }}
-          EXTRA: ${{ inputs.extra_patch }}
+          EVO_MODEL_PATCH: ${{ inputs.model_patch }}
         run: |
           if [ -z "$OPENCODE_API_KEY" ]; then echo "::error::secret OPENCODE_API_KEY is not set"; exit 1; fi
-          [ -n "$EXTRA" ] && export EVO_BENCH_PATCH="$GITHUB_WORKSPACE/$EXTRA"
+          [ -f "scripts/e2e/evo-bench/$EVO_MODEL_PATCH" ] || { echo "::error::no model patch $EVO_MODEL_PATCH"; exit 1; }
           E2E_XDG_DATA_HOME="$E2E_ROOT/xdg/data-evo" bash scripts/e2e/evo-bench/run.sh "${{ matrix.group }}" "run${{ matrix.run }}" "$BENCH_OUT" "$RUNNER_TEMP/evo-task"
 
       - name: Score (final cumulative source patch, fresh container)

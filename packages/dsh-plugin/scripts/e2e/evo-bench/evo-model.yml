@@ -1,43 +1,25 @@
-# Round 36 line I evo bench (dsh-evo-bench.yml): identical in ALL groups. Same
-# routes as cache-bench/bench-model.yml (recording proxy on 18731 -> OpenCode Go,
-# deepseek-v4.1-flash; the key from OPENCODE_API_KEY), but a 200k MAIN window.
-# Why not cache-bench's 100k: there DSH's native compaction-basic fires at
-# min(0.8w, w-4096-65536) = 30 368 tokens, below a single conan read/test burst;
-# in the pipeline run 42229338110 the baseline compacted 59 times in ~110 main
-# calls and the prompt right after each compaction was back above the trigger
-# (thrash). At 200k Magic Context's shipped execute threshold is 65 % (130 000).
-# DSH compaction-basic fires at min(0.8w, w - maxTokens - headroom 65536)
-# (dsh-compaction-basic resolveCompactSpec): with maxTokens 32768 that is 101 696
-# (50.8 %), NOT the same point as Magic Context (smoke 42238241963: baseline
-# compactions at ~100k). maxTokens 32768 (cache-bench: 4096): in smoke
-# 42235538885 every fold turn ended with turn_end reason max-tokens after a
-# 4096-token reasoning step (rc 1, no edits).
+# Round 36 line I evo bench (dsh-evo-bench.yml), DEFAULT route, identical in ALL
+# groups: the shipped `opencode-go` provider of DSH's pi-ai catalog with NOTHING
+# overridden but the baseURL, which points at the record-only cache-bench proxy
+# (port 18731, tag "main"; the proxy forwards to https://opencode.ai, i.e. the
+# catalog's own https://opencode.ai/inference/go/v1). Window, maxTokens and the
+# OpenCode session header therefore come from the catalog exactly as a user of
+# this route gets them: deepseek-v4.1-flash contextWindow 1 000 000, maxTokens
+# 384 000 (@earendil-works/pi-ai providers/data/opencode-go.json in DSH
+# 0.2.1-rc.5). No historian route: Magic Context's historian uses its default
+# (the main model). User instruction 2026-11-07 01:18–01:20 CST: real-use
+# defaults; only the bench-validity measures stay (git history stripped, network
+# block, test isolation, per-turn timeout).
+# Consequence: DSH compaction-basic fires at min(0.8w, w - maxTokens - 65536)
+# = 550 464 tokens; Magic Context's shipped execute threshold 65 % = 650 000.
+# The previous 200k / maxTokens 32768 route is evo-model-200k-stress.yml.
 - id: llm-pi-ai
   config:
     providers:
-      bench:
-        displayName: OpenCode Go via bench proxy (200k, evo main)
+      opencode-go:
         apiKeyEnv: OPENCODE_API_KEY
-        api: openai-completions
-        baseURL: http://127.0.0.1:18731/r/main/zen/go/v1
-        headers:
-          x-opencode-session: !!js process.env.OPENCODE_SESSION
-        models:
-          - id: deepseek-v4.1-flash
-            contextWindow: 200000
-            maxTokens: 32768
-      bench-hist:
-        displayName: OpenCode Go via bench proxy (200k, historian)
-        apiKeyEnv: OPENCODE_API_KEY
-        api: openai-completions
-        baseURL: http://127.0.0.1:18731/r/hist/zen/go/v1
-        headers:
-          x-opencode-session: !!js process.env.OPENCODE_SESSION
-        models:
-          - id: deepseek-v4.1-flash
-            contextWindow: 200000
-            maxTokens: 16384
+        baseURL: http://127.0.0.1:18731/r/main/inference/go/v1
 - id: agent-default-model
   config:
-    provider: bench
+    provider: opencode-go
     model: deepseek-v4.1-flash

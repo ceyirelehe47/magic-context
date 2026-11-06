@@ -24,7 +24,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from analyze import PRICE, PRICE_SRC, jl, hm, reasoning  # noqa: E402
 
 DROP = 0.15
-SUMMARIZER = "You are now acting as a compaction engine"  # DSH compaction-basic: same route, tools and system as the main agent
+SUMMARIZER = "You are now acting as a compaction engine"
+HISTORIAN = "You are Historian"  # Magic Context historian; with no historian.model it rides the main route  # DSH compaction-basic: same route, tools and system as the main agent
 NET = re.compile(r"curl |wget |pip (download|install)|git (clone|fetch)|https?://")
 # history probes: reading upstream history / a pristine image (smoke 42238241963: fold ran
 # `docker run IMG git log 2.0.2..2.0.3` and applied the upstream commits)
@@ -42,9 +43,15 @@ def kinds(rd, reqs):
         for r in reqs:
             k = r.get("kind")
             p = os.path.join(bd, f"{r['n']}.json")
-            if k == "main" and os.path.exists(p):
+            if k in ("main", "other") and os.path.exists(p):
                 try:
-                    m = (json.load(open(p)).get("messages") or [])[-1]
+                    msgs = json.load(open(p)).get("messages") or []
+                    s0 = next((x.get("content") for x in msgs if x.get("role") in ("system", "developer")), "") or ""
+                    s0 = s0 if isinstance(s0, str) else "".join(x.get("text", "") for x in s0 if isinstance(x, dict))
+                    if HISTORIAN in s0[:400]:
+                        out[str(r["n"])] = "historian"
+                        continue
+                    m = msgs[-1]
                     c = m.get("content")
                     c = c if isinstance(c, str) else "".join(x.get("text", "") for x in (c or []) if isinstance(x, dict))
                     if m.get("role") == "user" and c.lstrip().startswith(SUMMARIZER):
@@ -79,8 +86,85 @@ def net_attempts(rd, rx=None):
     return n, ex
 
 
+MC_ODD = re.compile(r"error|fail|warn|retry|retrying|backoff|pending|stuck|timeout|timed out|abort|crash|exceed|lease|deferred|already", re.I)
+
+
+def anomalies(rd, reqs, turns, sid):
+    """Everything unusual in one run, for the real-environment issue list (evidence = file + line)."""
+    A = {"turn_rc": {}, "turns_without_turn_end": [], "turn_end": {}, "http_status": {}, "finish": {},
+         "tool_errors": 0, "tool_error_examples": [], "mc_lines": {}, "mc_examples": {}, "stderr_lines": {}, "stderr_examples": {},
+         "session_ids": [], "session_resume_mismatch": [], "max_tokens_sent": {}, "hit_drops": []}
+    for t in turns:
+        if t.get("rc") != 0:
+            A["turn_rc"][str(t["turn"])] = t.get("rc")
+    for r in reqs:
+        A["http_status"][str(r.get("status"))] = A["http_status"].get(str(r.get("status")), 0) + 1
+        f = str(r.get("finish"))
+        A["finish"][f] = A["finish"].get(f, 0) + 1
+    for f in sorted(os.listdir(rd)):
+        if not (f.startswith("turn-") and f.endswith(".log")):
+            continue
+        has_end = False
+        for i, line in enumerate(open(os.path.join(rd, f), errors="replace"), 1):
+            if line.startswith("{"):
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    continue
+                if o.get("type") == "status" and o.get("phase") == "turn_end":
+                    has_end = True
+                    k = (o.get("reason") or {}).get("kind", "?")
+                    A["turn_end"].setdefault(k, []).append(f[5:7])
+                elif o.get("type") == "tool_result" and o.get("status") not in ("completed", None):
+                    A["tool_errors"] += 1
+                    if len(A["tool_error_examples"]) < 6:
+                        A["tool_error_examples"].append(f"{f}:{i} {str(o.get('result'))[:160]}")
+                elif o.get("type") == "session":
+                    A["session_ids"].append(o.get("sessionId"))
+                    if sid and o.get("sessionId") != sid:
+                        A["session_resume_mismatch"].append(f)
+            elif line.startswith("[magic-context]"):
+                if MC_ODD.search(line):
+                    key = re.sub(r"\d+(\.\d+)?", "N", line.strip())[:140]
+                    A["mc_lines"][key] = A["mc_lines"].get(key, 0) + 1
+                    A["mc_examples"].setdefault(key, f"{f}:{i}")
+            elif line.strip():
+                key = re.sub(r"\d+(\.\d+)?", "N", line.strip())[:140]
+                A["stderr_lines"][key] = A["stderr_lines"].get(key, 0) + 1
+                A["stderr_examples"].setdefault(key, f"{f}:{i}")
+        if not has_end:
+            A["turns_without_turn_end"].append(f[5:7])
+    bd = os.path.join(rd, "bodies")
+    if os.path.isdir(bd):
+        for r in reqs:
+            p = os.path.join(bd, f"{r['n']}.json")
+            try:
+                b = json.load(open(p))
+            except Exception:
+                continue
+            k = f"{r.get('kind')}:{b.get('max_tokens', b.get('max_completion_tokens'))}"
+            A["max_tokens_sent"][k] = A["max_tokens_sent"].get(k, 0) + 1
+        json.dump(A["max_tokens_sent"], open(os.path.join(rd, "evo-maxtokens.json"), "w"))
+    elif os.path.exists(os.path.join(rd, "evo-maxtokens.json")):
+        A["max_tokens_sent"] = json.load(open(os.path.join(rd, "evo-maxtokens.json")))
+    # cache-hit collapse on a main call that is NOT a prompt reduction (same or larger prompt)
+    main = [r for r in reqs if r.get("kind") == "main" and hm(r.get("usage"))[0]]
+    for a, b in zip(main, main[1:]):
+        pa, ha, _, _ = hm(a["usage"]); pb, hb, _, _ = hm(b["usage"])
+        if pa and pb >= pa * (1 - DROP) and pb > 20000 and ha / pa > 0.8 and hb / pb < 0.5:
+            A["hit_drops"].append({"req": b["n"], "prompt": pb, "hit_before": round(ha / pa, 3), "hit_after": round(hb / pb, 3), "gap_s": round(((b.get("t0") or 0) - (a.get("t1") or 0)) / 1000)})
+    return A
+
+
 def cost_of(h, m, o):
     return (h * PRICE["hit"] + m * PRICE["miss"] + o * PRICE["out"]) / 1e6
+
+
+def sid_file(rd):
+    try:
+        return open(os.path.join(rd, "sid")).read().strip()
+    except Exception:
+        return None
 
 
 def run_stats(rd, gold=None):
@@ -153,6 +237,7 @@ def run_stats(rd, gold=None):
         "cost": cost_of(tot["hit"], tot["miss"], tot["out"]), "by_kind": bykind,
         "compaction_requests": comp_req, "compaction_start_events": comp_ev,
         "boundaries": bounds, "net_attempts": na, "net_examples": nex, "history_probes": hpn, "history_examples": hpex, "peak_prompt": peak,
+        "anomalies": anomalies(rd, reqs, turns, sid_file(rd)),
         "turn_time_s": turn_ms / 1000, "wall_s": ((meta.get("end") or 0) - meta["start"]) / 1000 if meta.get("end") else None,
     }
 
@@ -215,6 +300,20 @@ def main():
     for r in runs:
         for x in r["boundaries"]:
             L.append(f"- {r['group']} {r['label']}: req {x['req_before']}→{x['req_after']} prompt {x['prompt_before']}→{x['prompt_after']}, hit {x['hit_before']*100:.1f} % → {(x['hit_after'] or 0)*100:.1f} %")
+    L += ["", "## Anomalies per run (raw material for the real-environment issue list; evidence = artifact file:line)", ""]
+    for r in runs:
+        A = r.get("anomalies") or {}
+        L.append(f"### {r['group']} {r['label']}")
+        L.append(f"- turn rc != 0: {A.get('turn_rc') or 'none'}; turns without turn_end: {A.get('turns_without_turn_end') or 'none'}; turn_end: { {k: len(v) for k, v in (A.get('turn_end') or {}).items()} } (max-tokens in turns {(A.get('turn_end') or {}).get('max-tokens', [])})")
+        L.append(f"- proxy HTTP status: {A.get('http_status')}; finish reasons: {A.get('finish')}; max_tokens sent (kind:value → n): {A.get('max_tokens_sent') or 'n/a'}")
+        L.append(f"- session ids seen: {len(set(A.get('session_ids') or []))} distinct over {len(A.get('session_ids') or [])} turns; resume mismatch: {A.get('session_resume_mismatch') or 'none'}")
+        L.append(f"- tool errors: {A.get('tool_errors', 0)}" + ("".join(f"\n  - `{e}`" for e in A.get('tool_error_examples', []))))
+        L.append(f"- cache-hit collapses without a prompt reduction (hit > 80 % → < 50 %): {len(A.get('hit_drops', []))}" + ("".join(f"\n  - req {d['req']} prompt {d['prompt']} hit {d['hit_before']} → {d['hit_after']} gap {d['gap_s']} s" for d in A.get('hit_drops', [])[:8])))
+        mc = sorted((A.get('mc_lines') or {}).items(), key=lambda x: -x[1])
+        L.append(f"- Magic Context log lines (warn / error / retry / pending / deferred …): {sum(v for _, v in mc)}" + "".join(f"\n  - {v}× `{k}` (first: {A['mc_examples'][k]})" for k, v in mc[:12]))
+        se = sorted((A.get('stderr_lines') or {}).items(), key=lambda x: -x[1])
+        L.append(f"- other non-JSON output lines: {sum(v for _, v in se)}" + "".join(f"\n  - {v}× `{k}` (first: {A['stderr_examples'][k]})" for k, v in se[:12]))
+        L.append("")
     open(out, "w").write("\n".join(L) + "\n")
     json.dump({"price": PRICE, "runs": runs}, open(out + ".json", "w"), indent=1, default=str)
     print("\n".join(L[:20]))
