@@ -93,7 +93,8 @@ def anomalies(rd, reqs, turns, sid):
     """Everything unusual in one run, for the real-environment issue list (evidence = file + line)."""
     A = {"turn_rc": {}, "turns_without_turn_end": [], "turn_end": {}, "http_status": {}, "finish": {},
          "tool_errors": 0, "tool_error_examples": [], "mc_lines": {}, "mc_examples": {}, "stderr_lines": {}, "stderr_examples": {},
-         "session_ids": [], "session_resume_mismatch": [], "max_tokens_sent": {}, "hit_drops": []}
+         "session_ids": [], "session_resume_mismatch": [], "max_tokens_sent": {}, "hit_drops": [],
+         "non2xx": [], "client_aborted": 0, "hist_fires": 0, "hist_requests": {}}
     for t in turns:
         if t.get("rc") != 0:
             A["turn_rc"][str(t["turn"])] = t.get("rc")
@@ -101,6 +102,20 @@ def anomalies(rd, reqs, turns, sid):
         A["http_status"][str(r.get("status"))] = A["http_status"].get(str(r.get("status")), 0) + 1
         f = str(r.get("finish"))
         A["finish"][f] = A["finish"].get(f, 0) + 1
+        if r.get("clientAborted"):
+            A["client_aborted"] += 1
+        if r.get("kind") == "historian":
+            k = str(r.get("status"))
+            A["hist_requests"][k] = A["hist_requests"].get(k, 0) + 1
+        st = r.get("status")
+        if not (isinstance(st, int) and 200 <= st < 300):
+            err = None
+            try:
+                err = json.load(open(os.path.join(rd, "resp", f"{r['n']}.json"))).get("errorBody")
+            except Exception:
+                pass
+            A["non2xx"].append({"n": r["n"], "kind": r.get("kind"), "status": st, "ms": r.get("ms"),
+                                "error": (err or r.get("error") or "(body not recorded: proxy before the round 36 line I fix)")[:240]})
     for f in sorted(os.listdir(rd)):
         if not (f.startswith("turn-") and f.endswith(".log")):
             continue
@@ -124,6 +139,8 @@ def anomalies(rd, reqs, turns, sid):
                     if sid and o.get("sessionId") != sid:
                         A["session_resume_mismatch"].append(f)
             elif line.startswith("[magic-context]"):
+                if "historian trigger:" in line and "fires=true" in line:
+                    A["hist_fires"] += 1
                 if MC_ODD.search(line):
                     key = re.sub(r"\d+(\.\d+)?", "N", line.strip())[:140]
                     A["mc_lines"][key] = A["mc_lines"].get(key, 0) + 1
@@ -306,6 +323,10 @@ def main():
         L.append(f"### {r['group']} {r['label']}")
         L.append(f"- turn rc != 0: {A.get('turn_rc') or 'none'}; turns without turn_end: {A.get('turns_without_turn_end') or 'none'}; turn_end: { {k: len(v) for k, v in (A.get('turn_end') or {}).items()} } (max-tokens in turns {(A.get('turn_end') or {}).get('max-tokens', [])})")
         L.append(f"- proxy HTTP status: {A.get('http_status')}; finish reasons: {A.get('finish')}; max_tokens sent (kind:value → n): {A.get('max_tokens_sent') or 'n/a'}")
+        L.append(f"- non-2xx requests: {len(A.get('non2xx') or [])}" + "".join(f"\n  - req {e['n']} ({e['kind']}) HTTP {e['status']} in {e['ms']} ms: `{e['error']}`" for e in (A.get('non2xx') or [])[:8]) +
+                 f"\n- client-aborted requests (upstream aborted when DSH went away): {A.get('client_aborted', 0)}" +
+                 f"\n- historian: trigger lines with fires=true {A.get('hist_fires', 0)}; historian requests by HTTP status {A.get('hist_requests') or 'none'}" +
+                 (" — **fired but no successful historian request**" if A.get('hist_fires') and not (A.get('hist_requests') or {}).get('200') else ""))
         L.append(f"- session ids seen: {len(set(A.get('session_ids') or []))} distinct over {len(A.get('session_ids') or [])} turns; resume mismatch: {A.get('session_resume_mismatch') or 'none'}")
         L.append(f"- tool errors: {A.get('tool_errors', 0)}" + ("".join(f"\n  - `{e}`" for e in A.get('tool_error_examples', []))))
         L.append(f"- cache-hit collapses without a prompt reduction (hit > 80 % → < 50 %): {len(A.get('hit_drops', []))}" + ("".join(f"\n  - req {d['req']} prompt {d['prompt']} hit {d['hit_before']} → {d['hit_after']} gap {d['gap_s']} s" for d in A.get('hit_drops', [])[:8])))

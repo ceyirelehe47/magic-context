@@ -36,6 +36,13 @@
 // stream's reasoning / text / tool calls are written to resp/<n>.json (the
 // model's own output; no headers).
 //
+// Round 36 line I (pipeline): a client that goes away before the response
+// ended (DSH killed by the per-turn timeout) aborts the upstream request, so
+// the provider stops generating / billing; the request is still logged with
+// "clientAborted": true (usage usually unknown then). A non-2xx response body
+// is kept (first 64 KiB) as "errorBody" in resp/<n>.json — the provider's
+// reason for a 400 is otherwise lost.
+//
 // A path prefix /r/<tag>/ names the DSH route (bench-model.yml gives the main
 // and historian routes different tags); it is stripped before forwarding.
 import http from "node:http";
@@ -185,6 +192,14 @@ http.createServer((req, res) => {
     }
     const headers = { ...req.headers, host: UP.host, "accept-encoding": "identity", "content-length": String(raw.length) };
     const lib = UP.protocol === "http:" ? http : https;
+    let clientAborted = false, upEnded = false, logged = false, onUpClose = null;
+    // the CLIENT went away before the response ended (DSH killed): abort upstream
+    res.on("close", () => {
+      if (upEnded || res.writableFinished) return;
+      clientAborted = true;
+      up.destroy();
+      onUpClose?.();
+    });
     const up = lib.request({ protocol: UP.protocol, hostname: UP.hostname, port: UP.port || (UP.protocol === "http:" ? 80 : 443), path: p, method: req.method, headers }, (ur) => {
       res.writeHead(ur.statusCode ?? 502, ur.headers);
       let buf = "", usage = null, tFirst = null, finish = null;
@@ -196,8 +211,9 @@ http.createServer((req, res) => {
         buf += c.toString("utf8");
         if (buf.length > 4_000_000) buf = buf.slice(-2_000_000);
       });
-      ur.on("end", () => {
-        res.end();
+      const finishLog = () => {
+        if (logged) return;
+        logged = true;
         // SSE: usage normally rides on the last data chunk; plain JSON: top level.
         for (const line of buf.split(/\r?\n/)) {
           const d = line.startsWith("data:") ? line.slice(5).trim() : null;
@@ -219,15 +235,26 @@ http.createServer((req, res) => {
           } catch {}
         }
         if (!usage) { try { const o = JSON.parse(buf); usage = o.usage ?? null; finish = o.choices?.[0]?.finish_reason ?? finish; } catch {} }
-        try { fs.writeFileSync(path.join(outDir, "resp", `${id}.json`), JSON.stringify({ n: id, kind, reasoning: rReason, text: rText, tool_calls: rCalls.filter(Boolean) })); } catch {}
+        const status = ur.statusCode ?? 0;
+        const errorBody = status >= 200 && status < 300 ? undefined : buf.slice(0, 65_536);
+        try { fs.writeFileSync(path.join(outDir, "resp", `${id}.json`), JSON.stringify({ n: id, kind, reasoning: rReason, text: rText, tool_calls: rCalls.filter(Boolean), ...(errorBody !== undefined ? { errorBody } : {}) })); } catch {}
         log.write(JSON.stringify({
           n: id, tag, kind, ablated, path: p.replace(/\?.*$/, ""), status: ur.statusCode,
           t0, tFirst, t1: Date.now(), ms: Date.now() - t0, model: body?.model ?? null, stream: body?.stream ?? null,
           nMessages: body?.messages?.length ?? null, nTools: body?.tools?.length ?? null, nonced, finish, usage,
+          ...(clientAborted ? { clientAborted: true } : {}),
         }) + "\n");
+      };
+      onUpClose = finishLog;
+      ur.on("end", () => {
+        upEnded = true;
+        res.end();
+        finishLog();
       });
+      ur.on("error", () => { if (clientAborted) finishLog(); });
     });
     up.on("error", (e) => {
+      if (clientAborted) return; // logged by the response handler / close above
       log.write(JSON.stringify({ n: id, tag, path: p, status: 0, t0, t1: Date.now(), error: String(e.message ?? e) }) + "\n");
       if (!res.headersSent) res.writeHead(502);
       res.end();
