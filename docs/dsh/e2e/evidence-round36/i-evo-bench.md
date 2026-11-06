@@ -135,7 +135,9 @@ regenerated with the fixed `analyze.py` (`dc916285b`, subagent calls split out o
 | native | 1 (42262147533) | 22 (0) | completed 22 | 95.7 % / 97.5 % | 1/8 | 310/311 | 1.399 | 144.8 M | 287 k (195 k) | 99.6 % | 0 | 562 773 | 63.9 min |
 | native | 1 (42262946905) | 22 (1: rc 124) | completed 21 | 95.7 % / 97.5 % | 1/8 | 310/311 | 0.946 | 92.1 M | 203 k (137 k) | 99.4 % | 0 | 489 905 | 52.5 min |
 | native | 2 (42262946905) | 22 (0) | completed 22 | 95.7 % / 97.5 % | 1/8 | 310/311 | 1.686 | 178.1 M | 300 k (192 k) | 99.5 % | 0 (historian 2 × HTTP 400) | 647 176 | 48.0 min |
-| fold | 1 (42262147533), 1–2 (42262946905) | running at the time of writing (jobs started 01:29 / 01:35 CST) | | | | | | | | | | | |
+| fold | 1 (42262147533) | 13 of 22, stopped by cost cap $3 before turn 14 (12: rc 124 on all but turn 4) | completed 1 | 95.7 % / 97.5 % | 1/8 | 310/311 | 3.247 | 59.4 M | 2 312 k (2 240 k) | 99.3 % | 0 | 371 395 | 259.1 min |
+| fold | 1 (42262946905) | 11 of 22, cost cap before turn 12 (10: rc 124 turns 1–10) | completed 1 | 95.4 % / 97.2 % | 0/8 | 310/311 | 3.037 | 39.3 M | 2 258 k (2 191 k) | 99.2 % | 0 | 295 037 | 207.1 min |
+| fold | 2 (42262946905) | 11 of 22, cost cap before turn 12 (11: rc 124 turns 1–11) | none | 95.4 % / 97.2 % | 0/8 | 310/311 | 3.093 | 46.8 M | 2 259 k (2 191 k) | 99.3 % | 0 | 321 332 | 220.0 min |
 
 Per group, mean (min–max):
 
@@ -143,7 +145,9 @@ Per group, mean (min–max):
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | baseline | 3 | 95.8 (95.7–96.0) | 97.6 (97.5–97.8) | 1/8 all | 1.215 (0.872–1.437) | 99.4 (99.2–99.6) | 118.4 M (77.6–147.8) | 246 k (194–321) | 0 | 52.2 (35.1–61.5) | 0 |
 | native | 3 | 95.7 (95.7–95.7) | 97.5 | 1/8 all | 1.344 (0.946–1.686) | 99.5 (99.4–99.6) | 138.3 M (92.1–178.1) | 264 k (203–300) | 0 | 54.8 (48.0–63.9) | 1 |
-| fold | 0 of 3 finished | pending | | | | | | | | | |
+| fold | 3 (all stopped by the $3 cost cap after 11–13 of 22 turns) | 95.5 (95.4–95.7) | 97.3 (97.2–97.5) | 0/8, 0/8, 1/8 | 3.125 (3.037–3.247) | 99.3 (99.2–99.3) | 48.5 M (39.3–59.4) | 2 276 k (2 258–2 312) | 0 | 228.7 (207.1–259.1) | 33 of 35 turns rc 124 (1200 s timeout) |
+
+Fold on the 1M route (I3): median reasoning per main request 4 897 / 8 765 / 6 028 tokens (baseline 34–141, native 44–121), median request time 35–50 s (others 3–5 s), so a 1200 s turn holds only ~20 steps and 33 of 35 turns hit the timeout; 97 % of the output is reasoning. In the fold view every earlier assistant step and tool result is a user message ("Magic Context note: these tool calls already ran …"), and the reasoning keeps re-deriving the state ("Previous turns are compacted", "turn-01 made no changes") and tries to recall the upstream 2.0.3 code (16 517 matches for 2.0.3 / upstream / recall in run 1 of 42262946905, native 933). Same direction as round 36 G (fold 290–325 reasoning tokens per step vs native 9–18), much larger on this task. Attribution: plugin fold presentation × model; not fixable without changing the fold semantics (record only; native roles avoids it). Evidence: `dsh-e2e-evobench-fold-run*-4226*/requests.jsonl`, `resp/37.json`, `turns.jsonl`.
 
 What the 1M route shows:
 
@@ -167,6 +171,15 @@ What the 1M route shows:
   `dc916285b`, `analyze.py` counted every switch between the main conversation and a subagent as a
   "reduction boundary" (7 / 50 / 27 with "hit before → after" means) although nothing was compacted.
 
+- **Fold (plugin default) is the outlier, and not because of compaction** (I3): it never got near any
+  threshold (peak prompt 0.30–0.37 M) but every main request carried 4.9–8.8 k reasoning tokens (median;
+  baseline / native 34–141), so a 1200 s turn held ~20 steps, 33 of 35 turns timed out, and all three runs
+  hit the $3 cap after 11–13 of 22 turns at $3.04–3.25 — about 2.6× the baseline group mean ($1.215) for
+  half the turns. Quality is no better (F2P 0/8, 0/8, 1/8; gold-valid 97.2–97.5 %). Native roles on the same
+  plugin build shows none of it.
+- The historian's 400 (I1) is now explained: the gateway requires `x-opencode-session` and the plugin's
+  historian call carried no session id (fixed in `f5bf2f84a`, not yet re-measured on the 1M route).
+
 ## 6. 真实环境问题清单
 
 Columns: 组 / 轮次, 证据路径 (artifact name / file:line, all under the run's per-run artifact), 能否复现,
@@ -176,15 +189,17 @@ mechanism traced in code + logs; 单次 = one observation; 推断 = derived, not
 
 | # | 现象 | 组 / 轮次 | 证据路径 | 能否复现 | 归因 | 证据等级 | 状态 |
 |---|---|---|---|---|---|---|---|
-| I1 | **historian 请求被上游拒绝（HTTP 400），无任何压缩，日志里也看不到失败**：turn 20 末起 `historian trigger … fires=true` 共 31 行，只有 2 个 historian 请求到达代理（23 ms / 45 ms 内 400），之后会话一直涨到 647 176（64.7 %）结束；stderr 无失败行（失败只进 ctx.logger / notifyIssue） | native / 20、21（1M） | `dsh-e2e-evobench-native-run2-42262946905/requests.jsonl` n=503、518；`turn-20.log:63`、`turn-21.log`；`bodies.tar.zst` 503.json（system 63 203 字符、user 69 382 字符、`max_tokens` 384 000） | 1 次（同组另 2 次没到 historian 阈值）；`dc916285b` 上的验证运行 42274076026（evo-9）运行中 | 未定：400 原因当时未记录（代理不存非 2xx 响应体 = pipeline 缺口，已修）；请求形状与主请求相同（同模型、同 `max_tokens`），候选是 OpenCode Go 对该请求的校验 | 确证（400、无压缩）；原因未知 | pipeline 部分已修（`5a39caac5` 记录 errorBody；`analyze.py` 标记 "fired but no successful historian request"）；原因 待 42274076026 记录的 errorBody |
+| I1 | **historian 请求被上游拒绝（HTTP 400），无任何压缩，日志里也看不到失败**：turn 20 末起 `historian trigger … fires=true` 共 31 行，只有 2 个 historian 请求到达代理（23 ms / 45 ms 内 400），之后会话一直涨到 647 176（64.7 %）结束；stderr 无失败行（失败只进 ctx.logger / notifyIssue） | native / 20、21（1M） | `dsh-e2e-evobench-native-run2-42262946905/requests.jsonl` n=503、518；`turn-20.log:63`、`turn-21.log`；`bodies.tar.zst` 503.json（system 63 203 字符、user 69 382 字符、`max_tokens` 384 000） | 1 次（同组另 2 次没到 historian 阈值）；`dc916285b` 上的验证运行 42274076026（evo-9，`dc916285b`）native 同样 2 × 400（resp/365.json、377.json，fires=true 13 行），原因见右 | 未定：400 原因当时未记录（代理不存非 2xx 响应体 = pipeline 缺口，已修）；请求形状与主请求相同（同模型、同 `max_tokens`），候选是 OpenCode Go 对该请求的校验 | 确证（400、无压缩）；原因未知 | pipeline 部分已修（`5a39caac5` 记录 errorBody；`analyze.py` 标记 "fired but no successful historian request"）；原因 已定位（42274076026 errorBody）：`{"type":"MissingSessionID","message":"Request is missing x-opencode-session and cannot be routed efficiently"}`。主循环请求由 loop 盖 `GenerateOptions.sessionId`，pi-ai 适配器映射成该头；DSH 自己的 compaction-basic 传 `sessionId: agent.session.id`；插件 historian 的 `ctx.llm.stream` 没传 → 归因插件。**已修** `f5bf2f84a`（RED `a889abf10`），只加路由元数据；真实路由复验待下一次 1M 运行 |
 | I2 | **1M 真实路由上压缩不预留输出**：catalog maxTokens 384 000 由适配器逐请求截断（`max_tokens` 随 prompt 降到 306 038），不进请求头 maxTokens / defaultMaxTokens → DSH 与插件都按 0 预留：DSH 800 000、插件兜底 900 000；22 项内无人压缩（baseline 峰值 592 597） | baseline、native 全部（1M） | 各 run 的 `evo-maxtokens.json`；`native-run2-42262946905/turn-20.log:4` `thresholdPct=90 window=1000000` | 是（每次都如此） | DSH（pi-ai 适配器 / compaction-basic 的预留来源） | 定位（日志 + DSH 源码 `reservedCompletionTokens`） | 只记录；`evo-model.yml` 注释改正（原写 550 464） |
+| I3 | **fold（插件默认）在 1M 真实路由上推理暴涨，几乎每轮超时，被成本上限截停**：每个主请求推理中位 4 897 / 8 765 / 6 028 token（baseline 34–141、native 44–121），请求中位耗时 35–50 s（其余组 3–5 s）；35 轮里 33 轮 rc 124（1200 s），3 次都在 11–13 / 22 轮触发 $3 上限；输出 97 % 是推理。推理反复重建状态（「Previous turns are compacted」「turn-01 made no changes」），并试图回忆上游 2.0.3 代码 | fold / 全部（1M，3 次） | `fold-run1-42262946905/resp/37.json`（42 271 推理 token、268 s）；各 fold run `requests.jsonl`、`turns.jsonl` | 是（3/3；200k stress 也是同向：turn 1、2、5 超时，3、4 max-tokens） | 插件（fold 呈现：之前的 assistant 步骤和工具结果都变成 user 消息 "Magic Context note: these tool calls already ran …"）× 模型 | 确证（现象）；机制为推断 | 只记录：改 fold 呈现即改语义，不在授权内；native roles（`MAGIC_CONTEXT_DSH_NATIVE_ROLES=1`）不出现此问题。待用户决定是否把 native roles 设为默认 |
+| P3 | 代理把正常结束的请求记成 `clientAborted`：DSH 读到 `data: [DONE]` 就关连接，上游响应尚未 end | 验证运行 native（55 个，53 个带 usage + finish，无一轮超时） | `native-run1-42274076026/requests.jsonl` | 是 | pipeline（`proxy.mjs`，`5a39caac5` 引入） | 确证 | **已修** `af6a810ca`；RED `6fdf5e9a1`（只影响标记，usage 一直有记录） |
 | S9 | **显式 maxTokens 的路由上原生兜底先于 MC**：1M + 请求 maxTokens 384 000 → 兜底 min(0.9w, w − 384 000 − 0) = 616 000（61.6 %）< MC 执行线 650 000（65 %），也低于 MC 强制带 85 % | 插件（真实 1M catalog 路由上**不发生**，见 I2；200k stress 路由同一机制给出 83.6 %） | 单测 `compaction-pressure.test.ts` S9（`738e3312a`）；200k stress `native-run1-42238241963/turn-06.log`（thresholdPct 83.6） | 是（确定性，单测） | 插件（MC 阈值按整窗、兜底受 w − maxTokens 封顶） | 定位 + RED 单测 | **待用户确认修法**（§7）；RED 以 `it.failing` 提交，CI 绿 |
 | S4 | 每轮超时杀掉 DSH 后，代理里的上游请求继续生成并计费 | fold / 1、2（200k）；native / 1（1M：71 步后 rc 124，req 72 在杀掉后又跑了 18 s） | 200k：`fold-run1-42238241963/requests.jsonl` t1 > turns.jsonl t1（82–151 s）；1M：`native-run1-42262946905/requests.jsonl` n=72 | 是（每次超时） | pipeline（代理不随客户端断开中止上游） | 确证 | **已修** `5a39caac5`（客户端断开 → 中止上游，记 `clientAborted`）；RED `b26f73dca` |
 | S6 | historian 忙时第二次过兜底的检查打印 "already deferred once … compacting now"，随后 compaction-basic 的剪枝就让会话回到阈值下、返回 null（outcome=none），实际没有压缩 | native / 6 起（200k stress，7 次） | `native-run1-42238241963/turn-06.log:22,32` | 是（单测复现）；1M 不触发（兜底不活跃） | 插件（日志在结果前打印） | 定位 + 单测 | **已修** `60f92181a`（只改日志：报告实际结果）；RED `aa3ce9fc4` |
 | S5 | 原生兜底触发的 DSH tool-result pruner 改写前缀：命中 98.3 % → 25.9 %，prompt 只降 6 % | native / 5（200k stress） | `native-run1-42238241963/bodies.tar.zst` 143 vs 144 | 结构性（每次原生压缩先 prune）；1M 不触发 | 原版 DSH（pruner），经插件兜底触发 | 单次 + 机制定位 | 只记录 |
 | P1 | 分析把 subagent 请求与主会话交替算成"上下文缩减边界" | 1M：native 1 / baseline 1 / native 2 | `x/an` 重算前后（7 / 50 / 27 → 0） | 是 | pipeline（analyze.py） | 确证 | **已修** `dc916285b`；RED `3fd165782` |
 | M1 | agent 用 subagent 从预训练记忆里"回忆"上游 2.0.3 的实现（"Using only your pretrained knowledge of the public Conan 2.x project … do NOT inspect …"） | native / 5（1M，42262147533） | `native-run1-42262147533/resp/119.json`（2 个 subagent 调用）、`bodies.tar.zst` 121.json | 1 次 | 模型（SWE-EVO 记忆污染风险） | 确证 | 只记录（无法用网络封锁防住） |
-| M2 | agent 在每个 1M run 里翻 bench 自己的快照库 `~/work/_temp/evo/<run>/snap.git`（`git log --all`、`fsck --unreachable`、`git show` 快照提交） | 全部组 / 1、5 | `analyze` history probes 1–6 / run，例 `native-run1-42262147533/turn-05.log` | 是 | pipeline 卫生（快照库只含 agent 自己的轮次，无上游内容，无泄漏） | 确证 | 只记录（可移出 `$HOME`） |
+| M2 | agent 在每个 1M run 里翻 bench 自己的快照库 `~/work/_temp/evo/<run>/snap.git`，并读 bench 自身目录 `~/work/_temp/bench/<run>`（请求体、patches、meta；1M 下 fold 每 run 10–14 次、snap.git 6–149 次，其余组 bench 目录 0–7 次、snap.git 2–28 次）（`git log --all`、`fsck --unreachable`、`git show` 快照提交） | 全部组 / 1、5 | `analyze` history probes 1–6 / run，例 `native-run1-42262147533/turn-05.log` | 是 | pipeline 卫生（快照库只含 agent 自己的轮次，无上游内容，无泄漏） | 确证 | 只记录（可移出 `$HOME`） |
 | S7 | 未读先改被拒（"file has not been read"）后重读重试；`old_string matched 2 times`；`offset out of range` | baseline、native 都有（1M 每 run 0–11 次） | 各 run `turn-*.log`（analyze tool errors） | 是 | 原版 DSH 守卫 + 模型 | 确证（影响小） | 只记录 |
 | S2 | 单轮 1200 s 超时 | fold / 1、2、5（200k）；native / 1（1M，正常工作 71 步） | `turns.jsonl` rc 124 | 1M 6 次中 1 次 | pipeline 参数（每轮上限）× 模型 | 单次 | 只记录（下一轮继续同一会话，工作不丢） |
 | S1 | 实例镜像带上游完整 git 历史（fold 取上游提交 apply） | fold / 5（200k） | `fold-run1-42238241963/turn-05.log` | 是 | pipeline（SWE-EVO 镜像） | 确证 | 已修 `786eca88a`（1M runs 无一触及原始镜像） |
@@ -235,8 +250,12 @@ with C's doctor warning in any case. Not committed: it waits for the user's choi
 | `3fd165782` | RED (pipeline) | analyze counts subagent interleavings as reductions | 42273703071 ✓ |
 | `dc916285b` | fix (pipeline) | subagent kind, packed-bodies streaming, versioned kinds cache | 42273703071 ✓ |
 | `786eca88a` | fix (pipeline, earlier) | sanitized image (S1) | push CI 42255035634 ✓ |
+| `6fdf5e9a1` | RED (pipeline) | P3 proxy flags a close after `[DONE]` as clientAborted | push CI 42309810588 ✓ |
+| `a889abf10` | RED (plugin) | I1 historian request has no session id | 42309810588 ✓ |
+| `af6a810ca` | fix (pipeline) | P3 close after `[DONE]` = complete response | 42309810588 ✓ |
+| `f5bf2f84a` | fix (plugin, routing metadata only) | I1 historian `ctx.llm.stream` gets `sessionId = agent.session.id` (compaction-basic parity) | 42309810588 ✓ |
 
-Verification run after the fixes: 42274076026 (slot evo-9, native + fold × 1, 22 items, commit `dc916285b`; reported separately from the `6c624362f` runs) — running at the time of writing.
+Verification run after the fixes: 42274076026 (slot evo-9, native + fold × 1, 22 items, commit `dc916285b`; reported separately from the `6c624362f` runs). **native** (done): 22/22 turns, all rc 0, turn_end completed 22, 95.7 % raw, F2P 1/8, P2P 310/317, $1.219, hit 99.6 %, 0 compactions, peak prompt 632 096, 54.3 min; historian fired (13 `fires=true` lines) but both historian requests got HTTP 400 MissingSessionID (I1, now located and fixed in `f5bf2f84a`). S4: no turn timed out in native, so the kill path was not exercised; the 55 `clientAborted` marks were normal completions closed after `[DONE]` (P3, fixed `af6a810ca`); every request has usage except 2. **fold**: still running at 07:10 CST (job started 02:48 CST; the three earlier fold runs needed 207–259 min of turn time until the $3 cap) — its S4 kill-path evidence (turns at rc 124) is pending.
 
 ## 9. Differences from the paper (what this bench is not)
 
@@ -269,7 +288,7 @@ Verification run after the fixes: 42274076026 (slot evo-9, native + fold × 1, 2
 - **单次**: S2 at 1M, S3, S8; I1 has one occurrence (the other two native runs never reached the
   historian threshold).
 - **未知**: the cause of I1's 400 (body not recorded before the proxy fix).
-- Fold on the 1M route: pending (runs still in progress at the time of writing).
+- Fold on the 1M route: 3 runs (42262147533 run 1, 42262946905 runs 1–2), all stopped by the $3 cost cap after 11–13 of 22 turns, 33 of 35 turns at the 1200 s timeout, reasoning-dominated output (I3); evidence `dsh-e2e-evobench-fold-run*-4226*`.
 
 ## 11. Limitations
 
