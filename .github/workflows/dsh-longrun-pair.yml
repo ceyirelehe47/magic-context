@@ -1,0 +1,111 @@
+# Explicitly requested real-model observational pair. Not a hard billing cap.
+# Only this isolated branch auto-starts it; no Core or security settings changed.
+name: dsh-longrun-pair
+on:
+  push:
+    branches: [bench/longrun-real-20261106]
+    paths:
+      - .github/workflows/dsh-longrun-pair.yml
+      - packages/dsh-plugin/scripts/e2e/longrun-bench/live_*
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dsh-longrun-real-20261106
+  cancel-in-progress: false
+jobs:
+  pair:
+    if: github.repository == 'ceyirelehe47/magic-context'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [baseline, plugin]
+    env:
+      E2E_ROOT: ${{ runner.temp }}/longrun-runtime
+      DSH_VERSION: '0.2.1-rc.5'
+      BUN_VERSION: '1.4.2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Offline tests and prerequisites
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s packages/dsh-plugin/scripts/e2e/longrun-bench -p 'test_*.py' -v
+          for tool in python3 node bun zstd; do command -v "$tool"; done
+          node --check packages/dsh-plugin/scripts/e2e/longrun-bench/live_proxy.mjs
+      - name: Install fixed DSH and build existing plugin
+        working-directory: packages/dsh-plugin
+        run: |
+          set -euo pipefail
+          mkdir -p "$E2E_ROOT/dsh"
+          printf '%s\n' '{"name":"dsh-longrun-pair","private":true}' > "$E2E_ROOT/dsh/package.json"
+          timeout 600 npm install --prefix "$E2E_ROOT/dsh" --ignore-scripts --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION"
+          got="$(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version")"
+          [ "$got" = "$DSH_VERSION" ]
+          (cd ../.. && timeout 600 bun install --ignore-scripts --backend=hardlink \
+            --filter '@cortexkit/opencode-magic-context' --filter '@cortexkit/retina-local-fs' \
+            --filter 'dsh-magic-context-adapter' --filter 'dsh-magic-context')
+          bun run build
+      - name: Create clean baseline or MC profile
+        working-directory: packages/dsh-plugin
+        run: |
+          set -euo pipefail
+          source scripts/e2e/env.sh
+          if [ '${{ matrix.arm }}' = plugin ]; then
+            bash scripts/e2e/install-profile.sh test headless
+            node dist/cli.js setup --profile test
+          else
+            timeout 60 node "$DSH_BIN" --profile headless --dump-default-config >/dev/null
+            cp -r "$DSH_HOME/profiles/headless" "$DSH_HOME/profiles/base"
+            sed -i 's/dsh-profile-headless/dsh-profile-base/' "$DSH_HOME/profiles/base/package.json"
+            if grep -rq magic-context "$DSH_HOME/profiles/base" --include='*.yml' --include='package.json'; then exit 1; fi
+          fi
+      - name: Real long task, same corpus, bounded attempts
+        working-directory: packages/dsh-plugin
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          set -euo pipefail
+          source scripts/e2e/env.sh
+          if [ -z "$OPENCODE_API_KEY" ]; then echo '::error::Existing OPENCODE_API_KEY is unavailable'; exit 1; fi
+          timeout 2450 python3 scripts/e2e/longrun-bench/live_pair.py \
+            --repo "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/live-pair/${{ matrix.arm }}" --arm '${{ matrix.arm }}'
+      - name: Redact and summarize observations
+        if: always()
+        working-directory: packages/dsh-plugin
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/live-pair/${{ matrix.arm }}"
+          mkdir -p "$out/dependencies"
+          cp "$E2E_ROOT/dsh/package-lock.json" "$out/dependencies/" 2>/dev/null || true
+          cp ../../bun.lock "$out/dependencies/" 2>/dev/null || true
+          { node --version; bun --version; git rev-parse HEAD; } > "$out/dependencies/versions.txt"
+          python3 scripts/e2e/ci-check.py redact "$out"
+          if [ -f "$out/summary.md" ]; then cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"; else echo 'No live result produced; inspect prior step.' >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: longrun-live-${{ matrix.arm }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/live-pair/${{ matrix.arm }}/*.json
+            ${{ runner.temp }}/live-pair/${{ matrix.arm }}/*.jsonl
+            ${{ runner.temp }}/live-pair/${{ matrix.arm }}/*.md
+            ${{ runner.temp }}/live-pair/${{ matrix.arm }}/*.log
+            ${{ runner.temp }}/live-pair/${{ matrix.arm }}/resp/
+            ${{ runner.temp }}/live-pair/${{ matrix.arm }}/dependencies/
+          retention-days: 1
+          if-no-files-found: warn

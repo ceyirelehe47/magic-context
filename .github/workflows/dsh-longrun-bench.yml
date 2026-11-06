@@ -1,0 +1,149 @@
+# Independent preparation/self-test lane. NO secrets and NO paid model calls.
+# This is not a live benchmark yet. mode=live fails closed with exact blockers.
+name: dsh-longrun-bench
+
+on:
+  # One isolated validation branch only; pushes never select paid/live mode.
+  push:
+    branches: [bench/longrun-mock-20261106]
+    paths:
+      - .github/workflows/dsh-longrun-bench.yml
+      - packages/dsh-plugin/scripts/e2e/longrun-bench/**
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "offline unit tests, plan, real DSH/local mock smoke, or blocked live check"
+        type: choice
+        options: [offline, plan, mock-smoke, live]
+        default: offline
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dsh-longrun-bench
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'ceyirelehe47/magic-context'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BENCH_MODE: ${{ github.event_name == 'push' && 'mock-smoke' || inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Offline guards and quality gates
+        run: |
+          python3 -m unittest discover -s packages/dsh-plugin/scripts/e2e/longrun-bench -p 'test_*.py' -v
+      - name: Prepare or check live capability
+        run: |
+          set -euo pipefail
+          driver=packages/dsh-plugin/scripts/e2e/longrun-bench/driver.py
+          case "$BENCH_MODE" in
+            offline|plan) python3 "$driver" "$BENCH_MODE" --out "$RUNNER_TEMP/longrun-prep" ;;
+            mock-smoke) echo "Real DSH/local mock integration requested; no model secrets." ;;
+            live) python3 "$driver" live ;;
+            *) echo 'Invalid mode'; exit 2 ;;
+          esac
+      - name: Check mock runner isolation capabilities
+        if: env.BENCH_MODE == 'mock-smoke'
+        run: |
+          set -euo pipefail
+          for tool in python3 node unshare zstd; do
+            command -v "$tool" >/dev/null || { echo "::error::required tool unavailable: $tool"; exit 1; }
+          done
+          python3 - <<'PYCODE'
+          import pathlib, socket, tempfile
+          with tempfile.TemporaryDirectory() as d:
+              with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                  s.bind(str(pathlib.Path(d) / "probe.sock"))
+          PYCODE
+          unshare --user --map-root-user --net --pid --fork --mount-proc python3 - <<'PYCODE'
+          import socket, sys
+          sys.path.insert(0, 'packages/dsh-plugin/scripts/e2e/longrun-bench')
+          from dsh_adapter import route_entries
+          assert not route_entries(open('/proc/net/route').read()), 'network namespace has routes'
+          with socket.socket() as s:
+              s.settimeout(1)
+              try:
+                  s.connect(('1.1.1.1', 443))
+              except OSError as e:
+                  assert e.errno == 101, f'unexpected isolation result: {e}'
+              else:
+                  raise RuntimeError('outbound route unexpectedly available')
+          PYCODE
+          # Failure is a blocker; do not change sysctl, AppArmor or sudo around it.
+      - uses: oven-sh/setup-bun@v2
+        if: env.BENCH_MODE == 'mock-smoke'
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/setup-node@v4
+        if: env.BENCH_MODE == 'mock-smoke'
+        with:
+          node-version: '24'
+      - name: Build existing DSH adapter for local mock only
+        if: env.BENCH_MODE == 'mock-smoke'
+        working-directory: packages/dsh-plugin
+        env:
+          E2E_ROOT: ${{ runner.temp }}/longrun-runtime
+          DSH_VERSION: '0.2.1-rc.5'
+          BUN_VERSION: '1.4.2'
+          INSTALL_TIMEOUT: '600'
+        run: |
+          set -euo pipefail
+          # Do not call stock bootstrap.sh: its bun add allows lifecycle scripts.
+          # One shared install serves both arms. Transitive resolution is NOT
+          # claimed to match local prep; preserve the generated lock as evidence.
+          mkdir -p "$E2E_ROOT/dsh"
+          printf '%s\n' '{"name":"dsh-longrun-mock","private":true}' > "$E2E_ROOT/dsh/package.json"
+          timeout "$INSTALL_TIMEOUT" npm install --prefix "$E2E_ROOT/dsh" \
+            --ignore-scripts --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION"
+          got="$(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version")"
+          [ "$got" = "$DSH_VERSION" ] || { echo "::error::unexpected DSH version $got"; exit 1; }
+          (cd ../.. && timeout "$INSTALL_TIMEOUT" bun install --ignore-scripts --backend=hardlink \
+            --filter '@cortexkit/opencode-magic-context' --filter '@cortexkit/retina-local-fs' \
+            --filter 'dsh-magic-context-adapter' --filter 'dsh-magic-context')
+          mkdir -p "$RUNNER_TEMP/longrun-dependencies"
+          cp "$E2E_ROOT/dsh/package-lock.json" "$RUNNER_TEMP/longrun-dependencies/dsh-package-lock.json"
+          cp ../../bun.lock "$RUNNER_TEMP/longrun-dependencies/workspace-bun.lock"
+          { node --version; bun --version; printf 'DSH=%s\n' "$got"; git rev-parse HEAD; } \
+            > "$RUNNER_TEMP/longrun-dependencies/versions.txt"
+          bun run build
+      - name: Real DSH baseline and plugin, local mock only
+        if: env.BENCH_MODE == 'mock-smoke'
+        run: |
+          set -euo pipefail
+          for arm in baseline plugin; do
+            python3 packages/dsh-plugin/scripts/e2e/longrun-bench/smoke_dsh.py \
+              --repo "$GITHUB_WORKSPACE" --dsh-install "$RUNNER_TEMP/longrun-runtime/dsh" \
+              --out "$RUNNER_TEMP/longrun-mock-$arm" --arm "$arm"
+          done
+      - name: Summary
+        if: always()
+        run: |
+          echo '### Long-run benchmark preparation only' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No real DSH/model comparison was run. Paid execution remains blocked by sole-egress, billing and evidence-adapter requirements.' >> "$GITHUB_STEP_SUMMARY"
+          echo "Source checkout: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dsh-longrun-prep-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/longrun-prep/plan.json
+            ${{ runner.temp }}/longrun-prep/report.json
+            ${{ runner.temp }}/longrun-prep/pair-*/**/result.json
+            ${{ runner.temp }}/longrun-mock-*/report.json
+            ${{ runner.temp }}/longrun-mock-*/*.log
+            ${{ runner.temp }}/longrun-mock-*/gateway/*.jsonl
+            ${{ runner.temp }}/longrun-mock-*/isolation.json
+            ${{ runner.temp }}/longrun-mock-*/session.jsonl
+            ${{ runner.temp }}/longrun-mock-*/mock-requests.jsonl
+            ${{ runner.temp }}/longrun-dependencies/*
+          retention-days: 7
+          if-no-files-found: warn
