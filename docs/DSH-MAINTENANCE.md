@@ -48,7 +48,21 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 35, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
+Baseline (round 36, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
+core v0.49.35 unchanged; version still **`0.49.35-dsh.8`, untagged**; no product code changed in line A).
+User-approved runs on `2e96be4c1` (09:00 CST). **Line A:** rc.5 e2e 42141100109 **132 / 2 / 1** — R9 / R15
+FAIL (scenario L lock-a 400 s timeout, third consecutive rc.5 occurrence after 42070363765 / 42077125011;
+8 reads in order with no re-read, model steps 127 s vs 37 s and in-compaction summarize 245 s vs 131 s
+against the last clean run 42050071694 → model latency against the fixed budget, analysed only, known
+limitation 29), E2 WARN; scenario K (U7–U10) passed this time. rc.5 soak 42141109254 (`segments=2
+segment_minutes=120`, installed rc.5, node v22.23.4): **K1–K9 PASS**, 5247 mock runs 0 errors, real samples
+7 / 8 (one provider 429), max-RSS 1.06× (+3.9 MB / 1k runs) and DB 14178 B / run — the same as the first
+240 min of the 12 h soak 41775904921 (1.05×, +3.7 MB / 1k, 14171 B / run); 0 residue / lock timeouts /
+historian failures, 2916 compactions → no leak. **dsh.8 condition (e2e all PASS + clean soak) not met**
+because of scenario L. **Line B:** cache-bench run 42142782133 (analysis only; `evidence-round36/cache-bench.md`).
+Evidence: `docs/dsh/e2e/evidence-round36/README.md`.
+
+Previous baseline (round 35, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
 core v0.49.35 unchanged; version still **`0.49.35-dsh.8`, untagged**). Scan + fix of the adapter layer
 (user request 00:29 CST). Fixed (RED → GREEN each): **F1** open lock — a lock path that exists but cannot
 be read (directory / no read permission / I/O error) spun synchronously forever at DSH boot
@@ -2537,6 +2551,24 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       tears the DB; the pre-restore safety copy is taken first); `bootstrapMagicHost` does not
       close the DB handle when `initializeDshAdapterTables` throws after a successful open (the
       process continues without Magic) — 待验证, no reproduction.
+
+29. **Round 36 (2026-11-06) — scenario L (lock-a) time budget; dsh.8 still untagged.**
+    - **What fails:** lock-a has a fixed 400 s run timeout (`rc=124`). Three consecutive rc.5 e2e runs
+      hit it: 42070363765 (R9 / BS1 / R15), 42077125011 (R9) and 42141100109 (R9 / R15). The last clean
+      rc.5 run 42050071694 finished lock-a in 185 s.
+    - **Why (from `lock-session.jsonl`, `docs/dsh/e2e/evidence-round36/l-lock-a-timelines.txt`):** the
+      adapter path is the same in every run — one deferral at 37 % ≥ 36 %, then one backstop compaction
+      per pressure check after the fixed 15 s e2e lease hold. What changed is model time: model steps
+      summed 37 s in the clean run vs 127 / 121 / 127 s in the three failures, and the summarize calls
+      inside the compactions 131 s vs 271 / 242 / 245 s. Re-reads (p17–p19 read twice) explain only the
+      first failure (42070363765); 42077125011 and 42141100109 read each file once and still ran out of time.
+      R15 fails when the timeout cuts the last compaction mid-summarize (`finish=aborted`), so it is a
+      consequence of R9, not a separate defect.
+    - **Not changed (rule: third occurrence → analyse only):** scenario, assertions and the 400 s budget.
+      Scenario L stays **待验证**. Options for the user: (a) scale the lock-a budget with measured model
+      latency (e.g. budget = fixed hold time + k × median step time of the run's own "ready" turn),
+      (b) keep 400 s and rerun at a quieter time, (c) keep it and accept L as WARN-on-timeout when the
+      timeline shows no re-read and no non-abort compaction error. None of these touches product code.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

@@ -1,0 +1,10 @@
+{"type":"session","sessionId":"session-e2906996-95c0-47e1-8d2b-275f023be364","cwd":"/home/runner/work/magic-context/magic-context/packages/dsh-plugin"}
+{"type":"status","phase":"turn_start","turn":4}
+[magic-context] historian trigger: pct=43 threshold=40 budget=5000 window=24000 fires=true
+[magic-context] native pressure check: child=false pct=44.2 thresholdPct=82.9 window=24000 outcome=none
+{"type":"status","phase":"step_start","turn":4,"step":1}
+{"type":"status","phase":"step_end","turn":4,"step":1,"usage":{"inputTokens":0,"outputTokens":0,"totalTokens":0}}
+{"type":"status","phase":"turn_end","turn":4,"reason":{"kind":"error","error":{"message":"429: {\"type\":\"server_error\",\"message\":\"Upstream request failed: [overloaded] the server is overloaded; retry shortly\"}","code":"RATE_LIMIT"}}}
+{"type":"final","text":""}
+dsh: RATE_LIMIT: 429: {"type":"server_error","message":"Upstream request failed: [overloaded] the server is overloaded; retry shortly"}
+rc=1 elapsed=17.3s log=/home/runner/work/_temp/e2e/soak/run.log

@@ -1,0 +1,30 @@
+# Scenario L lock-a, lock-session.jsonl timelines of four rc.5 e2e runs (r36-lock-cmp.py over the artifacts). Times in s; compaction = compaction/start -> end, incl. lease wait; E = compaction/end with error.
+# 42050071694 = last clean run before round 35; 42070363765 / 42077125011 = round 35; 42141100109 = round 36
+## 42050071694: rc=0 elapsed=185.0s log=~/work/_temp/e2e/logs/run-26.log
+  ready turn 3.9s; lock-a turn 185.4s (completed)
+  steps 9: 3 8 3 2 4 6 5 4 3 (sum 37s, median 4.0s)
+  reads 8: p17 p18 p19 p20 p21 p22 p23 p24 (unique 8)
+  compactions 6: 14 31 24 21 21 20 (sum 131s); lease waits 5 15 15 15 15 15
+  deferrals 1; aborted 0
+## 42070363765: rc=124 elapsed=404.1s log=~/work/_temp/e2e/logs/run-26.log
+  ready turn 16.9s; lock-a turn 404.5s (interrupted)
+  steps 11: 7 12 25 9 13 8 15 16 8 8 5 (sum 127s, median 9.2s)
+  reads 11: p17 p17 p18 p19 p17 p18 p19 p20 p21 p22 p23 (unique 7)
+  compactions 9: 34 34 34 29 33 27 37 42 0E (sum 271s); lease waits 15 15 15 15 15 15 15 15
+  deferrals 1; aborted 1
+## 42077125011: rc=124 elapsed=400.1s log=~/work/_temp/e2e/logs/run-27.log
+  ready turn 41.5s; lock-a turn 400.6s (interrupted)
+  steps 6: 8 15 15 44 39 0 (sum 121s, median 14.9s)
+  reads 5: p17 p18 p19 p20 p21 (unique 5)
+  compactions 3: 116 53 73 (sum 242s); lease waits 42 15 15
+  deferrals 1; aborted 0
+## 42141100109: rc=124 elapsed=400.1s log=~/work/_temp/e2e/logs/run-26.log
+  ready turn 20.1s; lock-a turn 400.5s (interrupted)
+  steps 8: 6 6 10 15 20 28 15 27 (sum 127s, median 15.0s)
+  reads 8: p17 p18 p19 p20 p21 p22 p23 p24 (unique 8)
+  compactions 5: 75 34 39 43 54 (sum 245s); lease waits 22 15 15 15 15 15
+  deferrals 1; aborted 2
+
+# 42141100109 lock-a.log: the cut-off check
+103:[magic-context] native compaction region: child=false tokens=19792 window=40000 pct=49.5
+106:[magic-context] native pressure check: child=false pct=49.5 thresholdPct=36 window=40000 outcome=error:magic-context: summarize mini-historian failed: llm call failed: Error message="magic-context: historian LLM stream failed (aborted; finish=aborted; route=openc
