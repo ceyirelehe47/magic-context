@@ -10,6 +10,12 @@
 // I1 (1M evo bench 42262946905, native run 2): both historian requests got
 // HTTP 400 from the provider in 23 / 45 ms and the proxy kept no trace of why —
 // non-2xx response bodies must be recorded (resp/<n>.json "errorBody", capped).
+//
+// P3 (verification run 42274076026, native, no turn timed out): 55 requests were
+// logged clientAborted, 53 of them with usage and a finish reason — DSH closes the
+// socket once it has read `data: [DONE]`, before the upstream connection ends.
+// A response the client read to its end ([DONE]) is complete: it must not be
+// logged as clientAborted.
 import { afterEach, describe, expect, it } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -161,5 +167,39 @@ describe("bench proxy (round 36 line I)", () => {
     const resp = JSON.parse(fs.readFileSync(path.join(out, "resp", "1.json"), "utf8"));
     expect(resp.text).toBe("hi");
     expect(resp.errorBody).toBeUndefined();
+  }, 15_000);
+
+  it("P3: a client that closes after reading data: [DONE] (upstream not yet ended) is not logged as clientAborted", async () => {
+    const upstream = http.createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write('data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"tool_calls"}]}\n\n');
+        res.write('data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}\n\ndata: [DONE]\n\n');
+        // the provider ends the HTTP response a little later
+        setTimeout(() => res.end(), 800).unref();
+      });
+    });
+    const up = await listen(upstream);
+    const { port, out } = await startProxy(up);
+    await new Promise<void>((resolve) => {
+      const req = http.request({ host: "127.0.0.1", port, method: "POST", path: "/v1/chat/completions", headers: { "content-type": "application/json" } }, (res) => {
+        let t = "";
+        res.on("data", (c) => {
+          t += c;
+          if (t.includes("[DONE]")) {
+            req.destroy();
+            resolve();
+          }
+        });
+      });
+      req.on("error", () => {});
+      req.end(body);
+    });
+    const line = await waitFor(() => logLines(out).find((l) => l.n === 1));
+    expect(line?.status).toBe(200);
+    expect((line?.usage as { prompt_tokens: number }).prompt_tokens).toBe(5);
+    expect(line?.finish).toBe("tool_calls");
+    expect(line?.clientAborted).toBeUndefined();
   }, 15_000);
 });
