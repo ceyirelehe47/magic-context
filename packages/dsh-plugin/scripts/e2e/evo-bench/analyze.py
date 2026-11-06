@@ -32,38 +32,115 @@ NET = re.compile(r"curl |wget |pip (download|install)|git (clone|fetch)|https?:/
 HIST = re.compile(r"docker (run|pull|create|save|export|cp|history)\b|git (log|show|tag|rev-list|cat-file|reflog)\b")
 
 
-def kinds(rd, reqs):
-    """proxy kind, with DSH's compaction-basic summarizer split out of "main" (it reuses the main
-    request shape, so the proxy cannot tell them apart; its last message is the compaction prompt).
-    Read from bodies/ when present, cached in evo-kinds.json for runs whose bodies were packed."""
-    cache = os.path.join(rd, "evo-kinds.json")
+KINDS_VERSION = 2  # 2: subagent requests split out of "main" (round 36 line I)
+
+
+def _text(c):
+    return c if isinstance(c, str) else "".join(x.get("text", "") for x in (c or []) if isinstance(x, dict))
+
+
+def _iter_bodies(rd):
+    """(n, body) for every recorded request body: bodies/ when present, else streamed from bodies.tar.zst."""
     bd = os.path.join(rd, "bodies")
     if os.path.isdir(bd):
-        out = {}
-        for r in reqs:
-            k = r.get("kind")
-            p = os.path.join(bd, f"{r['n']}.json")
-            if k in ("main", "other") and os.path.exists(p):
+        for f in os.listdir(bd):
+            if f.endswith(".json"):
                 try:
-                    msgs = json.load(open(p)).get("messages") or []
-                    s0 = next((x.get("content") for x in msgs if x.get("role") in ("system", "developer")), "") or ""
-                    s0 = s0 if isinstance(s0, str) else "".join(x.get("text", "") for x in s0 if isinstance(x, dict))
-                    if HISTORIAN in s0[:400]:
-                        out[str(r["n"])] = "historian"
-                        continue
-                    m = msgs[-1]
-                    c = m.get("content")
-                    c = c if isinstance(c, str) else "".join(x.get("text", "") for x in (c or []) if isinstance(x, dict))
-                    if m.get("role") == "user" and c.lstrip().startswith(SUMMARIZER):
-                        k = "summarizer"
+                    yield int(f[:-5]), json.load(open(os.path.join(bd, f)))
                 except Exception:
-                    pass
-            out[str(r["n"])] = k
-        json.dump(out, open(cache, "w"))
+                    continue
+        return
+    tz = os.path.join(rd, "bodies.tar.zst")
+    if not os.path.exists(tz):
+        return
+    import subprocess, tarfile
+    proc = subprocess.Popen(["zstd", "-dc", tz], stdout=subprocess.PIPE)
+    try:
+        with tarfile.open(fileobj=proc.stdout, mode="r|") as tf:
+            for m in tf:
+                name = os.path.basename(m.name)
+                if not (m.isfile() and name.endswith(".json")):
+                    continue
+                try:
+                    yield int(name[:-5]), json.load(tf.extractfile(m))
+                except Exception:
+                    continue
+    finally:
+        proc.stdout.close()
+        proc.wait()
+
+
+def _subagent_prompts(rd):
+    """prompt texts the agent handed to `subagent` (resp/<n>.json tool calls)."""
+    out = []
+    rdir = os.path.join(rd, "resp")
+    if not os.path.isdir(rdir):
         return out
+    for f in os.listdir(rdir):
+        try:
+            calls = json.load(open(os.path.join(rdir, f))).get("tool_calls") or []
+        except Exception:
+            continue
+        for tc in calls:
+            if tc.get("name") in ("subagent", "spawn_agent", "task"):
+                try:
+                    pr = json.loads(tc.get("arguments") or "{}").get("prompt")
+                except Exception:
+                    pr = None
+                if isinstance(pr, str) and len(pr.strip()) >= 20:
+                    out.append(pr.strip()[:200])
+    return out
+
+
+def kinds(rd, reqs):
+    """proxy kind, with DSH's compaction-basic summarizer split out of "main" (it reuses the main
+    request shape, so the proxy cannot tell them apart; its last message is the compaction prompt),
+    the Magic Context historian classified by its system prompt, and (v2) SUBAGENT requests split out
+    of "main": a request whose first non-system message starts with a prompt the agent passed to the
+    `subagent` tool (resp/<n>.json). Subagent calls interleave with the main conversation and are
+    no context reduction (1M runs 42262147533 / 42262946905: every "boundary" was a subagent call).
+    `subagent_fork` copies the main history and stays "main". Read from bodies/ (or bodies.tar.zst)
+    when present, cached in evo-kinds.json (with its version) for runs whose bodies were packed."""
+    cache = os.path.join(rd, "evo-kinds.json")
     if os.path.exists(cache):
-        return json.load(open(cache))
-    return {str(r["n"]): r.get("kind") for r in reqs}
+        try:
+            c = json.load(open(cache))
+            if c.get("_version") == KINDS_VERSION:
+                return c
+        except Exception:
+            pass
+    have = os.path.isdir(os.path.join(rd, "bodies")) or os.path.exists(os.path.join(rd, "bodies.tar.zst"))
+    if not have:
+        old = json.load(open(cache)) if os.path.exists(cache) else {}
+        return {str(r["n"]): old.get(str(r["n"]), r.get("kind")) for r in reqs}
+    byn = {r["n"]: r for r in reqs}
+    subs = _subagent_prompts(rd)
+    out = {str(r["n"]): r.get("kind") for r in reqs}
+    for n, body in _iter_bodies(rd):
+        r = byn.get(n)
+        if r is None or r.get("kind") not in ("main", "other"):
+            continue
+        k = r.get("kind")
+        try:
+            msgs = body.get("messages") or []
+            s0 = _text(next((x.get("content") for x in msgs if x.get("role") in ("system", "developer")), "") or "")
+            if HISTORIAN in s0[:400]:
+                out[str(n)] = "historian"
+                continue
+            last = msgs[-1]
+            if last.get("role") == "user" and _text(last.get("content")).lstrip().startswith(SUMMARIZER):
+                k = "summarizer"
+            elif k == "main" and subs:
+                first = next((x for x in msgs if x.get("role") not in ("system", "developer")), None)
+                ft = _text(first.get("content")).strip() if first and first.get("role") == "user" else ""
+                if ft and any(ft.startswith(p) or p in ft[:4000] for p in subs):
+                    k = "subagent"
+        except Exception:
+            pass
+        out[str(n)] = k
+    out["_version"] = KINDS_VERSION
+    json.dump(out, open(cache, "w"))
+    return out
 
 
 def net_attempts(rd, rx=None):
