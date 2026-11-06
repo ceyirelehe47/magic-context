@@ -105,6 +105,24 @@ function isMagicOpCopy(e: LogEventLike): boolean {
   return isMagicSource(source) && typeof source?.messageId === "string" && source.messageId.startsWith("mc-op:");
 }
 
+/**
+ * Round 36 line G (plan N): Magic's own native rewrite of a tool result — a
+ * single-node `tool/result` replace whose text is Magic-rendered (its `§N§`
+ * prefix, `[dropped §N§]` or `[truncated §N§]`). The same reasoning as for an
+ * `mc-op:` copy applies (a tag rewrite re-materializes bytes before they are
+ * served; a drop / truncation was itself a permitted rewrite). Tool results
+ * cannot carry a source marker (DSH allows only `message.content` to change),
+ * so the rendered text is the marker; DSH's own pruner output never starts so.
+ */
+const MAGIC_TOOL_TEXT = /^(?:\u00a7\d+\u00a7|\[(?:dropped|truncated) \u00a7\d+\u00a7\])/;
+function isMagicToolRewrite(e: LogEventLike): boolean {
+  if (e.type !== "tool/result") return false;
+  const message = (e as { data?: { message?: { content?: unknown } } }).data?.message;
+  const content = Array.isArray(message?.content) ? (message!.content as Array<{ type?: unknown; text?: unknown }>) : [];
+  const first = content.find((b) => b !== null && typeof b === "object" && b.type === "text");
+  return typeof first?.text === "string" && MAGIC_TOOL_TEXT.test(first.text);
+}
+
 function replaceStartSeq(op: unknown): number | null {
   if (op === null || typeof op !== "object") return null;
   const start = (op as { startSeq?: unknown }).startSeq;
@@ -161,7 +179,7 @@ export function readServedPrefixState(events: readonly unknown[]): ServedPrefixS
       // (drop / cleanup / truncation) was itself a permitted rewrite whose
       // drops landed in that same pass. Counting them would turn every
       // tag materialization into a ride (the exact churn this gate removes).
-      if (isMagicOpCopy(e)) continue;
+      if (isMagicOpCopy(e) || isMagicToolRewrite(e)) continue;
       rewrittenBySeq = seq;
       rewrittenByType = typeof e.type === "string" ? e.type : null;
       break;
