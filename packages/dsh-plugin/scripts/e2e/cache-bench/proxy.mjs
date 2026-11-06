@@ -192,10 +192,13 @@ http.createServer((req, res) => {
     }
     const headers = { ...req.headers, host: UP.host, "accept-encoding": "identity", "content-length": String(raw.length) };
     const lib = UP.protocol === "http:" ? http : https;
-    let clientAborted = false, upEnded = false, logged = false, onUpClose = null;
+    let clientAborted = false, upEnded = false, logged = false, onUpClose = null, sawDone = false;
     // the CLIENT went away before the response ended (DSH killed): abort upstream
     res.on("close", () => {
       if (upEnded || res.writableFinished) return;
+      // P3: DSH closes the socket once it has read `data: [DONE]`, often before the
+      // upstream response ends — that response is complete, not aborted.
+      if (sawDone) { up.destroy(); onUpClose?.(); return; }
       clientAborted = true;
       up.destroy();
       onUpClose?.();
@@ -209,6 +212,7 @@ http.createServer((req, res) => {
         if (tFirst === null) tFirst = Date.now();
         res.write(c);
         buf += c.toString("utf8");
+        if (!sawDone && /(^|\n)data:\s*\[DONE\]/.test(buf.slice(-4096))) sawDone = true;
         if (buf.length > 4_000_000) buf = buf.slice(-2_000_000);
       });
       const finishLog = () => {
