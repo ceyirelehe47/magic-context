@@ -533,6 +533,28 @@ describe("round 36 line G: native roles (plan N), switch on, new session", () =>
   });
 });
 
+describe("round 36 line G: native rewrites are Magic's own (drop-gate parity with mc-op copies)", () => {
+  it("N11 tagging a just-served tool result is not a 'rewritten served prefix' ride (no request headers: assistant boundary)", async () => {
+    await scenario(
+      async (h) => {
+        const { unprotected } = await buildTurns(h, 6);
+        const victims = unprotected.slice(0, 2);
+        for (const t of victims) queuePendingOp(h.db, h.key, t, "drop", Date.now());
+        // The last pass tagged turn 6's result AFTER its reply was appended
+        // (the served boundary): a fold-view tags copy is an mc-op copy and
+        // never counts as a ride; the native tool/result rewrite must not either.
+        const before = bytes(wire(h.session));
+        await h.step();
+        await h.step();
+        expect(bytes(wire(h.session))).toEqual(before);
+        expect(h.pending()).toEqual([...victims].sort((a, b) => a - b));
+        expect(wire(h.session).some((m) => m.content.startsWith("[dropped"))).toBe(false);
+      },
+      { native: true },
+    );
+  });
+});
+
 describe("round 36 line G: tag scheme is frozen when the session is first seen", () => {
   it("S1 a session Magic already worked on stays on the fold view when the switch is turned on", async () => {
     await scenario(async (h) => {
