@@ -10,8 +10,13 @@
 # (the main model). User instruction 2026-11-07 01:18–01:20 CST: real-use
 # defaults; only the bench-validity measures stay (git history stripped, network
 # block, test isolation, per-turn timeout).
-# Consequence: DSH compaction-basic fires at min(0.8w, w - maxTokens - 65536)
-# = 550 464 tokens; Magic Context's shipped execute threshold 65 % = 650 000.
+# Measured (runs 42262147533 / 42262946905, plugin log thresholdPct=90): the
+# catalog maxTokens is applied per request by the pi-ai adapter (clamped to
+# window - prompt), NOT exposed as the request header's maxTokens /
+# defaultMaxTokens, so compaction reserves 0 output tokens: DSH compaction-basic
+# fires at min(0.8w, w - 0 - 65536) = 800 000, the plugin's native backstop at
+# 90 % = 900 000; Magic Context's shipped execute threshold 65 % = 650 000.
+# (The earlier "550 464" assumed a 384 000 reservation.)
 # The previous 200k / maxTokens 32768 route is evo-model-200k-stress.yml.
 - id: llm-pi-ai
   config:

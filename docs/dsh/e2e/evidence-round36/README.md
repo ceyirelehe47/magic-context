@@ -147,3 +147,12 @@ sits in; native output sat on the tool-result message, the tag on the call), fix
 42221195453 (94.5 %, 0 divergences, reminder at body 33–34, ctx_reduce 1 / 5 / 1;
 [h-bench-42221195453-summary.md](h-bench-42221195453-summary.md), [h-bench-stats.txt](h-bench-stats.txt),
 [h-scripts/](h-scripts/)).
+
+## Line I — same-task evo bench (CompactionBench-style), real-use 1M route
+
+[i-evo-bench.md](i-evo-bench.md): SWE-EVO `conan-io__conan_2.0.2_2.0.3` as one DSH session, groups baseline /
+fold / native. 1M catalog route (42262147533, 42262946905): baseline / native F2P 1/8, gold-valid 97.5–97.8 %,
+no compaction in any run; 200k stress smoke 42238241963. 真实环境问题清单 §6 (I1 historian HTTP 400, I2 zero
+reservation, S9 backstop < MC 65 % with explicit maxTokens — RED `738e3312a`, fix awaits the user; S4 / S6 / P1
+fixed `5a39caac5` / `60f92181a` / `dc916285b`), push CI 42273089229 / 42273703071. Fold 1M and the
+post-fix verification run 42274076026 pending at the time of writing.

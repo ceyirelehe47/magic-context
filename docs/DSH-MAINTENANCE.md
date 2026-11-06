@@ -79,6 +79,20 @@ semantics); fold view untouched. RED `efa9c4aab`, FIX `3f1d66f68`, test ids `b65
 plugin, switch on): 94.5 % hit, 0 divergences, $0.0279 / run, reminder at body 33–34, ctx_reduce 1 / 5 / 1;
 after the cutoff the drops ride the historian publication (prompt 63k → 21k) and cost / request falls ~65 % vs G.
 Limitation 31 nudge item **fixed**, `evidence-round36/h-native-nudge.md`.
+**Line I** (user-approved 21:45 CST): CompactionBench-style same-task bench `dsh-evo-bench.yml` +
+`scripts/e2e/evo-bench/` — one SWE-EVO release transition (`conan-io__conan_2.0.2_2.0.3`) as one persistent
+DSH session, one changelog item per turn in PR order, git history stripped (sanitized flat image), web tools
+off, code hosts / registries blocked, final source patch scored with the release tests; groups baseline /
+fold / native, cache-bench proxy (record only). Since 2026-11-07 01:20 CST (user) all groups run the shipped
+opencode-go catalog route (1M window, catalog maxTokens); the 200k / maxTokens 32 768 route is a stress
+control. 1M results (42262147533 + 42262946905, 22 items, 3 runs each): baseline and native both F2P 1/8,
+gold-valid 97.5–97.8 %, hit 99.2–99.6 %, **no compaction in any run** (DSH reserves 0 output tokens on this
+route: compaction-basic 800 000, plugin backstop 900 000), cost spread inside each group larger than between
+groups; fold pending at the time of writing. Real-environment issue list (I1 historian requests HTTP 400 with
+no stderr trace, I2 zero reservation, S9 backstop below MC's 65 % on routes with an explicit maxTokens —
+RED `738e3312a`, fix options A–D await the user —, S4 / S6 / P1 fixed: `60f92181a` plugin log text,
+`5a39caac5` / `dc916285b` bench pipeline; push CI 42273089229 / 42273703071 green):
+`evidence-round36/i-evo-bench.md`.
 Evidence: `docs/dsh/e2e/evidence-round36/README.md`.
 
 Previous baseline (round 35, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
