@@ -1,0 +1,13 @@
+# C-line runs (42164389768 / 42166613496) have no resp/ (recorded from line D on): their ctx_reduce / reads columns read 0 = not recorded; see c-drop-gate.md (42166613496 run2: 2 ctx_reduce before the cutoff).
+42164389768 run1 native None requests 49 first historian 35 first nudge body 36 ctx_reduce 0 reads 0 repeat 0
+42164389768 run2 native None requests 47 first historian 40 first nudge body 41 ctx_reduce 0 reads 0 repeat 0
+42164389768 run3 native None requests 36 first historian 34 first nudge body 35 ctx_reduce 0 reads 0 repeat 0
+42166613496 run1 native None requests 50 first historian 43 first nudge body 44 ctx_reduce 0 reads 0 repeat 0
+42166613496 run2 native None requests 43 first historian 38 first nudge body None ctx_reduce 0 reads 0 repeat 0
+42166613496 run3 native None requests 44 first historian 36 first nudge body 37 ctx_reduce 0 reads 0 repeat 0
+42214443375 run1 native 1 requests 39 first historian 33 first nudge body None ctx_reduce 0 reads 32 repeat 0
+42214443375 run2 native 1 requests 39 first historian 33 first nudge body None ctx_reduce 0 reads 32 repeat 0
+42214443375 run3 native 1 requests 39 first historian 33 first nudge body None ctx_reduce 0 reads 32 repeat 0
+42215740858 run1 native 1 requests 39 first historian 33 first nudge body None ctx_reduce 0 reads 32 repeat 0
+42215740858 run2 native 1 requests 39 first historian 33 first nudge body None ctx_reduce 0 reads 32 repeat 0
+42215740858 run3 native 1 requests 39 first historian 34 first nudge body None ctx_reduce 0 reads 32 repeat 0

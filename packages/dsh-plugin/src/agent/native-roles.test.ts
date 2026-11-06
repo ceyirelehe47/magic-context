@@ -531,6 +531,41 @@ describe("round 36 line G: native roles (plan N), switch on, new session", () =>
       { native: true },
     );
   });
+
+  it("N12 preview only rewrites user input; a new tool result gets its §N§ on the surface in the same pass (pre-step messages are UserMessage[] in DSH)", async () => {
+    await scenario(
+      async (h) => {
+        addToolTurn(h.session, 1, 50);
+        await h.step();
+        addUser(h.session, "question 2");
+        addCall(h.session, 2, { text: "reading 2" });
+        addResult(h.session, 2, "BODY2 ".repeat(20));
+        // Non-production payload shape (the whole conversation, as the legacy
+        // preview test feeds it): non-user entries pass through unchanged.
+        const payload = (session: typeof h.session) =>
+          session.surface.nodes
+            .map((seq) => sessionEventAt(session, seq))
+            .map((event) => (event ? deriveEventMessage(event) : undefined))
+            .filter((m) => m !== undefined) as Array<{ role: string; content: Array<{ type: string; text?: string }> }>;
+        const messages = payload(h.session);
+        const toolBefore = JSON.stringify(messages.filter((m) => m.role !== "user"));
+        await h.step({ messages });
+        expect(JSON.stringify(messages.filter((m) => m.role !== "user"))).toBe(toolBefore);
+        // The served view (surface) carries the result's number in this pass.
+        const w = wire(h.session);
+        const last = w.at(-1)!;
+        expect(last.role).toBe("tool");
+        const m = TAG.exec(last.content);
+        expect(m).not.toBeNull();
+        expect(h.tags().find((t) => t.tag_number === Number(m![1]))?.type).toBe("tool");
+        // Every number the preview shows is the number the surface shows.
+        const shown = messages.flatMap((x) => x.content.filter((c) => c.type === "text").map((c) => TAG.exec(c.text ?? "")?.[1]));
+        const onSurface = new Set(w.map((x) => TAG.exec(x.content)?.[1]).filter(Boolean));
+        for (const n of shown.filter(Boolean)) expect(onSurface.has(n)).toBe(true);
+      },
+      { native: true },
+    );
+  });
 });
 
 describe("round 36 line G: native rewrites are Magic's own (drop-gate parity with mc-op copies)", () => {

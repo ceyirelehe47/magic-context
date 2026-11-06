@@ -44,6 +44,16 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   bench run vs $0.16. Commits `d8c571377` (RED) / `8cc2c4220`; push CI 42163961834 (673 / 15 / 107);
   e2e 42164393979 132 / 2 / 1 (R0 / R7 provider 429 overload, E2 WARN). Detail:
   `docs/dsh/e2e/evidence-round36/c-drop-gate.md`.
+- **Round 36 line G — experimental native roles, default OFF (adapter only, core unchanged):** setting
+  `context.nativeRoles: true` (or env `MAGIC_CONTEXT_DSH_NATIVE_ROLES=1`) makes new sessions keep DSH's
+  own message roles instead of folding tool calls into a Magic user message: only the single tool-result
+  or user node is rewritten, assistant messages are never replaced, and each rewrite carries a token-meter
+  price (the C3 meter drift is fixed for these sessions only). Existing sessions keep the fold view. With
+  the switch off nothing changes. Real rc.5 cache-bench with the switch on (42214443375, 42215740858):
+  94.3 % prompt-cache hit, 0 prefix breaks, about $0.027 per bench run vs $0.041 with the fold view
+  (far fewer reasoning tokens). Known gap: the `ctx_reduce` reminder does not fire in native sessions.
+  Not covered by e2e / soak yet. Commits `16e6fe2e8` / `8e095e315` / `5d19db4aa`; push CI 42215396157.
+  Detail: `docs/dsh/e2e/evidence-round36/g-native-roles.md`.
 - Known (unchanged by dsh.8): `@deepseek-ai/dsh-tools` and `@deepseek-ai/dsh-subagent` are loaded
   from DSH's own tree without being declared (works with npm and pnpm's default hoisting; not with a
   strict non-hoisting layout).

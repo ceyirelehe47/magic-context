@@ -65,6 +65,13 @@ because of scenario L. **Line B:** cache-bench run 42142782133 (analysis only; `
 `8cc2c4220`; push CI 42163961834 `dsh-plugin` **673** / `adapter-api` 15 / `contracts:dsh` **107** ×3 / ci-check 33;
 cache-bench plugin 94.4 % / 94.1 % with 0 divergences (before 90.0 %, 75), e2e 42164393979 132 / 2 / 1 (R9 / R15
 PASS; R0 / R7 = provider 429 overload) — known limitation 30, `evidence-round36/c-drop-gate.md`.
+**Line G** (user-approved plan N, adapter only, core untouched): native roles behind an **experimental switch,
+default off** (`context.nativeRoles` / env `MAGIC_CONTEXT_DSH_NATIVE_ROLES`) — RED `16e6fe2e8`, FEAT `8e095e315`,
+bench input `bc74ce513`, N11 RED `73cf540e6` / FIX `5d19db4aa`; push CI 42215396157 `dsh-plugin` **689** / `adapter-api`
+15 / `contracts:dsh` **109** ×3 / ci-check 33 (690 with the N12 pin of the docs commit). Cache-bench (plugin, switch on)
+42214443375 and 42215740858: 94.3 % hit, 0 divergences, **$0.0274 / run** (line C fold view $0.041), reasoning
+9–18 tokens / step (fold 290–325). Open: the ctx_reduce nudge does not fire in native sessions (measurement
+attributes the tool tag to the call part; not fixed). Known limitation 31, `evidence-round36/g-native-roles.md`.
 Evidence: `docs/dsh/e2e/evidence-round36/README.md`.
 
 Previous baseline (round 35, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
@@ -1700,6 +1707,12 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
    copy of the user prompt (`§2§ …`, `source.kind: "magic-context"`) after
    it. The model still answers correctly, but the ordering is a side effect
    of range replacement worth watching on long sessions.
+   **Round 36 line G — experimental native-roles switch (default off):** with `context.nativeRoles: true`
+   (or env `MAGIC_CONTEXT_DSH_NATIVE_ROLES=1`) a session Magic sees for the first time keeps DSH's own
+   roles: assistant nodes are never replaced (drops keep the call skeleton via core `skeleton_real`, assistant
+   text is not tagged), tagging / drops / truncation rewrite only the single `tool/result` or `user/message`
+   node, each replace preceded by a priced `compaction/prune`. The scheme is frozen per session (a session
+   Magic already worked on stays on the fold view described above). Not the default; see limitation 31.
 2. **Core borrows the `opencode` model harness** (`historian.opencode`,
    `dreamer.opencode`); there is no first-class `dsh` harness in core. See
    open point 1.
@@ -2484,6 +2497,9 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       (`foldSurfaceProjection`), so the next request is sent at ≈ 48 %. One early pass covers
       little; C3 then passes only if the model's later turns re-cross 65 % (2 of 4 runs did).
       Assertion unchanged; options for the user in evidence-round31 B1.
+      **Round 36 line G:** fixed **only in native-roles sessions** (switch on, limitation 31): every native
+      replace is preceded by `compaction/prune` with `shadowedTokenCount = tokenMeter.estimateMessage(original)`,
+      so the meter re-prices (N5). Fold-view sessions — the default — still drift as described here.
     - **Still open:** Y2 / T3 pending the user; full `npm install` of the whole DSH tree + plugin
       not exercised (only the cordis pair); Windows bin shim not exercised (静态推断: npm `.cmd`
       shims call the real path).
@@ -2625,6 +2641,35 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       new R0 / R7 FAIL = provider `429 overloaded` in scenario P (first request; summarize LLM call), not
       the gate; E2 WARN.
     - **Not observed on a real model (tests only):** force-band, executeReclaim and cache-TTL rides.
+
+31. **Round 36 line G (2026-11-06) — native roles (plan N) behind an experimental switch, default off.**
+    - **What:** `context.nativeRoles` (settings) / env `MAGIC_CONTEXT_DSH_NATIVE_ROLES=1`. A session seen
+      for the first time with the switch on gets the native scheme (`agent/tag-scheme.ts`, frozen per
+      session; worked-on sessions stay fold, native sessions stay native). `walkDshLog` drops the
+      pending-assistant fold; ops are grouped per source seq with the node's own role: content-only
+      `tool/result` replace or single-node `user/message` replace, each preceded by a `compaction/prune`
+      priced with token-meter `estimateMessage` (C3 fixed for these sessions only, limitation 26);
+      assistant parts read-only (core falls back to `skeleton_real`; assistant text not tagged); reasoning
+      replay skipped; first-call preview has no fold offset. Switch off: unchanged (all old tests pass
+      with their assertions untouched).
+    - **Commits / CI:** RED `16e6fe2e8` (9 / 13 FAIL before), FEAT `8e095e315`, bench input `bc74ce513`,
+      N11 RED `73cf540e6` / FIX `5d19db4aa` (drop gate: Magic's native rewrites are not a "rewritten served
+      prefix" ride, like `mc-op:` copies); N12 pin in the docs commit. Push CI 42215396157 @ `5d19db4aa`:
+      689 / 15 / 109 ×3 / 33.
+    - **Preview-tags observation (env on, old test):** the preview payload leaves a tool result without
+      `§N§` — expected: the preview only rewrites user input (DSH's pre-step payload is `UserMessage[]`),
+      the tool result is tagged on the surface in the same pass and is served tagged (bench: 32 / 32 first
+      serves tagged per run). Pinned by N12.
+    - **Real model (cache-bench, plugin group, switch on):** 42214443375 @ `bc74ce513` and 42215740858 @
+      `5d19db4aa`: hit 94.3 %, 0 divergences, steps to first compaction 31, $0.0274 / run (line C fold
+      $0.040–0.041), reasoning 9–18 tokens / step (fold 290–325), 8 reads per turn with no re-read.
+    - **Open (not fixed): ctx_reduce nudge blind in native sessions.** Core tail hygiene attributes a tool
+      tag to `(toolOwnerMessageId, callID)`, which in the native view is the assistant's call part, not the
+      synthetic tool-result message holding the output; U stays at argument size (local diagnostic: 280 vs
+      126k tokens) and channel 1 / 2 never fire. Bench: no reminder after the cutoff in native runs, fold
+      runs get one right after the first historian request.
+    - **Not run with the switch on:** e2e, soak, install acceptance. Evidence:
+      `docs/dsh/e2e/evidence-round36/g-native-roles.md`.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

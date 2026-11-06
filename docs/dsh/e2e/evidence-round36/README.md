@@ -126,3 +126,13 @@ re-derives its progress every step (~295 vs ~7 reasoning tokens/step). Static in
 section, ctx_* tools, §N§ tags) show no measurable effect. Per-step numbers:
 [d-output-tokens-steps.jsonl](d-output-tokens-steps.jsonl); scripts in [d-scripts/](d-scripts/).
 No product code changed; fix options A / A′ await a user decision.
+
+## Line G — native roles (plan N) behind an experimental switch, default off
+
+[g-native-roles.md](g-native-roles.md): commits (RED `16e6fe2e8` → `8e095e315`, N11 `73cf540e6` → `5d19db4aa`),
+the env-on preview-tags observation (expected: tool results are tagged on the surface, the preview only
+rewrites user input; N12 pin), and the two native cache-bench rounds 42214443375 / 42215740858 (94.3 %, 0
+divergences, $0.0274 / run vs $0.041 fold; reasoning 9–18 vs 290–325 tokens / step). Open: the ctx_reduce
+nudge never fires in native sessions ([g-nudge-diag.txt](g-nudge-diag.txt)). Round-2 summary
+[g-bench-42215740858-summary.md](g-bench-42215740858-summary.md), counts [g-bench-stats.txt](g-bench-stats.txt),
+scripts in [g-scripts/](g-scripts/).

@@ -1,0 +1,24 @@
+# Round 36 line G — ctx_reduce nudge measurement, fold view vs native roles (local diagnostic, not a CI test)
+# Script: g-scripts/diag-nudge-native.test.ts.txt (rename to .test.ts under packages/dsh-plugin/src/agent/ to run).
+# Harness of native-roles.test.ts; 5 user turns x 6 read_file calls, each result "BODYk " x 1500 (9000 B, ~4500 tok).
+# After each turn: core refreshTailHygieneBaseline over nudgeMeasurementMessages (the measurement the DSH nudge uses).
+
+fold   turn1 msgs=8  toolTags=12 U=18042  T=27062  c2 band=quiet    reason=tail-below-minimum
+fold   turn2 msgs=16 toolTags=24 U=45106  T=54126  c2 band=quiet    reason=tail-below-minimum
+fold   turn3 msgs=24 toolTags=36 U=72170  T=81190  c2 band=channel2 reason=ceiling-threshold-met
+fold   turn5 msgs=40 toolTags=60 U=126298 T=135318 c2 band=channel2 reason=ceiling-threshold-met
+fold   logs: channel1 nudge fired: level=urgent U=54130 T=63150 reason=band-crossing || channel2 nudge delivered: reclaimable~54k
+
+native turn1 msgs=14 toolTags=6  U=32  T=27062  c2 band=quiet reason=tail-below-minimum
+native turn2 msgs=28 toolTags=12 U=94  T=54126  c2 band=quiet reason=tail-below-minimum
+native turn3 msgs=42 toolTags=18 U=156 T=81190  c2 band=quiet reason=reclaimable-below-floor
+native turn5 msgs=70 toolTags=30 U=280 T=135318 c2 band=quiet reason=reclaimable-below-floor
+native logs: (no nudge)
+
+# Why (native view, first turn):
+# MSG assistant 284e…  parts [{type:tool, callID:call-1, state:{input:{file_path:f1.ts}}}]          <- tag 2 owner (toolOwnerMessageId)
+# MSG user synth-user-0446…  parts [{type:tool, callID:call-1, state:{output:"BODY1 …" 9000 B}}]  <- no tag attributed
+# tags row: {tagNumber:2, messageId:"call-1", type:"tool", byteSize:9000, tokenCount:4500, toolOwnerMessageId:"284e…"}
+# Core tail hygiene attributes a tool tag to the part (toolOwnerMessageId, callID): in the native view that is the
+# assistant's call part (input only, ~5 tokens), not the synthetic tool-result message holding the output.
+# U (undropped reclaimable tokens) therefore stays at the call-argument size and channel 1 / 2 never fire.
