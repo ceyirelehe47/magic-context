@@ -59,7 +59,12 @@ segment_minutes=120`, installed rc.5, node v22.23.4): **K1–K9 PASS**, 5247 moc
 7 / 8 (one provider 429), max-RSS 1.06× (+3.9 MB / 1k runs) and DB 14178 B / run — the same as the first
 240 min of the 12 h soak 41775904921 (1.05×, +3.7 MB / 1k, 14171 B / run); 0 residue / lock timeouts /
 historian failures, 2916 compactions → no leak. **dsh.8 condition (e2e all PASS + clean soak) not met**
-because of scenario L. **Line B:** cache-bench run 42142782133 (analysis only; `evidence-round36/cache-bench.md`).
+because of scenario L. **Line B:** cache-bench run 42142782133 (analysis only; `evidence-round36/cache-bench.md`). **Line C** (user-approved
+12:07 CST, adapter only, core untouched): queued drops now land only on a core reclaim ride
+(`reclaimRidePermitted`, like core's `shouldApplyPendingOps`) instead of on every pre-step — RED `d8c571377`, FIX
+`8cc2c4220`; push CI 42163961834 `dsh-plugin` **673** / `adapter-api` 15 / `contracts:dsh` **107** ×3 / ci-check 33;
+cache-bench plugin 94.4 % / 94.1 % with 0 divergences (before 90.0 %, 75), e2e 42164393979 132 / 2 / 1 (R9 / R15
+PASS; R0 / R7 = provider 429 overload) — known limitation 30, `evidence-round36/c-drop-gate.md`.
 Evidence: `docs/dsh/e2e/evidence-round36/README.md`.
 
 Previous baseline (round 35, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
@@ -2569,6 +2574,57 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       latency (e.g. budget = fixed hold time + k × median step time of the run's own "ready" turn),
       (b) keep 400 s and rerun at a quieter time, (c) keep it and accept L as WARN-on-timeout when the
       timeline shows no re-read and no non-abort compaction error. None of these touches product code.
+
+30. **Round 36 line C (2026-11-06) — queued drops land only on a core reclaim ride (fixed, adapter only).**
+    - **What was wrong (line B finding 3, `evidence-round36/cache-bench.md`):** the adapter called core
+      `applyPendingOperations` on every pre-step, so a model `ctx_reduce` landed its drops one protected-window
+      step at a time and every landing rewrote an already-served message (`[dropped §N§]`): cache-bench
+      42142782133 plugin run1 / run2 had 45 + 30 prefix divergences, all of them drop placeholders. Core
+      (OpenCode `transform-postprocess-phase.ts`, Pi `context-handler.ts`) applies pending ops only when
+      `reclaimRidePermitted(rideSignals, gate)` is true.
+    - **Fix (user-approved 12:07 CST; RED `d8c571377` 7 / 7 FAIL on `22558298c`, FIX `8cc2c4220`):**
+      new `agent/drop-gate.ts` gathers DSH observations into core's ride shapes and asks core's own
+      `reclaimRidePermitted` / `originateExecuteReclaim` / `estimateExecuteReclaimTokens` /
+      `reclaimRideLabel` (no decision logic of its own). `transcript.ts` gates `applyPendingOperations`
+      behind it; `applyFlushedStatuses` (replay of already-landed drops) still runs on every pass.
+      Core untouched. Mapping:
+
+      | core ride signal | DSH observation |
+      |---|---|
+      | `hardFold` | a served surface node replaced since the last served request (boundary = latest `request/header`; Magic's own `mc-op:` copies excluded — covers DSH compaction checkpoints, `/compact`, system-prompt rewrite); nothing served yet (first render); cache-TTL idle expiry (`now − last assistant/message > resolveCacheTtl(cache_ttl)`, default 5m) |
+      | `publishedHistory` | a historian publication (`compartments.created_at` / compaction-marker `published_at`) at or after the last served request |
+      | `force` | context % ≥ force band (85 % at execute 65 %); below 95 % only on a provider-anchored reading with no emergency sample (core's guard) |
+      | `executeReclaim` | core `originateExecuteReclaim` on [execute, force) when no summary can come (`compartmentInProgress`, unapplied DSH compaction marker, core floor mark) |
+      | `explicitFlush` | not needed: `/ctx-flush` runs core `executeFlush`, which marks tags `dropped` directly and replays without a gate |
+      | `subagentExecute`, `servedShapeRepair`, `signedThinkingHold` | no DSH counterpart → false (children never enter the context plane; DeepSeek reasoning is not signature-bound) |
+
+      ≥ 95 %: no protected tags passed (core parity). A ride input that cannot be built (read error) means
+      "no ride" — queued drops wait, they are never lost. Every queued drop still lands at the latest on
+      the force band, which is always below DSH's 90 % native backstop.
+    - **Five old tests adjusted (assertions unchanged):** `transcript.test.ts` "derives a drop op from a
+      queued pending operation", `drop-after-tag.test.ts` "a queued drop … replaces the surface copy" and
+      "round 17: two dropped tool arcs …", `identity-regression.test.ts` "drop targets the exact number",
+      `pressure-truncation.test.ts` "a ctx_reduce drop of a truncated result lands once it leaves the
+      protection window". They encoded the old "every pre-step applies" behaviour; each drop step now gets
+      a real core ride (cache-TTL idle expiry through the injectable clock, or an explicit `dropRide`
+      input to `deriveMutationPlan`). The still-protected half of the pressure-truncation test passes
+      unchanged. No assertion removed or loosened.
+    - **Limitation 21 (model imitating the fold record):** not affected by design — the gate covers core
+      `pending_ops` only; the tool-arc fold (`<recorded-tool-activity>` v2 prose) and its timing are
+      unchanged. What does change: a stamped tool result stays verbatim on the surface until the next ride
+      instead of turning into `[dropped §N§]` a step later, and placeholders then arrive in one batch. e2e
+      42164393979 (rc.5, at `8cc2c4220`): I1 PASS (no imitation), I2 PASS (no 4× re-read), C9 PASS (no
+      duplicated placeholder).
+    - **Evidence:** `docs/dsh/e2e/evidence-round36/c-drop-gate.md` (RED output `c-drop-gate-red.txt`).
+      Real model (rc.5): cache-bench 42164389768 @ `8cc2c4220` plugin 94.4 % (94.3–94.5), $0.041 / run, and
+      rerun 42166613496 94.1 % (93.7–94.7), $0.040 / run — 0 prefix divergences in 6 runs (before: 90.0 %,
+      $0.158 / run, 75 drop divergences). The one run with ctx_reduce before the cutoff (42166613496 run2,
+      2 calls) stayed append-only for the 19 + 9 steps after them (no ride came before the bench stopped);
+      after the cutoff, 3 episodes landed 33 / 25 / 23 placeholders in one pass each, on the historian
+      publication, with only appends afterwards. e2e 42164393979 @ `8cc2c4220` 132 / 2 / 1: R9 / R15 PASS,
+      new R0 / R7 FAIL = provider `429 overloaded` in scenario P (first request; summarize LLM call), not
+      the gate; E2 WARN.
+    - **Not observed on a real model (tests only):** force-band, executeReclaim and cache-TTL rides.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

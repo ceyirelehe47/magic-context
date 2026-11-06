@@ -7,7 +7,7 @@ adapter layer). Version `<upstream>-dsh.N`, git tag `dsh/<upstream>-dsh.N`
 (`bun pm pack` in `packages/dsh-plugin`, as `dsh-install.yml` does).
 Full detail per round: `docs/DSH-MAINTENANCE.md` and `docs/dsh/e2e/evidence-round*`.
 
-## 0.49.35-dsh.8 — 待发 (pending, rounds 34–35; no tag)
+## 0.49.35-dsh.8 — 待发 (pending, rounds 34–36; no tag)
 
 Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unchanged):
 `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`.
@@ -31,6 +31,19 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   `--storage-dir` / `--restore` without a value (exit 2) instead of falling back to the default
   storage DB. Acceptance at `7f3e6d451`: `dsh-install.yml` from `dsh/0.49.35-dsh.7`, A0–A8 PASS on
   rc.5 42070371822 / alpha.3 42070380440 / rc.1 42070387621; push CI 42069775942 (660 / 15 / 105).
+- **Round 36 fix — fewer DeepSeek prompt-cache breaks after `ctx_reduce` (adapter only, core
+  unchanged; user-approved 2026-11-06 12:07 CST):** drops the model queues with `ctx_reduce` (and the
+  historian's compartment drops) used to be applied on every pre-step, so they landed one step at a time
+  and each landing rewrote an already-sent message. They now wait for the same "reclaim ride" core uses
+  (`reclaimRidePermitted`: historian publication, a DSH compaction / `/compact` / rewritten prefix, idle
+  longer than `cache_ttl`, the force band, execute-band reclaim when no summary is coming) and land
+  together in that one pass; `/ctx-flush` still applies at once, landed drops still replay every pass,
+  and every queued drop lands at the latest on the force band (below DSH's 90 % backstop). Real rc.5
+  cache-bench: plugin hit rate before the first compaction 94.4 % / 94.1 % with 0 prefix divergences
+  (42164389768 / 42166613496) vs 90.0 % and 75 drop divergences before (42142782133); about $0.04 per
+  bench run vs $0.16. Commits `d8c571377` (RED) / `8cc2c4220`; push CI 42163961834 (673 / 15 / 107);
+  e2e 42164393979 132 / 2 / 1 (R0 / R7 provider 429 overload, E2 WARN). Detail:
+  `docs/dsh/e2e/evidence-round36/c-drop-gate.md`.
 - Known (unchanged by dsh.8): `@deepseek-ai/dsh-tools` and `@deepseek-ai/dsh-subagent` are loaded
   from DSH's own tree without being declared (works with npm and pnpm's default hoisting; not with a
   strict non-hoisting layout).

@@ -1,0 +1,61 @@
+# Round 36 line C — RED output (bun test src/agent/drop-gate-context-plane.test.ts, bun 1.4.4, sandbox)
+
+## 1. d8c571377 test file on 22558298c product code (as committed)
+
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 1. no ride: pending drops stay queued and the served prefix bytes do not change over several pre-steps [1549.99ms]
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 2a. historian publication is a ride: every eligible pending drop lands in that one pass [892.56ms]
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 2b. force band is a ride (all eligible land together); the next pass without a ride lands nothing new [599.03ms]
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 2c. cache-TTL idle expiry and a rewritten served prefix are rides; /ctx-flush lands at once without one [589.86ms]
+error: expect(received).toBe(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 3. at ≥ 95 % the protected tail is not protected (core parity); at the force band below 95 % it is [695.57ms]
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 4. replay invariant: landed drops replay on every pass (and in a fresh process) and never revert; new queued drops still wait [634.45ms]
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 5. execute band: core executeReclaim rides only when no historian summary can come [478.29ms]
+ 0 pass
+ 7 fail
+Ran 7 tests across 1 file. [8.29s]
+
+## 2. test file as adjusted in 8cc2c4220 (scenario 2c: 8 turns, one served request after the rewritten-prefix ride), run against 22558298c product code (transcript.ts / context-plane.ts / index.ts stashed)
+
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 1. no ride: pending drops stay queued and the served prefix bytes do not change over several pre-steps [1217.09ms]
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 2a. historian publication is a ride: every eligible pending drop lands in that one pass [464.22ms]
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 2b. force band is a ride (all eligible land together); the next pass without a ride lands nothing new [364.82ms]
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 2c. cache-TTL idle expiry and a rewritten served prefix are rides; /ctx-flush lands at once without one [580.77ms]
+error: expect(received).toBe(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 3. at ≥ 95 % the protected tail is not protected (core parity); at the force band below 95 % it is [824.26ms]
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 4. replay invariant: landed drops replay on every pass (and in a fresh process) and never revert; new queued drops still wait [742.63ms]
+error: expect(received).toEqual(expected)
+(fail) round 36 line C: pending drops wait for a core reclaim ride > 5. execute band: core executeReclaim rides only when no historian summary can come [692.81ms]
+ 0 pass
+ 7 fail
+Ran 7 tests across 1 file. [6.16s]
+
+## 3. GREEN on 8cc2c4220
+
+(pass) round 36 line C: pending drops wait for a core reclaim ride > 1. no ride: pending drops stay queued and the served prefix bytes do not change over several pre-steps [1567.09ms]
+(pass) round 36 line C: pending drops wait for a core reclaim ride > 2a. historian publication is a ride: every eligible pending drop lands in that one pass [1030.46ms]
+(pass) round 36 line C: pending drops wait for a core reclaim ride > 2b. force band is a ride (all eligible land together); the next pass without a ride lands nothing new [1223.25ms]
+(pass) round 36 line C: pending drops wait for a core reclaim ride > 2c. cache-TTL idle expiry and a rewritten served prefix are rides; /ctx-flush lands at once without one [1576.65ms]
+(pass) round 36 line C: pending drops wait for a core reclaim ride > 3. at ≥ 95 % the protected tail is not protected (core parity); at the force band below 95 % it is [727.11ms]
+(pass) round 36 line C: pending drops wait for a core reclaim ride > 4. replay invariant: landed drops replay on every pass (and in a fresh process) and never revert; new queued drops still wait [1462.06ms]
+(pass) round 36 line C: pending drops wait for a core reclaim ride > 5. execute band: core executeReclaim rides only when no historian summary can come [1213.95ms]
+ 7 pass
+ 0 fail
+Ran 7 tests across 1 file. [12.61s]
+(pass) drop-gate: served prefix from the DSH log > uses the latest request/header as the served boundary and finds a later non-Magic replace of a served node [0.34ms]
+(pass) drop-gate: served prefix from the DSH log > falls back to the last appended assistant/message, ignores replaced copies, and reports nothing served [0.24ms]
+(pass) drop-gate: served prefix from the DSH log > cache-TTL idle expiry follows core resolveCacheTtl/parseCacheTtl ("never" disables it) [0.78ms]
+(pass) drop-gate: core ride signals > maps each DSH observation onto core's signal and gate shape [1307.05ms]
+ 4 pass
+ 0 fail
+Ran 4 tests across 1 file. [3.81s]
