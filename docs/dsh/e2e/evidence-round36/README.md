@@ -115,3 +115,14 @@ rc.5 occurrence). The analysis points to model latency against a fixed time budg
 adapter defect, but no rc.5 e2e has passed scenario L since 42050071694, and no assertion or budget was
 changed to make it pass. dsh.8 stays untagged; tagging needs a user decision on scenario L
 (see DSH-MAINTENANCE known limitation 29).
+
+## Line D — why the plugin group's output tokens are ~6× the baseline (analysis only)
+
+[d-output-tokens.md](d-output-tokens.md): per-step output / reasoning data (9 plugin + 6 baseline existing runs),
+request-body diff, and proxy-level ablations (diagnosis-only `BENCH_ABLATE` switches in the bench proxy;
+runs 42172021344, 42172024788, 42172028320, 42173981151, 42173985186). Cause reproduced: the adapter's
+surface fold (known limitation 1) turns the live turn's tool arcs into `user` text, and the model
+re-derives its progress every step (~295 vs ~7 reasoning tokens/step). Static injections (MC system
+section, ctx_* tools, §N§ tags) show no measurable effect. Per-step numbers:
+[d-output-tokens-steps.jsonl](d-output-tokens-steps.jsonl); scripts in [d-scripts/](d-scripts/).
+No product code changed; fix options A / A′ await a user decision.
