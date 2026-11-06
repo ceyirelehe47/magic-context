@@ -46,6 +46,14 @@ def hm(u):
     return pt, h, m, u.get("completion_tokens") or 0
 
 
+def reasoning(u):
+    return ((u or {}).get("completion_tokens_details") or {}).get("reasoning_tokens")
+
+
+def list_cost(u):
+    return ((u or {}).get("opencode") or {}).get("list_cost")
+
+
 def canon(x):
     return json.dumps(x, sort_keys=True, ensure_ascii=False)
 
@@ -110,7 +118,7 @@ def run_stats(rd):
         bp = os.path.join(rd, "bodies", f"{r['n']}.json")
         body = json.load(open(bp)) if os.path.exists(bp) else None
         s = {"step": len(steps) + 1, "req": r["n"], "status": r.get("status"), "prompt_tokens": pt, "cache_hit": h,
-             "cache_miss": m, "completion_tokens": o, "ms": r.get("ms"), "nonced": r.get("nonced"),
+             "cache_miss": m, "completion_tokens": o, "reasoning_tokens": reasoning(r.get("usage")), "list_cost": list_cost(r.get("usage")), "ms": r.get("ms"), "nonced": r.get("nonced"),
              "prev_prompt_tokens": steps[-1]["prompt_tokens"] if steps else None,
              "div": divergence(prev_body, body)}
         steps.append(s)
@@ -129,6 +137,11 @@ def run_stats(rd):
         "step1_hit": ok[0]["cache_hit"] if ok else None,
         "last_prompt_tokens": steps[-1]["prompt_tokens"] if steps else None,
         "cost_usd_peak": cost,
+        "cost_parts": {"hit": H * PRICE["hit"] / 1e6, "miss": M * PRICE["miss"] / 1e6, "out": O * PRICE["out"] / 1e6},
+        "cost_per_step": cost / len(ok) if ok else None,
+        "out_per_step": O / len(ok) if ok else None,
+        "reasoning_per_step": (sum(s["reasoning_tokens"] or 0 for s in ok) / len(ok)) if ok else None,
+        "opencode_list_cost": sum(s["list_cost"] or 0 for s in ok),
         "n_append_only": sum(1 for s in steps[1:] if s["div"] and s["div"]["append_only"]),
         "n_diverged": sum(1 for s in steps[1:] if s["div"] and not s["div"]["append_only"]),
         "titles": sum(1 for r in reqs if r.get("kind") == "title"),
@@ -164,9 +177,15 @@ def main():
           "|---|---|---|---|---|---|---|---|---|"]
     summ = {}
     for g, rs in sorted(groups.items()):
-        a = {k: agg([r[k] for r in rs]) for k in ("rate", "rate_after1", "n_steps", "last_prompt_tokens", "cost_usd_peak", "step1_hit")}
+        a = {k: agg([r[k] for r in rs]) for k in ("rate", "rate_after1", "n_steps", "last_prompt_tokens", "cost_usd_peak", "step1_hit", "cost_per_step", "out_per_step", "reasoning_per_step", "opencode_list_cost")}
+        a["cost_parts"] = {k: agg([r["cost_parts"][k] for r in rs]) for k in ("hit", "miss", "out")}
         summ[g] = a
         L.append(f"| {g} | {len(rs)} | {pct(a['rate'])} | {pct(a['rate_after1'])} | {num(a['step1_hit'])} | {num(a['n_steps'], '{:.1f}')} | {num(a['last_prompt_tokens'])} | {num(a['cost_usd_peak'], '{:.4f}')} | {sum(r['n_append_only'] for r in rs)} / {sum(r['n_diverged'] for r in rs)} |")
+    L += ["", "| group | cost/step USD (peak) | cost parts per run: hit / miss / output USD | output tokens/step | reasoning tokens/step | OpenCode list_cost per run USD |", "|---|---|---|---|---|---|"]
+    for g, rs in sorted(groups.items()):
+        a = summ[g]
+        cp = a["cost_parts"]
+        L.append(f"| {g} | {num(a['cost_per_step'], '{:.5f}')} | {cp['hit']['mean']:.4f} / {cp['miss']['mean']:.4f} / {cp['out']['mean']:.4f} | {num(a['out_per_step'], '{:.0f}')} | {num(a['reasoning_per_step'], '{:.0f}')} | {num(a['opencode_list_cost'], '{:.4f}')} |")
     nmin = min((r["n_usage"] for r in runs), default=0)
     if nmin:
         L += ["", f"### Common window (first {nmin} steps of every run)", "", "| group | hit rate mean (min–max) | after step 1 | cost/run USD (peak) |", "|---|---|---|---|"]
@@ -186,12 +205,12 @@ def main():
         rate2 = "—" if r["rate_after1"] is None else "%.1f %%" % (r["rate_after1"] * 100)
         L += [f"### {r['mode']} {r['label']} (stop {r['stop']}; cutoff by {r['cutoff_by']}; requests from cutoff on: {', '.join(r['cutoff_kinds']) or '—'})", "",
               f"steps {r['n_steps']} · hit {r['hit']} · miss {r['miss']} · out {r['out']} · rate {rate} · after step 1 {rate2} · cost ${r['cost_usd_peak']:.4f} · raw usage keys: {', '.join(r['raw_usage_keys'])}", "",
-              "| step | prompt_tokens | cache_hit | cache_miss | hit / prev prompt | ms | prefix vs previous step |", "|---|---|---|---|---|---|---|"]
+              "| step | prompt_tokens | cache_hit | cache_miss | hit / prev prompt | out (reasoning) | ms | prefix vs previous step |", "|---|---|---|---|---|---|---|---|"]
         for s in r["steps"]:
             d = s["div"]
             dv = "—" if d is None else ("append-only" if d["append_only"] else f"diverges at {d.get('where')} ({d['common_chars']}/{d['prev_chars']} chars common)")
             hp = f"{s['cache_hit']/s['prev_prompt_tokens']:.2f}" if s["prev_prompt_tokens"] and s["cache_hit"] is not None else "—"
-            L.append(f"| {s['step']} | {s['prompt_tokens']} | {s['cache_hit']} | {s['cache_miss']} | {hp} | {s['ms']} | {dv} |")
+            L.append(f"| {s['step']} | {s['prompt_tokens']} | {s['cache_hit']} | {s['cache_miss']} | {hp} | {s['completion_tokens']} ({s['reasoning_tokens']}) | {s['ms']} | {dv} |")
         divs = [s for s in r["steps"] if s["div"] and not s["div"]["append_only"]]
         if divs:
             L += ["", "First divergences (previous → current message at the first differing index):", ""]
