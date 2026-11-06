@@ -25,6 +25,11 @@
 //             assistant message (+ its tool results) becomes a user message,
 //             tool arcs rendered with the plugin's v2 prose note, no
 //             reasoning_content (agent/transcript.ts renderToolRecord)
+//   foldtail  like fold, but the arcs after the LAST user message (the live
+//             turn) stay native assistant/tool messages with their reasoning
+//             (estimates a "do not fold the live turn" fix)
+//   foldplain like fold, but without the "Magic Context note" sentence (role
+//             flattening alone: results become bare user text)
 //   pad       append a neutral ~5.8k-char paragraph to the system prompt
 //             (same length as the plugin's Magic Context section)
 // Each applied edit is listed in requests.jsonl ("ablated"). The response
@@ -85,11 +90,14 @@ function describe(tc) {
   const n = tc.function?.name ?? "tool";
   return n === "read" && p ? `read the file ${p}` : `used ${n}`;
 }
-function foldMessages(msgs) {
+function foldMessages(msgs, opts = {}) {
   const out = [];
   let i = 0;
+  let stop = msgs.length;
+  if (opts.keepTail) for (let j = msgs.length - 1; j >= 0; j -= 1) if (msgs[j].role === "user") { stop = j + 1; break; }
   while (i < msgs.length) {
     const m = msgs[i];
+    if (i >= stop) { out.push(m); i += 1; continue; }
     if (m.role !== "assistant") { out.push(m); i += 1; continue; }
     const text = textOf(m.content);
     const calls = Array.isArray(m.tool_calls) ? m.tool_calls : [];
@@ -98,7 +106,7 @@ function foldMessages(msgs) {
     i += 1;
     while (i < msgs.length && msgs[i].role === "tool") { results.push(textOf(msgs[i].content)); i += 1; }
     const note = `Magic Context note: these tool calls already ran and finished; their results are merged below as plain reference text, in this order: ${calls.map(describe).join("; ")}. Do not run them again to get the same result; call tools normally for new work.`;
-    out.push({ role: "user", content: [text, note, ...results].filter((x) => x && x.length).join("\n\n") });
+    out.push({ role: "user", content: [text, opts.plain ? "" : note, ...results].filter((x) => x && x.length).join("\n\n") });
   }
   return out;
 }
@@ -137,10 +145,12 @@ function ablate(body) {
     for (const m of body.messages) if (m.role === "assistant" && "reasoning_content" in m) { delete m.reasoning_content; k += 1; }
     if (k) done.push(`noreason(${k})`);
   }
-  if (ABLATE.has("fold")) {
-    const k = body.messages.filter((m) => m.role === "assistant").length;
-    body.messages = foldMessages(body.messages);
-    if (k) done.push(`fold(${k})`);
+  for (const mode of ["fold", "foldtail", "foldplain"]) {
+    if (!ABLATE.has(mode)) continue;
+    const before = body.messages.filter((m) => m.role === "assistant").length;
+    body.messages = foldMessages(body.messages, { keepTail: mode === "foldtail", plain: mode === "foldplain" });
+    const after = body.messages.filter((m) => m.role === "assistant").length;
+    if (before) done.push(`${mode}(${before - after}/${before})`);
   }
   if (ABLATE.has("pad") && mapSys(body, (s) => `${s}\n\n${PAD}`)) done.push("pad");
   return done;

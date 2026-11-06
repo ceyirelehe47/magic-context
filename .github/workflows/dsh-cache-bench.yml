@@ -115,8 +115,12 @@ jobs:
         working-directory: packages/dsh-plugin
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          BENCH_ABLATE: ${{ matrix.mode == 'plugin' && inputs.ablate_plugin || inputs.ablate_baseline }}
+          # Chosen in bash: in a GitHub expression an empty ablate_plugin is falsy and
+          # `a && b || c` would hand the plugin group the baseline's list (42172028320).
+          ABLATE_PLUGIN: ${{ inputs.ablate_plugin }}
+          ABLATE_BASELINE: ${{ inputs.ablate_baseline }}
         run: |
+          if [ "${{ matrix.mode }}" = plugin ]; then export BENCH_ABLATE="$ABLATE_PLUGIN"; else export BENCH_ABLATE="$ABLATE_BASELINE"; fi
           echo "BENCH_ABLATE=${BENCH_ABLATE:-<none>}"
           if [ -z "$OPENCODE_API_KEY" ]; then echo "::error::secret OPENCODE_API_KEY is not set"; exit 1; fi
           mkdir -p "$BENCH_OUT"
