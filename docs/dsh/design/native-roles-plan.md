@@ -29,6 +29,10 @@ core（`packages/plugin`）只读，`node_modules` 只读。
 > assistant 文本不再加 §N§，改由 historian 覆盖（这是与 OpenCode 唯一保留的偏差）。
 > 预期效果是推理回到基线水平（约 17 token/步，D 线 foldtail 实测 64/17），每步省约 29 % 成本；命中率不降，因为改写仍只在
 > reclaim ride 上落地，而且只从被改写的那个节点开始失效。另外 C3 的 meter 漂移也会顺带修掉。
+>
+> spike（§5，本地分支 `r36e-spike`，未 push）在真实 rc.5 Session 上 8/8 通过：角色序列和 tool_call 配对不变；
+> 给新结果打 tag 不改变已发送的前缀；drop 只改那一条 tool 消息；重放结果字节相同；真实 TokenMeter 对原生 drop
+> 减掉 3046→50 token，不带影子价的 replace 则保持 3046 不变。
 
 ---
 
@@ -123,7 +127,7 @@ dropped 状态、m0/m1 缓存、reasoning watermark 等）：每次 pass 都从�
   结论：**插件可以原位改写单个工具结果的内容，角色和配对保持不变。**
 * `user/message` 作为 replace：除来源覆盖和 system 头部保护（L412–423）外没有别的限制，可以单节点原位改写。
 * surface 节点 0 是 system 时只能由 system 替换。
-* 证据：静态 + 已复现（§5 R1–R4）。
+* 证据：静态 + 已复现（§5 R1–R5）。
 
 ### 2.2 `dsh-session`：message projection（插件自定义的原位改写）
 
@@ -134,13 +138,15 @@ dropped 状态、m0/m1 缓存、reasoning watermark 等）：每次 pass 都从�
 * 能做到 OpenCode 的全部原位改写，**包括 assistant 文本**；契约要求「保持消息身份」，但运行时不校验 role。
 * 风险：
   * 必须在 SessionStore 上注册（`ctx.sessions`）；`Session.create/fromRestore` 只会拿到注册时已有的 projection（L1810、L1829）。
-  * 插件卸载后，**用过它的 live session** 会拒绝继续派生（`_assertProjections` L583–584：「restore the session with its owning plugin」）。
+  * 插件卸载后，**用过它的 live session** 不只是拒绝派生，**连下一次普通 append 都会抛错**
+    （`_assertProjections` L583–584 在 `validateNext` 里执行：「restore the session with its owning plugin」，spike R6 已复现）。
+    也就是说，会话进行中禁用或热重载插件，会让 agent loop 卡死。
     重新 restore 时，如果该事件是 ignorable plugin record，找不到 projection 就被忽略，内容退回原文（L301、L429–440）。
   * 持久化的事件类型：`appendPluginRecord`（L1272–1297）产生 `plugin:*` ignorable 记录，但注释说明只有 DSH 仓库内
     `packages/experimental/` 可以调用（仓库自检门）。用 `session.append` 写自定义的非 ignorable 类型，在
     session-log 写入和读取时的行为没有验证。
   * meter 不对 projection 计价（只认 `compaction/summary|prune` + replace），压力会漂移。
-* 证据：静态 + spike 已复现（§5 R5–R6）。
+* 证据：静态 + spike 已复现（§5 R6）。
 
 ### 2.3 `dsh-agent`：loop 事件
 
@@ -199,7 +205,7 @@ dropped 状态、m0/m1 缓存、reasoning watermark 等）：每次 pass 都从�
 | 角色保留 | 是（assistant / tool 原生） | 是 | 否（ride 之间原生，ride 后又变成 user） | 历史轮否，当前轮是 | 是 |
 | 与 OpenCode 等价程度 | 高。偏差：assistant 文本不加 §N§、不原位 drop；`full` drop 改为 skeleton | 最高 | 低 | 中 | 高，但违反契约 |
 | 用到的 DSH API | `session.append` 的 tool/result、user/message replace，`compaction/prune`（全是已发布 schema，官方 pruner 在用） | `registerMessageProjection`（公开），事件类型持久化路径（未验证或仅限 experimental） | 现有 | 现有 | 违反 `llm/stream` 契约 |
-| 升级风险 | 低。依赖的校验规则就是官方 pruner 依赖的规则 | 中。插件卸载后 live session 无法派生；`appendPluginRecord` 受仓库自检限制 | 低 | 低 | 高 |
+| 升级风险 | 低。依赖的校验规则就是官方 pruner 依赖的规则 | 中到高。插件卸载或热重载后，live session 连普通 append 都会被拒（R6）；`appendPluginRecord` 受仓库自检限制 | 低 | 低 | 高 |
 | 改动面 | `transcript.ts` 视图（不折叠，改为与 pi 视图相同的 tool-result 消息形态）、op 几何（每条脏消息一个 op，按角色选事件类型）、`coordinator`（按角色 append，加 prune）、outbox 记录 op kind、`compat/dsh-0.1/session.ts` 加两个 helper。中等 | 视图同 N，加 projection 注册和事件 | 小 | 小到中 | — |
 | C 线 drop 门控 | 不变（仍只在 ride 落地）；一次 ride 落多个单节点 replace，缓存只从最早被改的节点开始失效 | 不变 | 不变 | 不变 | — |
 | historian | 不变（区间 user/message replace；区间不能拆开 tool 配对，复用现有逻辑） | 不变 | 不变 | 不变 | — |
@@ -256,6 +262,44 @@ A′ 也只是把这件事推迟到 ride 之后。
 
 ---
 
-## 5. spike 结果
+## 5. spike 结果（已复现，rc.5）
 
-（见下一次提交。）
+位置：本地分支 `r36e-spike`（commit `01c690952`，**未 push**），基于 `87434df01`：
+
+* `packages/dsh-plugin/src/agent/native-rewrite.spike.ts`：原型，约 130 行。提供 `replaceToolResultContent`、
+  `replaceUserMessageText`（都先追加 `compaction/prune`）、`nativeTagPass`（给 tool/result 和 user 文本加 §N§）、
+  `nativeDropToolResult`（改成 `[dropped §N§]`），以及一个只用于比较的 chat 序列化 `toChatWire`
+  （本地没有安装 DSH 的 provider adapter，所以没有拿真实请求体比，见下文）。
+* `packages/dsh-plugin/src/agent/native-roles.spike.test.ts`：单文件测试，**8/8 通过**
+  （`bun test src/agent/native-roles.spike.test.ts`，6.0 s）。Session 用真实的 `@deepseek-ai/dsh-session` 0.2.1-rc.5，
+  事件构造复用 `crash-recovery.helpers.ts` 的 `toolTurn` / `tailToolCall`。
+
+| # | 测试 | 结果 |
+|---|---|---|
+| R1 | 一个已完成的工具轮 + 一个进行中的工具轮，做 tag pass | 角色序列保持 `user, assistant+calls, tool, assistant, user, assistant+calls, tool`；`tool_call_id` 仍是 call-1 / call-2；tool 内容变成 `§N§ BODY…`；surface 节点数仍为 7 |
+| R2 | 请求 k 之后，模型又发起一个工具轮，pre-step k+1 只给新节点打 tag | 请求 k 的全部消息**字节相同**，只在尾部多出 3 条 |
+| R3 | 对已打 tag 的旧结果做 drop | **只有**那条 tool 消息变成 `{"role":"tool","tool_call_id":"call-1","content":"[dropped §N§]"}`，其余 6 条字节相同，角色序列不变 |
+| R4 | 每个 replace 的前一个事件 | 都是 `compaction/prune`，`shadowedRange` 和 `shadowedSeqs` 与 replace 一致，`shadowedTokenCount > 0` |
+| R4b | 校验器的边界 | tool/result replace 改 `isError` 时被拒（「may change only content」）；覆盖 2 个节点时被拒（「exactly one current node」）；assistant/message 作为 replace 被拒（「cannot carry sourceEventSeqs」） |
+| R5 | 从持久事件日志重放（restore / fork） | 重放后的模型输入与 live 字节相同 |
+| R6 | 方案 P：message projection | 可以原位改写 **assistant** 文本，角色不变；不带 projection 重放时，自定义事件被忽略，内容退回原文（不报错）；**移除 projection 后，live session 下一次普通 append 就抛错** |
+| R7 | **真实 TokenMeter** 的 `contextBreakdown` fold（与 `token-meter-projection.contract.test.ts` 同样的捕获方式） | 带 prune 的原生 drop：messageTokens 3046 → **50**；不带影子价的 replace：**3046 → 3046**（0 delta，被替换的大内容仍按原价计入）。C3 的 meter 漂移已复现，方案 N 的写法能修掉 |
+
+没有做的：
+
+* **bench 代理录请求体**：需要 dispatch cache-bench，而 D 线的 `foldtail` 消融（当前轮保持原生 assistant/tool，
+  64 / 17 token/步）已经在真实 DeepSeek 请求上测过「原生角色」的效果，再跑一次不能改变结论，按约束不 dispatch。
+  实施后的验证 bench 见 §4。
+* **alpha.3 / rc.1 上运行 spike**：三个版本的相关函数 md5 相同（§2.8），只做了静态核对。
+* **core 管线接到原生视图上**：没有改 `transcript.ts`。core 的 `tagTranscript` 本来就支持 pi 那种「工具结果是独立消息」
+  的形态（`pi-plugin/src/transcript-pi.ts`），这一点是静态推断；实施时由 §4 的 R-a…R-f 验证。
+
+## 6. 需要用户决定的事项
+
+1. 是否按方案 N 实施（只改适配层，先放在 `dsh.native_roles` 开关后面，默认关）。
+2. assistant 文本不再加 §N§、不再原位 drop（与 OpenCode 的唯一保留偏差）是否可以接受；还是要求后续用方案 P 补上
+   （代价：插件热重载或禁用时，live session 会卡死）。
+3. `full` drop 统一改为 skeleton（保留调用和真实参数，结果改成占位符）是否可以接受。
+4. 实施后，`fold-format.test.ts` 等测试里「折叠格式」相关断言需要改写（行为变了，不是放宽），是否批准。
+5. 验证用的 bench（slot `cache-7` 起）、e2e 和 soak 是否批准运行。
+6. C3：方案 N 顺带修了 meter 漂移，与第 34 轮「C3 等上游修复」的决定不同，是否同意由我们这边修。
