@@ -226,7 +226,19 @@ describe("deriveMutationPlan (recording pipeline)", () => {
       const textTag = tags.find((t) => t.type === "message")!;
       queuePendingOp(db, view.sessionId, textTag.tagNumber, "drop", Date.now());
 
-      const plan = deriveMutationPlan(view, { db });
+      // Round 36 line C: queued drops apply only on a core reclaim ride; give
+      // this pass one (cache-TTL idle expiry).
+      const plan = deriveMutationPlan(view, {
+        db,
+        dropRide: {
+          served: { servedBoundarySeq: 0, servedAt: 0, lastResponseAt: 0, rewrittenBySeq: null, rewrittenByType: null },
+          cacheExpired: true,
+          historianPublishedAt: 0,
+          executePercentage: 65,
+          forcePercentage: 85,
+          summaryCanCome: false,
+        },
+      });
       expect(plan).not.toBeNull();
       const dropOp = plan!.ops.find((op) => op.kind === "drops");
       expect(dropOp).toBeDefined();

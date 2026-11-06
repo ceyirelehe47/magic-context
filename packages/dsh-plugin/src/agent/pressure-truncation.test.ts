@@ -187,6 +187,7 @@ describe("pressure truncation of protected large tool results (24k window deadlo
   });
 
   it("a ctx_reduce drop of a truncated result lands once it leaves the protection window (drop wins over the replay)", async () => {
+    const clock = { offset: 0 };
     await scenario(async ({ db, session, step, pressure, rows, newState }) => {
       addRead(session, 1, fileBody("alpha"));
       addRead(session, 2, fileBody("beta"));
@@ -205,11 +206,15 @@ describe("pressure truncation of protected large tool results (24k window deadlo
       // Still inside core's protection window (newest three tool tags): the
       // drop stays queued (core parity) and the truncation keeps replaying.
       expect(surface(session).some((t) => t.includes("1: alpha line 1 ") && MARK.test(t))).toBe(true);
-      // Three newer reads push it out of the window; the queued drop lands.
+      // Three newer reads push it out of the window; the queued drop lands on
+      // the next core reclaim ride (round 36 line C: here the cache-TTL idle
+      // expiry), not on every pre-step.
       addRead(session, 4, fileBody("delta", 40));
       addRead(session, 5, fileBody("eps", 40));
       addRead(session, 6, fileBody("zeta", 40));
+      clock.offset = 6 * 60_000;
       await step();
+      clock.offset = 0;
       const texts = surface(session);
       expect(texts.some((t) => t.includes("1: alpha line 1 "))).toBe(false);
       const status = db.prepare("SELECT status FROM tags WHERE session_id = ? AND tag_number = ?").get(KEY, first.tag_number) as { status: string };
@@ -229,7 +234,7 @@ describe("pressure truncation of protected large tool results (24k window deadlo
       newState();
       await step();
       expect(surface(session)).toEqual(before);
-    });
+    }, { cacheTtl: "5m", now: () => Date.now() + clock.offset });
   });
 });
 

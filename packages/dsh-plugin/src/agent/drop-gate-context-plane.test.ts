@@ -244,7 +244,8 @@ describe("round 36 line C: pending drops wait for a core reclaim ride", () => {
 
   it("2c. cache-TTL idle expiry and a rewritten served prefix are rides; /ctx-flush lands at once without one", async () => {
     await scenario(async (h) => {
-      const { unprotected } = await buildTurns(h, 7);
+      const { unprotected } = await buildTurns(h, 8);
+      expect(unprotected.length).toBeGreaterThanOrEqual(5);
       const [a, b, c, d, e] = unprotected;
       queueDrops(h.db, [a!, b!]);
       await h.step();
@@ -259,7 +260,7 @@ describe("round 36 line C: pending drops wait for a core reclaim ride", () => {
       queueDrops(h.db, [c!]);
       await h.step();
       expect(placeholders(h.session)).not.toContain(c!);
-      addToolTurn(h.session, 8, 50);
+      addToolTurn(h.session, 9, 50);
       await h.step();
       expect(placeholders(h.session)).not.toContain(c!);
       const first = h.session.surface.nodes[0]!;
@@ -276,6 +277,10 @@ describe("round 36 line C: pending drops wait for a core reclaim ride", () => {
       );
       await h.step();
       expect(placeholders(h.session)).toContain(c!);
+      // The rewritten prefix is a ride only until the next request is served
+      // (a new response closes that window).
+      addToolTurn(h.session, 10, 50);
+      await h.step();
       // Explicit flush (/ctx-flush → core executeFlush) needs no ride.
       queueDrops(h.db, [d!, e!]);
       await h.step();

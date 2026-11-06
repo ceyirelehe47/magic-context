@@ -35,15 +35,20 @@ async function scenario(fn: (ctx: {
   step: () => Promise<void>;
   applied: string[];
   tags: () => Array<{ tag_number: number; type: string; status: string; message_id: string }>;
+  /** Round 36 line C: the next passes run after an idle gap past cache_ttl (core's idle-expiry ride). */
+  idle: () => void;
 }) => Promise<void>) {
   const dir = mkdtempSync(join(tmpdir(), "dsh-magic-drop-"));
   const db = await createTestDb(join(dir, "c.db"));
   try {
     const session = Session.create(SessionId(SID));
     const applied: string[] = [];
+    let nowOffset = 0;
     const deps: ContextPlaneDeps = {
       host: { ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }), canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}` },
       config: {},
+      cacheTtl: "5m",
+      now: () => Date.now() + nowOffset,
       log: (m) => {
         if (m.includes("applied plan")) applied.push(m);
       },
@@ -59,7 +64,7 @@ async function scenario(fn: (ctx: {
         status: string;
         message_id: string;
       }>;
-    await fn({ db, session, step, applied, tags });
+    await fn({ db, session, step, applied, tags, idle: () => (nowOffset = 6 * 60_000) });
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });
@@ -84,7 +89,7 @@ function addToolTurn(session: Session, i: number, size: number) {
 
 describe("drops land on messages that were already tagged (op copies are expanded, not baselines)", () => {
   it("a queued drop of an old message tag and an old tool tag (outside the token floor) replaces the surface copy", async () => {
-    await scenario(async ({ db, session, step, tags }) => {
+    await scenario(async ({ db, session, step, tags, idle }) => {
       for (let i = 1; i <= 4; i += 1) {
         addToolTurn(session, i, 3000);
         await step();
@@ -95,6 +100,9 @@ describe("drops land on messages that were already tagged (op copies are expande
       expect(surface(session).some((t) => t.includes(`BODY1 BODY1`))).toBe(true);
       queuePendingOp(db, KEY, msg.tag_number, "drop", Date.now());
       queuePendingOp(db, KEY, tool.tag_number, "drop", Date.now());
+      // Round 36 line C: queued drops land on a core reclaim ride (here the
+      // cache-TTL idle expiry), not on every pre-step.
+      idle();
       await step();
       const after = new Map(tags().map((t) => [t.tag_number, t.status]));
       expect(after.get(msg.tag_number)).toBe("dropped");
@@ -118,7 +126,7 @@ describe("drops land on messages that were already tagged (op copies are expande
     // tool calls folds into one copy whose parts are [call A, call B,
     // result A, result B]; dropping both tags rendered
     // "[dropped §6§]\n\n[dropped §7§]\n\n[dropped §6§]\n\n[dropped §7§]".
-    await scenario(async ({ db, session, step, tags }) => {
+    await scenario(async ({ db, session, step, tags, idle }) => {
       const u = createUserMessage({ content: [{ type: "text", text: "question 0" }], source: { kind: "user" } });
       session.append("user/message", u as never, { surfaceOp: "append" });
       const calls = createAssistantMessage({
@@ -146,6 +154,7 @@ describe("drops land on messages that were already tagged (op copies are expande
       const toolTags = tags().filter((t) => t.type === "tool").slice(0, 2);
       expect(toolTags.length).toBe(2);
       for (const t of toolTags) queuePendingOp(db, KEY, t.tag_number, "drop", Date.now());
+      idle(); // round 36 line C: land on the idle-expiry ride
       await step();
       const after = new Map(tags().map((t) => [t.tag_number, t.status]));
       const all = surface(session).join("\n");

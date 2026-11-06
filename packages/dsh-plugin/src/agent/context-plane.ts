@@ -57,6 +57,13 @@ import type { Database } from "@magic-context/core/shared/sqlite";
 import type { ProtectedTokensTierOverrides } from "@magic-context/core/config/project-security";
 import { resolveDshProtectionFloor, type DshProtectionOptions } from "./protection";
 import { e2eCrashPoint } from "./e2e-hooks";
+import {
+  dshSummaryCanCome,
+  isCacheIdleExpired,
+  latestHistorianPublishAt,
+  readServedPrefixState,
+  type DshDropRideInput,
+} from "./drop-gate";
 
 /** The host-service slice the context plane needs (structural view). */
 export interface ContextPlaneHostView {
@@ -149,6 +156,14 @@ export interface ContextPlaneDeps {
    * per-step Magic action (plan, nudges, historian trigger); absent = on.
    */
   readonly isEnabled?: () => boolean;
+  /**
+   * Provider cache TTL ("5m", "1h", "never"; knowledge `cacheTtl` /
+   * `cache_ttl`): an idle gap past it is core's idle-expiry ride for queued
+   * drops (round 36 line C). Absent = core default "5m".
+   */
+  readonly cacheTtl?: string;
+  /** Injectable clock (tests). */
+  readonly now?: () => number;
   readonly log?: (message: string) => void;
 }
 
@@ -697,6 +712,71 @@ function messageTexts(message: unknown): string[] {
   return out;
 }
 
+/**
+ * Round 36 line C: the DSH observations core's reclaim-ride permission is
+ * computed from (see `agent/drop-gate.ts` for the signal mapping). Reads the
+ * durable session log (served boundary, replaces since it, last response
+ * time), the historian publication time, the pressure reading the historian
+ * trigger and pressure truncation use, and whether a historian summary can
+ * still come. Fail-open to `undefined` = no ride (queued drops wait).
+ */
+export function dropRideInputFor(
+  deps: ContextPlaneDeps,
+  agent: Agent,
+  db: Database,
+  sessionId: string,
+  pressure: PressureTruncationInput | undefined,
+): DshDropRideInput | undefined {
+  try {
+    const served = readServedPrefixState(sessionEvents(agent.session));
+    const options = (agent as unknown as { options?: { provider?: string; model?: string } }).options;
+    const modelKey = options?.provider && options?.model ? `${options.provider}/${options.model}` : undefined;
+    const now = deps.now?.() ?? Date.now();
+    const execute =
+      pressure?.executePercentage ??
+      safeThreshold(deps.historian, agent) ??
+      deps.historian?.config?.executeThresholdPercentage ??
+      65;
+    // Context % = the reading the historian trigger uses (DSH token-meter
+    // projection / window). Without a meter sample, fall back to the
+    // pressure-truncation reading (last provider prompt + dense movement).
+    // Not the pressure-truncation reading when a meter exists: it counts
+    // Magic's own replace copies after the last usage sample as new input,
+    // which over-states pressure right after a rewrite and would open a force
+    // ride (or lift tail protection) the session is not in.
+    let meter: { projectedTokens?: number; contextWindow?: number } | undefined;
+    try {
+      meter = deps.historian?.readPressure?.(agent);
+    } catch {
+      meter = undefined;
+    }
+    const meterWindow =
+      typeof meter?.contextWindow === "number" && meter.contextWindow > 0 ? meter.contextWindow : pressure?.contextWindow;
+    const meterSample = typeof meter?.projectedTokens === "number" && typeof meterWindow === "number" && meterWindow > 0;
+    const pct = meterSample
+      ? ((meter!.projectedTokens as number) / (meterWindow as number)) * 100
+      : pressure !== undefined && pressure.contextWindow > 0
+        ? (pressure.projectedTokens / pressure.contextWindow) * 100
+        : undefined;
+    return {
+      served,
+      cacheExpired: isCacheIdleExpired(served.lastResponseAt, now, deps.cacheTtl, modelKey),
+      historianPublishedAt: latestHistorianPublishAt(db, sessionId),
+      contextPercentage: pct,
+      // Token-meter projections and provider usage are provider-anchored;
+      // only a reading with neither is a local estimate (core contextUsageFromEstimate).
+      fromEstimate: !(meterSample || (pressure !== undefined && pressure.usageSeq >= 0)),
+      executePercentage: execute,
+      forcePercentage: pressure?.forcePercentage ?? escalationBands(execute).forceMaterializationPercentage,
+      usableWindow: meterWindow,
+      summaryCanCome: dshSummaryCanCome(db, sessionId),
+    };
+  } catch (error) {
+    reportPlaneFailureOnce(deps.log, "drop ride input", error);
+    return undefined;
+  }
+}
+
 /** Protection-window inputs for one pass (config + live DSH context window). */
 export function protectionOptionsFor(deps: ContextPlaneDeps, agent: Agent): DshProtectionOptions {
   let contextWindow: number | undefined;
@@ -788,12 +868,13 @@ export async function runContextPlaneStep(
           // fail-open: legacy rows are inert for the plan; retry next process.
         }
       }
+      const pressureInput = pressureTruncationInputFor(deps, agent);
       const plan = deriveMutationPlan(view, {
         db,
         protection,
         heuristicCleanup: deps.heuristicCleanup,
-        pressureTruncation:
-          deps.config?.pressureTruncation === false ? undefined : pressureTruncationInputFor(deps, agent),
+        pressureTruncation: deps.config?.pressureTruncation === false ? undefined : pressureInput,
+        dropRide: dropRideInputFor(deps, agent, db, canonicalSessionId, pressureInput),
         log: deps.log,
       } satisfies PlanContext);
       // Round 27 C4 (e2e only, inert in production): the Y4 window — tool

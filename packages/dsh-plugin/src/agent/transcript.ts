@@ -82,6 +82,7 @@ import type {
 import type { KnowledgeSessionView } from "./knowledge-gate";
 import { isMagicSource, sessionEvents } from "../compat/dsh-0.1/session";
 import { tokenProtectionWindow, type DshProtectionOptions } from "./protection";
+import { decideDropRide, type DshDropRideInput } from "./drop-gate";
 import {
   deriveEventMessage,
   type SessionEvent,
@@ -191,6 +192,14 @@ export interface PlanContext {
    * this input only allows a new decision on this pass. Absent = replay only.
    */
   readonly pressureTruncation?: PressureTruncationInput;
+  /**
+   * Round 36 line C: the DSH observations core's reclaim-ride permission is
+   * computed from (`agent/drop-gate.ts`). Queued drops (`pending_ops`) are
+   * applied only when `reclaimRidePermitted` allows it, exactly like core's
+   * `shouldApplyPendingOps`. Absent = no ride (queued drops wait; landed
+   * drops still replay every pass).
+   */
+  readonly dropRide?: DshDropRideInput;
   readonly log?: (message: string) => void;
 }
 
@@ -2019,6 +2028,20 @@ export function reownAbsorbedTailToolTags(db: Database, sessionId: string, messa
   return moved;
 }
 
+/** One "deferred" line per (session, queue depth) per process — never one per step. */
+const deferredDropLog = new Map<string, number>();
+function logDeferredDropsOnce(
+  log: ((message: string) => void) | undefined,
+  sessionId: string,
+  depth: number,
+  detail: string,
+): void {
+  if (log === undefined || deferredDropLog.get(sessionId) === depth) return;
+  if (deferredDropLog.size >= 256) deferredDropLog.clear();
+  deferredDropLog.set(sessionId, depth);
+  log(`[magic-context] pending ops deferred — ride=none, pendingOps=${depth}, ${detail}`);
+}
+
 /**
  * Derive a MutationPlan from the view + shared DB state (design §3).
  *
@@ -2026,7 +2049,9 @@ export function reownAbsorbedTailToolTags(db: Database, sessionId: string, messa
  * layer — the view's messages are never mutated):
  *   1. temporal gap markers (idempotent insertion ops);
  *   2. tagTranscript (shared; §N§ prefix injections recorded on parts);
- *   3. applyPendingOperations (shared, recording TagTargets, preloaded reads);
+ *   3. applyPendingOperations (shared, recording TagTargets, preloaded reads)
+ *      — only when core's reclaim ride permits it (round 36 line C,
+ *      `agent/drop-gate.ts`); otherwise queued drops wait;
  *   4. applyFlushedStatuses (every pass; byte-level drop replay);
  *   5. reasoning replay from the clearedReasoningThroughTag watermark.
  *
@@ -2060,14 +2085,38 @@ export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): M
     const preloadedPendingOps = getPendingOps(db, sessionId);
     // Core token-floor window (persisted tool-row mass vs the epoch floor).
     const protection = tokenProtectionWindow(db, sessionId, ctx.protection ?? {});
-    applyPendingOperations(
-      sessionId,
-      db,
-      recordingTargets,
-      protection.protectedTagNumbers,
-      preloadedTags,
-      preloadedPendingOps,
-    );
+    // Round 36 line C: queued drops land only on a pass core would let rewrite
+    // the prefix anyway (reclaimRidePermitted — historian publication, a
+    // rewritten served prefix / first render / cache-TTL idle, force band,
+    // executeReclaim); otherwise they stay queued and the served prefix
+    // stays byte-identical. Landed drops replay below on EVERY pass.
+    if (preloadedPendingOps.length > 0) {
+      const ride = decideDropRide({
+        db,
+        sessionId,
+        input: ctx.dropRide,
+        pendingOps: preloadedPendingOps,
+        tags: preloadedTags,
+        targets: recordingTargets,
+        protectedTagNumbers: protection.protectedTagNumbers,
+      });
+      if (ride.permitted) {
+        ctx.log?.(
+          `[magic-context] pending ops WILL APPLY — reason=${ride.label}, pendingOps=${preloadedPendingOps.length}, ${ride.detail}${ride.unprotectTail ? " (≥95%: tail unprotected)" : ""}`,
+        );
+        applyPendingOperations(
+          sessionId,
+          db,
+          recordingTargets,
+          // Core parity: at ≥ 95 % the protected tail is not protected.
+          ride.unprotectTail ? new Set<number>() : protection.protectedTagNumbers,
+          preloadedTags,
+          preloadedPendingOps,
+        );
+      } else {
+        logDeferredDropsOnce(ctx.log, sessionId, preloadedPendingOps.length, ride.detail);
+      }
+    }
     applyFlushedStatuses(sessionId, db, recordingTargets, preloadedTags);
 
     // Heuristic cleanup (Pi/OpenCode parity): routine dedup + optional caveman

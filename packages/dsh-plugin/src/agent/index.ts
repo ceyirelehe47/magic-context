@@ -564,6 +564,10 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
     host,
     config: config.context,
     directory,
+    // Round 36 line C: the cache-TTL idle-expiry ride uses the same TTL the
+    // knowledge gate's HARD-bust signal uses.
+    cacheTtl: config.knowledge?.cacheTtl,
+    now: config.now,
     isEnabled: liveEnabled,
     historian: {
       config: config.historian,

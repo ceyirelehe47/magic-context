@@ -87,6 +87,8 @@ interface Ctx {
   db: Database;
   session: () => Session;
   step: () => Promise<void>;
+  /** Round 36 line C: later passes run after an idle gap past cache_ttl (core's idle-expiry ride). */
+  idle: () => void;
   restart: () => void;
   tags: () => TagRow[];
   applied: string[];
@@ -98,9 +100,12 @@ async function scenario(fn: (ctx: Ctx) => Promise<void>) {
   try {
     let session = Session.create(SessionId(SID));
     const applied: string[] = [];
+    let nowOffset = 0;
     const deps: ContextPlaneDeps = {
       host: { ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }), canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}` },
       config: {},
+      cacheTtl: "5m",
+      now: () => Date.now() + nowOffset,
       log: (m) => {
         if (m.includes("applied plan")) applied.push(m);
       },
@@ -118,7 +123,7 @@ async function scenario(fn: (ctx: Ctx) => Promise<void>) {
     };
     const tags = () =>
       db.prepare("SELECT tag_number, type, status, message_id FROM tags WHERE session_id = ? ORDER BY tag_number").all(KEY) as TagRow[];
-    await fn({ db, session: () => session, step, restart, tags, applied });
+    await fn({ db, session: () => session, step, restart, tags, applied, idle: () => (nowOffset = 6 * 60_000) });
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });
@@ -215,6 +220,7 @@ describe("long-session tag identity (round 13 B)", () => {
       const targetMsg = msgs.find((t) => t.tag_number < targetTool.tag_number && t.tag_number > tools[0]!.tag_number)!;
       queuePendingOp(ctx.db, KEY, targetTool.tag_number, "drop", Date.now());
       queuePendingOp(ctx.db, KEY, targetMsg.tag_number, "drop", Date.now());
+      ctx.idle(); // round 36 line C: queued drops land on a core reclaim ride
       await ctx.step();
       const after = new Map(ctx.tags().map((t) => [t.tag_number, t.status]));
       expect(after.get(targetTool.tag_number)).toBe("dropped");
