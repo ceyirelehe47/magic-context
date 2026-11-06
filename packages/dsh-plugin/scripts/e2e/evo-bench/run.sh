@@ -18,7 +18,8 @@
 # scored by score.py in a fresh container. Every model request goes through the
 # cache-bench recording proxy (record only; BENCH_ABLATE empty).
 #
-# Env: EVO_RUN_TIMEOUT (per turn, s, default 1800), EVO_COST_CAP (USD at
+# Env: EVO_NET_BLOCK (1 = block code hosts / package indexes in /etc/hosts for the run),
+# EVO_RUN_TIMEOUT (per turn, s, default 1800; SIGKILL 30 s after SIGTERM), EVO_COST_CAP (USD at
 # DeepSeek peak list price; stop starting new turns above it, default 0 = off),
 # EVO_DEADLINE (epoch s; stop starting new turns after it), EVO_SANDBOX
 # (DSH_PERMISSION_MODE for all groups, default danger-full-access: the agent
@@ -30,11 +31,12 @@ source "$HERE/../env.sh"
 GROUP="$1"; LABEL="$2"; OUT="$(mkdir -p "$3" && cd "$3" && pwd)"; TD="$(cd "$4" && pwd)"
 RUN_TIMEOUT="${EVO_RUN_TIMEOUT:-1800}"
 case "$GROUP" in
-  baseline) PROFILE=base; PATCHES=(--patch "$CB/bench-model.yml"); unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
-  fold) PROFILE=test; PATCHES=(--patch "$CB/bench-model.yml" --patch "$CB/bench-plugin.yml"); unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
-  native) PROFILE=test; PATCHES=(--patch "$CB/bench-model.yml" --patch "$CB/bench-plugin.yml"); export MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 ;;
+  baseline) PROFILE=base; PATCHES=(--patch "$HERE/evo-model.yml"); unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
+  fold) PROFILE=test; PATCHES=(--patch "$HERE/evo-model.yml" --patch "$CB/bench-plugin.yml"); unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
+  native) PROFILE=test; PATCHES=(--patch "$HERE/evo-model.yml" --patch "$CB/bench-plugin.yml"); export MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 ;;
   *) echo "group must be baseline|fold|native" >&2; exit 2 ;;
 esac
+PATCHES+=(--patch "$HERE/bench-evo.yml")
 [[ -n "${EVO_BENCH_PATCH:-}" ]] && PATCHES+=(--patch "$EVO_BENCH_PATCH")
 export DSH_PERMISSION_MODE="${EVO_SANDBOX:-danger-full-access}"
 export BENCH_ABLATE=""
@@ -70,7 +72,7 @@ snap add -A >/dev/null 2>&1; snap -c user.name=bench -c user.email=bench@local c
 BASE_SNAP="$(snap rev-parse HEAD)"
 
 # --- test container: the agent's tree mounted at /testbed (its editable install path)
-docker run -d --name "$CT" -v "$WS:/testbed" "$IMG" sleep infinity >/dev/null
+docker run -d --network none --name "$CT" -v "$WS:/testbed" "$IMG" sleep infinity >/dev/null
 cat > "$SCR/bin/evo-pytest" <<WRAP
 #!/usr/bin/env bash
 # pytest in the instance image (conda env "testbed"), run in the matching directory under /testbed
@@ -80,6 +82,17 @@ WRAP
 chmod +x "$SCR/bin/evo-pytest"
 export PATH="$SCR/bin:$PATH"
 (cd "$WS" && timeout 300 evo-pytest --version > "$OUT/evo-pytest-version.txt" 2>&1); echo "evo-pytest: $(tail -n 2 "$OUT/evo-pytest-version.txt" | tr '\n' ' ')"
+
+# --- anti-shortcut network block for the run (the model API goes through the proxy to
+# opencode.ai, which stays reachable). Exact hostnames only; restored on exit.
+BLOCK="github.com api.github.com raw.githubusercontent.com codeload.github.com objects.githubusercontent.com gist.github.com gist.githubusercontent.com pypi.org files.pythonhosted.org pypi.python.org conan.io docs.conan.io center.conan.io datasets-server.huggingface.co gitlab.com bitbucket.org"
+if [[ "${EVO_NET_BLOCK:-1}" == 1 ]]; then
+  sudo cp /etc/hosts "$SCR/hosts.orig"
+  trap 'sudo cp "$SCR/hosts.orig" /etc/hosts' EXIT
+  { echo "# evo-bench block"; for h in $BLOCK; do echo "0.0.0.0 $h"; echo ":: $h"; done; } | sudo tee -a /etc/hosts >/dev/null
+  curl -s -m 5 -o /dev/null -w '%{http_code}' https://api.github.com/ > "$OUT/netblock-check.txt" 2>&1; echo " exit=$?" >> "$OUT/netblock-check.txt"
+  echo "net block: $(cat "$OUT/netblock-check.txt") (api.github.com, expect 000)"
+fi
 
 node "$CB/proxy.mjs" 18731 "$OUT" > "$OUT/proxy.out" 2>&1 &
 PROXY=$!
@@ -105,7 +118,7 @@ for k in $(seq 1 "$NT"); do
   args=(--profile "$PROFILE" "${PATCHES[@]}" "$task" --json)
   [[ -n "$SID" ]] && args+=(--session-id "$SID")
   s=$(date +%s%3N)
-  (cd "$WS" && timeout "$RUN_TIMEOUT" node "$DSH_BIN" "${args[@]}" > "$OUT/$name.log" 2>&1)
+  (cd "$WS" && timeout -k 30 "$RUN_TIMEOUT" node "$DSH_BIN" "${args[@]}" > "$OUT/$name.log" 2>&1)
   rc=$?
   e=$(date +%s%3N)
   [[ -z "$SID" ]] && SID="$(sid_of "$OUT/$name.log")" && echo "$SID" > "$OUT/sid"

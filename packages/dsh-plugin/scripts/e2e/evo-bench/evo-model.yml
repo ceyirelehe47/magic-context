@@ -1,0 +1,38 @@
+# Round 36 line I evo bench (dsh-evo-bench.yml): identical in ALL groups. Same
+# routes as cache-bench/bench-model.yml (recording proxy on 18731 -> OpenCode Go,
+# deepseek-v4.1-flash; the key from OPENCODE_API_KEY), but a 200k MAIN window.
+# Why not cache-bench's 100k: there DSH's native compaction-basic fires at
+# min(0.8w, w-4096-65536) = 30 368 tokens, below a single conan read/test burst;
+# in the pipeline run 42229338110 the baseline compacted 59 times in ~110 main
+# calls and the prompt right after each compaction was back above the trigger
+# (thrash). At 200k native fires at 130 368 (65.2 %) and Magic Context's shipped
+# execute threshold is 65 % (130 000): the same trigger point for both systems.
+- id: llm-pi-ai
+  config:
+    providers:
+      bench:
+        displayName: OpenCode Go via bench proxy (200k, evo main)
+        apiKeyEnv: OPENCODE_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:18731/r/main/zen/go/v1
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: deepseek-v4.1-flash
+            contextWindow: 200000
+            maxTokens: 4096
+      bench-hist:
+        displayName: OpenCode Go via bench proxy (200k, historian)
+        apiKeyEnv: OPENCODE_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:18731/r/hist/zen/go/v1
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: deepseek-v4.1-flash
+            contextWindow: 200000
+            maxTokens: 16384
+- id: agent-default-model
+  config:
+    provider: bench
+    model: deepseek-v4.1-flash

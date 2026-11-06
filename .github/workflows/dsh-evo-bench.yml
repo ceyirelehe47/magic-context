@@ -4,9 +4,9 @@
 #   baseline  profile "base": shipped DSH headless template, no plugin (native compaction)
 #   fold      profile "test": dsh-magic-context from this checkout + `setup` (defaults)
 #   native    same as fold + MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 (round 36 G, plan N)
-# Same DSH, model route (cache-bench/bench-model.yml: deepseek-v4.1-flash via
-# OpenCode Go, 100k main window), requests, workspace, test wrapper and
-# permission mode in every group. Each (group, run) is its own job (6 h cap).
+# Same DSH, model route (evo-bench/evo-model.yml: deepseek-v4.1-flash via
+# OpenCode Go, 200k main window), requests, workspace, test wrapper, permission
+# mode, web tools off (bench-evo.yml) and network block in every group. Each (group, run) is its own job (6 h cap).
 # Manual dispatch only (spends OPENCODE_API_KEY quota). See
 # packages/dsh-plugin/scripts/e2e/evo-bench/ and
 # docs/dsh/e2e/evidence-round36/i-evo-bench.md. New file, DSH branches only.
@@ -40,9 +40,9 @@ on:
         type: string
         default: "3"
       turn_timeout:
-        description: "Per-turn timeout, seconds"
+        description: "Per-turn timeout, seconds (SIGKILL 30 s after SIGTERM)"
         type: string
-        default: "1800"
+        default: "1200"
       extra_patch:
         description: "Optional DSH --patch file (repo path) applied to ALL groups, e.g. a smaller window / threshold; empty = none"
         type: string

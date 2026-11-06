@@ -83,7 +83,8 @@ def main():
                     "The project's test environment is reachable through the command `evo-pytest` (pytest with the project's "
                     "dependencies, run in this directory, e.g. `evo-pytest path/to/test_file.py -x -q`); the full suite is slow, "
                     "so run only the tests relevant to the change. You may add or update tests. "
-                    f"There is no version-control history here; do not try to obtain the {ev} code from elsewhere.\n\n"
+                    f"There is no version-control history here, and network access to code hosts and package indexes is blocked; "
+                    f"do not try to obtain the {ev} code from elsewhere.\n\n"
                     f"Requirement 1 of {len(items)}:\n{it['text']}")
         else:
             head = f"Next requirement for release {ev} ({k + 1} of {len(items)}):\n{it['text']}"

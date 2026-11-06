@@ -1,0 +1,8 @@
+# Round 36 line I evo bench, ALL groups: the DSH web tools are off (web_search /
+# web_fetch would hand the agent the release's PR diffs; the first pipeline run
+# 42229338110 fetched docs.conan.io's changelog and, through bash curl, the
+# GitHub API for PR 13450). Bash-level network to code hosts / package indexes
+# is blocked separately by run.sh (/etc/hosts). Bench-only overlay; product
+# defaults untouched.
+- id: tool-web
+  disabled: true
