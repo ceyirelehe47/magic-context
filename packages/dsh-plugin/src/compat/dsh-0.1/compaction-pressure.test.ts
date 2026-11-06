@@ -252,6 +252,36 @@ describe("nativeBackstopPercentage (user decision 2026-11-03: native at 90 %)", 
   });
 });
 
+// Round 36 line I, S9 (RED, fix pending a user decision — it changes what MC's
+// thresholds mean). compaction-basic caps pressure at window − maxTokens −
+// headroom; the MC main backstop sets headroom 0 and ratio 0.9, so on a route
+// whose request maxTokens is large relative to the window the cap wins:
+// 1M window + maxTokens 384 000 → min(900 000, 616 000) = 616 000 (61.6 %),
+// BELOW MC's 65 % execute threshold (650 000; MC prices pressure against the
+// whole window, reserved output not subtracted) and its 85 % force band — the
+// native backstop compacts before the historian ever fires. (The shipped
+// opencode-go catalog route reserves 0: its 384 000 is applied per request by
+// the adapter, the evo bench logged thresholdPct=90 at 1M; an explicit route
+// maxTokens — e.g. the 200k stress route, thresholdPct 83.6 — reaches the cap.)
+// it.failing: the assertions state the invariant; flip to it() with the fix.
+describe("S9: native backstop vs MC execute threshold on a 1M / 384k route (round 36 line I, RED)", () => {
+  it.failing("1M window, route maxTokens 384 000: no native pressure compaction below MC's 65 % execute threshold", async () => {
+    expect((await probe({ window: 1_000_000, maxTokens: 384_000, pct: 0.62 })).fired).toBe(false);
+    expect((await probe({ window: 1_000_000, maxTokens: 384_000, pct: 0.64 })).fired).toBe(false);
+  });
+
+  it.failing("pressure-policy view: the MC main threshold on 1M / 384k is not below the execute threshold", async () => {
+    const { effectivePressurePolicy, thresholdPercent } = await import("./pressure-policy");
+    const main = effectivePressurePolicy({ auto: true } as never).main;
+    expect(thresholdPercent(1_000_000, 384_000, main)).toBeGreaterThanOrEqual(65);
+  });
+
+  it("control: the same route with maxTokens 32 768 keeps the 90 % backstop (cap 967 232 not reached)", async () => {
+    expect((await probe({ window: 1_000_000, maxTokens: 32_768, pct: 0.64 })).fired).toBe(false);
+    expect((await probe({ window: 1_000_000, maxTokens: 32_768, pct: 0.91 })).fired).toBe(true);
+  });
+});
+
 // Round 21: a background historian pass holds the compartment lease; the 90 %
 // backstop's summarize would hit "lease busy" and close compaction/end with an
 // ERROR. The backstop must skip quietly (no error, accurate status) and the
