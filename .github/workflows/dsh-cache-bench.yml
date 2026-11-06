@@ -30,6 +30,14 @@ on:
         description: "Runs per group (sequential within a group)"
         type: string
         default: "3"
+      ablate_plugin:
+        description: "Round 36 D, diagnosis only: BENCH_ABLATE for the plugin group (comma list: nosys,notools,notags,noreason,fold,pad; see proxy.mjs). Empty = unchanged"
+        type: string
+        default: ""
+      ablate_baseline:
+        description: "Round 36 D, diagnosis only: BENCH_ABLATE for the baseline group (same list). Empty = unchanged"
+        type: string
+        default: ""
       slot:
         description: "Concurrency slot (use cache-*; never the e2e line's slots)"
         type: string
@@ -107,7 +115,9 @@ jobs:
         working-directory: packages/dsh-plugin
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          BENCH_ABLATE: ${{ matrix.mode == 'plugin' && inputs.ablate_plugin || inputs.ablate_baseline }}
         run: |
+          echo "BENCH_ABLATE=${BENCH_ABLATE:-<none>}"
           if [ -z "$OPENCODE_API_KEY" ]; then echo "::error::secret OPENCODE_API_KEY is not set"; exit 1; fi
           mkdir -p "$BENCH_OUT"
           for i in $(seq 1 "${{ inputs.runs }}"); do
