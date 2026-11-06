@@ -83,6 +83,7 @@ import type { KnowledgeSessionView } from "./knowledge-gate";
 import { isMagicSource, sessionEvents } from "../compat/dsh-0.1/session";
 import { tokenProtectionWindow, type DshProtectionOptions } from "./protection";
 import { decideDropRide, type DshDropRideInput } from "./drop-gate";
+import { isNativeRolesSession } from "./tag-scheme";
 import {
   deriveEventMessage,
   type SessionEvent,
@@ -96,6 +97,11 @@ export interface DshTranscriptInput {
     readonly header: { readonly id?: string; readonly cwd?: string };
   };
   readonly canonicalSessionId: string;
+  /**
+   * Round 36 line G: plan-N native-role view (no tool-call fold; per-node
+   * rewrites). Absent = the session's frozen scheme (`agent/tag-scheme.ts`).
+   */
+  readonly nativeRoles?: boolean;
 }
 
 /**
@@ -152,6 +158,12 @@ export interface MutationOp {
   readonly reason: string;
   /** DSH event seqs of every shadowed surface node (sourceEventSeqs coverage). */
   readonly shadowedSeqs: readonly number[];
+  /**
+   * Round 36 line G (native view only): the role of the ONE source node this
+   * op rewrites — `user` (single-node user/message replace) or `tool`
+   * (content-only tool/result replace). Absent on fold-view ops.
+   */
+  readonly role?: "user" | "tool";
 }
 
 export interface MutationPlan {
@@ -308,6 +320,29 @@ function parseToolArguments(raw: unknown): Record<string, unknown> {
  * alone. See {@link textTagContentIdsBySource}.
  */
 const TEXT_PART_ORIGIN = new WeakMap<object, { sourceId: string; blockIndex: number }>();
+
+/**
+ * Round 36 line G (native view only): the ONE surface node a view part came
+ * from — pi-plugin's per-part back-pointer (`transcript-pi.ts`). Ops are
+ * grouped by it and written back per node with the node's own role. Kept in a
+ * WeakMap so the parts (and the view digest) stay byte-identical.
+ */
+export interface DshPartNode {
+  readonly nodeIndex: number;
+  /** Live surface seq (the replace target). */
+  readonly surfaceSeq: number;
+  readonly role: "user" | "assistant" | "tool";
+}
+const PART_NODE = new WeakMap<object, DshPartNode>();
+
+function markPartNodes(parts: readonly unknown[], node: DshPartNode): void {
+  for (const part of parts) if (part !== null && typeof part === "object") PART_NODE.set(part, node);
+}
+
+/** The source node of a native-view part (undefined in the fold view). */
+export function partSourceNode(part: unknown): DshPartNode | undefined {
+  return part !== null && typeof part === "object" ? PART_NODE.get(part) : undefined;
+}
 
 function textPart(text: string, sourceId: unknown, blockIndex: number): Record<string, unknown> {
   const part = { type: "text", text };
@@ -530,6 +565,8 @@ interface DshWalkResult {
   readonly opCopyOrdinals: ReadonlySet<number>;
   readonly ordinalToSeq: Map<number, number>;
   readonly seqToOrdinal: Map<number, number>;
+  /** Native view: live surface seq → the text the model sees now, for rewritten nodes. */
+  readonly nodeTexts: ReadonlyMap<number, string>;
 }
 
 interface WalkEntry {
@@ -598,12 +635,49 @@ function opCopyText(event: EventLike): string | undefined {
 }
 
 /**
+ * Round 36 line G: the original `tool/result` behind a native content
+ * rewrite (single-source `tool/result` replace, followed transitively), or
+ * null when the event is not one. The view keeps core's input stable (original
+ * output, so tags / sizes / drop replay are re-derived the same way every
+ * pass) while the op targets the live node.
+ */
+function expandToolRewrite(event: EventLike, eventBySeq: ReadonlyMap<number, EventLike>): EventLike | null {
+  if (event.type !== "tool/result") return null;
+  let current = event;
+  for (let depth = 0; depth < MAX_OP_COPY_DEPTH; depth += 1) {
+    const shadowed = (current as { sourceEventSeqs?: unknown }).sourceEventSeqs;
+    if (!Array.isArray(shadowed) || shadowed.length !== 1 || typeof shadowed[0] !== "number") break;
+    const source = eventBySeq.get(shadowed[0]);
+    if (source === undefined || source.type !== "tool/result") break;
+    current = source;
+  }
+  return current === event ? null : current;
+}
+
+/** The text a tool/result node shows (text fragments joined like {@link toolResultParts}). */
+function toolNodeText(event: EventLike): string {
+  const message = deriveEventMessage(event as unknown as SessionEvent) as unknown as Record<string, unknown> | null;
+  const parts = message === null ? [] : toolResultParts(message, new Map());
+  const first = parts[0] as { state?: { output?: unknown } } | undefined;
+  return typeof first?.state?.output === "string" ? first.state.output : "";
+}
+
+/**
  * Shared walk. With `surfaceNodes` (surface order iteration) it produces the
  * model-visible messages; with null it walks the whole log in seq order (the
  * pure Pi-mirror conversion). Both keep tool-result folding consistent with
  * their own adjacency notion.
+ *
+ * `native` (round 36 line G, plan N): no tool-call fold. Assistant nodes are
+ * their own messages; a run of tool results becomes one synthetic user
+ * message (pi `transcript-pi.ts` shape) that never absorbs, and is never
+ * absorbed by, a user message; every part remembers its source node.
  */
-function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] | null): DshWalkResult {
+function walkDshLog(
+  events: readonly unknown[],
+  surfaceNodes: readonly number[] | null,
+  native = false,
+): DshWalkResult {
   const eventBySeq = new Map<number, EventLike>();
   const boundaryAfter = new Set<number>();
   const toolNameByCallId = new Map<string, string>();
@@ -635,6 +709,7 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
   // current text is remembered so an op that would re-render the same text
   // is skipped (deriveMutationPlan).
   const ordered: WalkEntry[] = [];
+  const nativeNodeTexts = new Map<number, string>();
   const copyText = new Map<number, string>();
   const expandedCopies = new Set<number>();
   if (surfaceNodes !== null) {
@@ -642,6 +717,14 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
       const surfaceSeq = surfaceNodes[nodeIndex];
       const event = eventBySeq.get(surfaceSeq);
       if (event === undefined) continue;
+      if (native) {
+        const root = expandToolRewrite(event, eventBySeq);
+        if (root !== null) {
+          nativeNodeTexts.set(surfaceSeq, toolNodeText(event));
+          ordered.push({ event: root, nodeIndex, surfaceSeq, boundaryBefore: false });
+          continue;
+        }
+      }
       const expanded = expandOpCopy(event, eventBySeq, 0);
       if (expanded === null) {
         ordered.push({ event, nodeIndex, surfaceSeq, boundaryBefore: false });
@@ -784,6 +867,15 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
     const record = message as unknown as Record<string, unknown>;
     const seq = seqOf(event);
 
+    if (type === "assistant/message" && native) {
+      // Plan N: the assistant node keeps its role (never folded, never written).
+      if (pendingParts.length > 0) flushSynthetic();
+      const parts = assistantParts(record, surfaceNodes !== null, toolNameByCallId);
+      markPartNodes(parts, { nodeIndex, surfaceSeq, role: "assistant" });
+      pushAssistant({ nodeIndex, seq, surfaceSeq, parts, createdAt: timeOf(event) ?? null, id: String(message.id) });
+      continue;
+    }
+
     if (type === "assistant/message") {
       if (pendingParts.length > 0) flushSynthetic();
       const parts = assistantParts(record, surfaceNodes !== null, toolNameByCallId);
@@ -835,6 +927,30 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
       if (seq >= 0) seqToOrdinal.set(seq, ordinal);
       if (surfaceSeq >= 0) seqToOrdinal.set(surfaceSeq, ordinal);
       runtimeContextOrdinals.add(ordinal);
+      continue;
+    }
+
+    if (type === "user/message" && native) {
+      // Plan N: a tool-result run is its own synthetic message; the user
+      // message covers only its own node.
+      if (pendingParts.length > 0) flushSynthetic();
+      const ownParts = userTextParts(record.content, record.id);
+      markPartNodes(ownParts, { nodeIndex, surfaceSeq, role: "user" });
+      const ordinal = messages.length + 1;
+      messages.push({
+        ordinal,
+        id: String(message.id),
+        role: "user",
+        parts: ownParts,
+        createdAt: timeOf(event) ?? null,
+        version: seq >= 0 ? seq : null,
+      });
+      spans.push(surfaceNodes !== null ? { nodeStart: nodeIndex, nodeEnd: nodeIndex + 1, seqs: [surfaceSeq] } : null);
+      ordinalToSeq.set(ordinal, seq);
+      if (seq >= 0) seqToOrdinal.set(seq, ordinal);
+      if (surfaceSeq >= 0) seqToOrdinal.set(surfaceSeq, ordinal);
+      if (isKnowledgeMessage(record)) knowledgeOrdinals.add(ordinal);
+      if (isSkillCatalogMessage(record)) skillCatalogOrdinals.add(ordinal);
       continue;
     }
 
@@ -897,7 +1013,9 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
     }
 
     // tool/result — folded into the next user (or synthetic tail user).
-    pendingParts.push(...toolResultParts(record, toolNameByCallId));
+    const resultParts = toolResultParts(record, toolNameByCallId);
+    if (native) markPartNodes(resultParts, { nodeIndex, surfaceSeq, role: "tool" });
+    pendingParts.push(...resultParts);
     pendingSeqs.push(seq);
     pendingSurfaceSeqs.push(surfaceSeq);
     if (pendingStartIndex === null) pendingStartIndex = nodeIndex;
@@ -924,7 +1042,10 @@ function walkDshLog(events: readonly unknown[], surfaceNodes: readonly number[] 
     const text = copyText.get(span.seqs[0]);
     if (text !== undefined) surfaceTexts.set(messages[i].ordinal, text);
   });
+  const nodeTexts = new Map<number, string>(nativeNodeTexts);
+  if (native) for (const [seq, text] of copyText) nodeTexts.set(seq, text);
   return {
+    nodeTexts,
     surfaceTexts,
     opCopyOrdinals,
     messages,
@@ -1002,7 +1123,8 @@ export function readDshTranscript(input: DshTranscriptInput): DshTranscriptView 
   const nodes = Array.isArray(input.session.surface?.nodes)
     ? [...input.session.surface.nodes]
     : [];
-  const walk = walkDshLog(events, nodes);
+  const native = input.nativeRoles ?? isNativeRolesSession(input.canonicalSessionId);
+  const walk = walkDshLog(events, nodes, native);
 
   for (let i = 0; i < walk.messages.length; i += 1) {
     const message = walk.messages[i];
@@ -1048,7 +1170,7 @@ export function readDshTranscript(input: DshTranscriptInput): DshTranscriptView 
     }
   }
 
-  return {
+  const view: DshTranscriptView = {
     sessionId: input.canonicalSessionId,
     sourceWatermark: maxEventSeq(events),
     inputDigest: sha256Hex(JSON.stringify(walk.messages)).slice(0, 16),
@@ -1059,6 +1181,25 @@ export function readDshTranscript(input: DshTranscriptInput): DshTranscriptView 
     messages: walk.messages,
     surfaceNodes: nodes,
   };
+  if (native) {
+    Object.defineProperty(view, DSH_NATIVE_VIEW_KEY, { value: true, enumerable: false, configurable: true });
+    Object.defineProperty(view, DSH_NODE_TEXTS_KEY, { value: walk.nodeTexts, enumerable: false, configurable: true });
+  }
+  return view;
+}
+
+/** Non-enumerable marker on a plan-N native view (round 36 line G). */
+export const DSH_NATIVE_VIEW_KEY = "__dshNativeRoles";
+const DSH_NODE_TEXTS_KEY = "__dshNodeTexts";
+
+/** True when the view is the plan-N native-role view. */
+export function isNativeView(view: DshTranscriptView): boolean {
+  return (view as unknown as Record<string, unknown>)[DSH_NATIVE_VIEW_KEY] === true;
+}
+
+function nativeNodeTexts(view: DshTranscriptView): ReadonlyMap<number, string> {
+  const value = (view as unknown as Record<string, unknown>)[DSH_NODE_TEXTS_KEY];
+  return value instanceof Map ? (value as ReadonlyMap<number, string>) : new Map();
 }
 
 /* ─────────────────────────── history (native compaction) ─────────────────── */
@@ -1215,7 +1356,11 @@ export function readDshHistory(input: DshTranscriptInput): DshHistoryView {
     }
     if (Number.isFinite(first)) standInOrdinals.set(standIn.seq, { first, last });
   }
-  return { ...view, surfaceNodes: surface, standInOrdinals };
+  const history: DshHistoryView = { ...view, surfaceNodes: surface, standInOrdinals };
+  if (isNativeView(view)) {
+    Object.defineProperty(history, DSH_NATIVE_VIEW_KEY, { value: true, enumerable: false, configurable: true });
+  }
+  return history;
 }
 
 function maxEventSeq(events: readonly unknown[]): number {
@@ -1274,6 +1419,14 @@ export class RecordingPart implements TranscriptPart {
   readonly kind: TranscriptPartKind;
   readonly id: string | undefined;
   readonly partIndex: number;
+  /** Native view (round 36 line G): the surface node this part writes back to. */
+  readonly source: DshPartNode | undefined;
+  /**
+   * Native view: an assistant-node part. DSH cannot replace an assistant node,
+   * so every setter refuses (returns false) — core then picks skeleton_real
+   * for drops by itself (no `remove`), and tool_use input is never rewritten.
+   */
+  readonly readOnly: boolean;
   private readonly owner: RecordingMessage;
   private readonly raw: Record<string, unknown>;
   private readonly toolName: string | undefined;
@@ -1281,16 +1434,31 @@ export class RecordingPart implements TranscriptPart {
   private payload: string | undefined;
   private input: Record<string, unknown> | null;
 
-  constructor(owner: RecordingMessage, partIndex: number, raw: unknown) {
+  constructor(owner: RecordingMessage, partIndex: number, raw: unknown, native = false) {
     this.owner = owner;
     this.partIndex = partIndex;
     this.raw = isRecord(raw) ? raw : {};
-    this.kind = classifyRecordingPart(this.raw);
+    this.source = native ? partSourceNode(raw) : undefined;
+    this.readOnly = native && this.source?.role === "assistant";
+    const kind = classifyRecordingPart(this.raw);
+    // Native view: assistant text is not taggable (no §N§, no tag row): it
+    // can never be written back, so a tag would be an inert number the model
+    // could only waste a ctx_reduce on.
+    this.kind = this.readOnly && kind === "text" ? "structural" : kind;
     this.callId = typeof this.raw.callID === "string" ? this.raw.callID : undefined;
     this.toolName = typeof this.raw.tool === "string" ? this.raw.tool : undefined;
     this.id = this.callId;
     this.input = this.readInputState();
     this.payload = this.initPayload();
+    this.initialPayload = this.payload;
+  }
+
+  /** The payload before any recorded mutation (native per-node no-op check). */
+  readonly initialPayload: string | undefined;
+
+  /** True when a mutation was recorded on this part. */
+  isMutated(): boolean {
+    return this.owner.mutations.some((record) => record.partIndex === this.partIndex);
   }
 
   private readInputState(): Record<string, unknown> | null {
@@ -1331,6 +1499,7 @@ export class RecordingPart implements TranscriptPart {
   }
 
   setText(newText: string): boolean {
+    if (this.readOnly) return false;
     if (newText === this.payload) return false;
     const from = this.payload ?? "";
     this.payload = newText;
@@ -1339,6 +1508,7 @@ export class RecordingPart implements TranscriptPart {
   }
 
   setToolOutput(newText: string): boolean {
+    if (this.readOnly) return false;
     if (newText === this.payload) return false;
     const from = this.payload ?? "";
     this.payload = newText;
@@ -1351,6 +1521,7 @@ export class RecordingPart implements TranscriptPart {
   }
 
   setToolInput(input: Record<string, unknown>): boolean {
+    if (this.readOnly) return false;
     if (input === this.input) return false;
     const from = JSON.stringify(this.input ?? {});
     this.input = input;
@@ -1374,6 +1545,7 @@ export class RecordingPart implements TranscriptPart {
   }
 
   replaceWithSentinel(sentinelText: string): boolean {
+    if (this.readOnly) return false;
     if (this.payload === sentinelText) return false;
     const from = this.payload ?? "";
     this.payload = sentinelText;
@@ -1541,8 +1713,8 @@ export class RecordingMessage implements TranscriptMessage {
     this.span = span;
   }
 
-  addPart(raw: unknown): RecordingPart {
-    const part = new RecordingPart(this, this.parts.length, raw);
+  addPart(raw: unknown, native = false): RecordingPart {
+    const part = new RecordingPart(this, this.parts.length, raw, native);
     this.parts.push(part);
     return part;
   }
@@ -1552,9 +1724,9 @@ export class RecordingMessage implements TranscriptMessage {
   }
 
   /** Coalesced op kind: the "worst" of this message's mutations (drops > reasoning > tags). */
-  opKind(): MutationKind {
+  opKind(records: readonly MutationRecord[] = this.mutations): MutationKind {
     if (
-      this.mutations.some(
+      records.some(
         (record) =>
           record.field === "sentinel" ||
           record.field === "output" ||
@@ -1564,14 +1736,14 @@ export class RecordingMessage implements TranscriptMessage {
     ) {
       return "drops";
     }
-    if (this.mutations.some((record) => record.field === "reasoning")) return "reasoning";
+    if (records.some((record) => record.field === "reasoning")) return "reasoning";
     return "tags";
   }
 
   /** Deterministic human-readable reason for the coalesced op. */
-  reason(): string {
+  reason(records: readonly MutationRecord[] = this.mutations): string {
     const parts: string[] = [];
-    for (const record of this.mutations) {
+    for (const record of records) {
       if (record.field === "sentinel") {
         parts.push(`drop → ${record.to}`);
       } else if (record.field === "reasoning") {
@@ -1686,6 +1858,7 @@ export class RecordingTagTarget implements TagTarget {
 
 function buildRecordingTranscript(
   view: DshTranscriptView,
+  native = false,
 ): {
   transcript: RecordingTranscript;
   byMessageId: Map<string, RecordingMessage>;
@@ -1714,7 +1887,7 @@ function buildRecordingTranscript(
       { id: raw.id, role: raw.role, sessionId: view.sessionId },
       messageNodeSpan(raw),
     );
-    for (const part of raw.parts) message.addPart(part);
+    for (const part of raw.parts) message.addPart(part, native);
     messages.push(message);
     rawByRecording.set(message, raw);
     if (typeof raw.id === "string") byMessageId.set(raw.id, message);
@@ -1733,6 +1906,8 @@ function buildRecordingTranscript(
  * text). Returns 0 when the view does not end in a synthetic tail.
  */
 export function pendingFoldTextCount(view: DshTranscriptView): number {
+  // Plan N: nothing is ever absorbed by the next user message.
+  if (isNativeView(view)) return 0;
   const last = view.messages[view.messages.length - 1];
   if (last === undefined || !isSyntheticUserMessage(last) || isOpCopyBackedMessage(last)) return 0;
   let n = 0;
@@ -1742,6 +1917,7 @@ export function pendingFoldTextCount(view: DshTranscriptView): number {
 
 /** True when the view ends in a synthetic tail (pending tool results). */
 export function endsInPendingFold(view: DshTranscriptView): boolean {
+  if (isNativeView(view)) return false;
   const last = view.messages[view.messages.length - 1];
   // A synthetic tail rebuilt from an op copy is closed (copy boundary): the
   // next user message does not absorb it.
@@ -1764,7 +1940,10 @@ export function textTagContentIdsBySource(
   view: DshTranscriptView,
 ): Map<string, Map<number, string>> {
   const out = new Map<string, Map<number, string>>();
+  const native = isNativeView(view);
   for (const raw of view.messages) {
+    // Plan N: assistant text is never tagged (no key to look up).
+    if (native && raw.role === "assistant") continue;
     if (isKnowledgeBaselineMessage(raw)) continue;
     if (isSkillCatalogBaselineMessage(raw)) continue;
     if (isRuntimeContextBaselineMessage(raw)) continue;
@@ -1828,6 +2007,7 @@ function baselineNodeIndices(view: DshTranscriptView): number[] {
  */
 function planTemporalMarkers(view: DshTranscriptView): MutationOp[] {
   const ops: MutationOp[] = [];
+  const native = isNativeView(view);
   const baseline = baselineNodeIndices(view);
   let prev: RawMessage | null = null;
   for (const message of view.messages) {
@@ -1857,6 +2037,7 @@ function planTemporalMarkers(view: DshTranscriptView): MutationOp[] {
               ),
               reason: `temporal gap ${formatGap(gapSeconds) ?? "?"}`,
               shadowedSeqs: [],
+              ...(native ? { role: "user" as const } : {}),
             });
           }
         }
@@ -2043,6 +2224,83 @@ function logDeferredDropsOnce(
 }
 
 /**
+ * Round 36 line G (plan N, pi `transcript-pi.ts` commit model): one op per
+ * dirty SOURCE node, with that node's role.
+ *   - tool node → `role: "tool"`, replacement = the result part's new output
+ *     (the coordinator writes it as a content-only tool/result replace);
+ *   - user node → `role: "user"`, replacement = the node's text parts;
+ *   - assistant node → never (its parts refuse every write; a record that
+ *     still lands there is dropped and counted in the log).
+ * A node whose new text equals what the surface shows now is skipped (no
+ * cache bust, no event): the view reads rewritten nodes back as their
+ * originals, so this check is what makes replay idempotent.
+ */
+function planNativeNodeOps(
+  transcript: RecordingTranscript,
+  view: DshTranscriptView,
+  baseline: readonly number[],
+  log: ((message: string) => void) | undefined,
+): MutationOp[] {
+  const current = nativeNodeTexts(view);
+  const ops: MutationOp[] = [];
+  let refused = 0;
+  for (const message of transcript.messages) {
+    if (!message.isDirty()) continue;
+    const groups = new Map<number, { node: DshPartNode; parts: RecordingPart[] }>();
+    for (const part of message.parts) {
+      const node = part.source;
+      if (node === undefined) continue;
+      const group = groups.get(node.surfaceSeq) ?? { node, parts: [] };
+      group.parts.push(part);
+      groups.set(node.surfaceSeq, group);
+    }
+    for (const { node, parts } of groups.values()) {
+      const indices = new Set(parts.map((part) => part.partIndex));
+      const records = message.mutations.filter((record) => indices.has(record.partIndex));
+      if (records.length === 0) continue;
+      if (node.role === "assistant") {
+        refused += 1;
+        continue;
+      }
+      let replacement: string;
+      let before: string;
+      if (node.role === "tool") {
+        const part = parts.find((p) => p.kind === "tool_result" || p.kind === "structural");
+        if (part === undefined) continue;
+        replacement = part.getText() ?? "";
+        before = part.initialPayload ?? "";
+      } else {
+        replacement = parts
+          .map((p) => p.render())
+          .filter((v): v is string => typeof v === "string" && v.length > 0)
+          .join("\n\n");
+        before = parts
+          .map((p) => (p.kind === "text" ? (p.initialPayload ?? "") : ""))
+          .filter((v) => v.length > 0)
+          .join("\n\n");
+      }
+      if (replacement === (current.get(node.surfaceSeq) ?? before)) continue;
+      ops.push({
+        kind: message.opKind(records),
+        start: node.nodeIndex,
+        end: node.nodeIndex + 1,
+        replacement,
+        cacheClass: minimalCacheClassForOp(
+          { start: node.nodeIndex, end: node.nodeIndex + 1 },
+          view.surfaceNodes.length,
+          baseline,
+        ),
+        reason: message.reason(records),
+        shadowedSeqs: [node.surfaceSeq],
+        role: node.role === "tool" ? "tool" : "user",
+      });
+    }
+  }
+  if (refused > 0) log?.(`[magic-context] native roles: ${refused} assistant-node rewrite(s) refused (assistant nodes are read-only)`);
+  return ops;
+}
+
+/**
  * Derive a MutationPlan from the view + shared DB state (design §3).
  *
  * Pipeline (this slice: stages 1-5 of §9.10, all through the recording
@@ -2064,8 +2322,9 @@ export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): M
   const sessionId = view.sessionId;
 
   const ops: MutationOp[] = [...planTemporalMarkers(view)];
+  const native = isNativeView(view);
 
-  const { transcript, byMessageId, rawByRecording } = buildRecordingTranscript(view);
+  const { transcript, byMessageId, rawByRecording } = buildRecordingTranscript(view, native);
   if (transcript.messages.length > 0) {
     reownAbsorbedTailToolTags(db, sessionId, view.messages);
     const tagger = createTagger();
@@ -2172,10 +2431,12 @@ export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): M
       );
     }
 
-    planReasoningReplay(view, byMessageId, recordingTargets, db);
+    // Plan N: reasoning lives on assistant nodes, which are never written.
+    if (!native) planReasoningReplay(view, byMessageId, recordingTargets, db);
 
     const baseline = baselineNodeIndices(view);
-    for (const message of transcript.messages) {
+    if (native) ops.push(...planNativeNodeOps(transcript, view, baseline, ctx.log));
+    for (const message of native ? [] : transcript.messages) {
       if (!message.isDirty()) continue;
       const span = message.span;
       if (span === null || span.seqs.length === 0) continue; // no surface coverage

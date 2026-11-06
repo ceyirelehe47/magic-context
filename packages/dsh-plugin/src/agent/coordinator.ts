@@ -30,9 +30,12 @@ import { randomUUID } from "node:crypto";
 import { e2eCrashPoint } from "./e2e-hooks";
 import type { Session } from "@deepseek-ai/dsh-session";
 import {
+  appendNodePrune,
   deriveEventMessage,
   magicUserMessage,
   replaceSurfaceRange,
+  replaceToolResultContent,
+  replaceUserNode,
   sessionEventAt,
   sessionEvents,
 } from "../compat/dsh-0.1/session";
@@ -157,17 +160,43 @@ export function applyPlanOps(
         `magic-context: plan op [${op.start}, ${op.end}) shadowedSeqs ${JSON.stringify(actual)} does not cover the live surface nodes ${JSON.stringify(expected)}`,
       );
     }
-    const message = magicUserMessage(op.replacement, {
-      kind: "magic-context",
-      plugin: "magic-context",
-      messageId: `mc-op:${plan.opId}`,
-      revision: String(plan.generation),
-      digest: plan.inputDigest,
-    });
+    if (op.role !== undefined) {
+      // Round 36 line G (plan N): one source node, its own role, preceded by
+      // the node's compaction/prune shadow price (token-meter re-prices).
+      if (op.end - op.start !== 1 || op.shadowedSeqs.length !== 1) {
+        throw new Error(`magic-context: native op [${op.start}, ${op.end}) must cover exactly one node`);
+      }
+      const nodeEvent = sessionEventAt(session, startSeq);
+      const nodeType = (nodeEvent as { type?: unknown } | undefined)?.type;
+      if (op.role === "tool") {
+        if (nodeType !== "tool/result") {
+          throw new Error(`magic-context: native tool op targets a ${String(nodeType)} node (seq ${startSeq})`);
+        }
+        ackSeq = replaceToolResultContent(session, startSeq, op.replacement);
+        continue;
+      }
+      if (nodeType !== "user/message") {
+        throw new Error(`magic-context: native user op targets a ${String(nodeType)} node (seq ${startSeq})`);
+      }
+      ackSeq = replaceUserNode(session, startSeq, opCopyMessage(op.replacement, plan));
+      continue;
+    }
+    const message = opCopyMessage(op.replacement, plan);
     ackSeq = replaceSurfaceRange(session, startSeq, endSeq, message, op.shadowedSeqs);
     void db;
   }
   return { ackSeq };
+}
+
+/** The Magic op copy written for one op (`mc-op:<opId>` source). */
+function opCopyMessage(text: string, plan: MutationPlan) {
+  return magicUserMessage(text, {
+    kind: "magic-context",
+    plugin: "magic-context",
+    messageId: `mc-op:${plan.opId}`,
+    revision: String(plan.generation),
+    digest: plan.inputDigest,
+  });
 }
 
 /** Merge a temporal marker into the node at `start` (prepend). */
@@ -198,6 +227,8 @@ function applyInsertionMerge(
     revision: String(plan.generation),
     digest: plan.inputDigest,
   });
+  // Plan N: every replace carries its shadow price.
+  if (op.role !== undefined) appendNodePrune(session, nodeSeq);
   return replaceSurfaceRange(session, nodeSeq, nodeSeq, message, [nodeSeq]);
 }
 

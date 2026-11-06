@@ -57,6 +57,7 @@ import type { Database } from "@magic-context/core/shared/sqlite";
 import type { ProtectedTokensTierOverrides } from "@magic-context/core/config/project-security";
 import { resolveDshProtectionFloor, type DshProtectionOptions } from "./protection";
 import { e2eCrashPoint } from "./e2e-hooks";
+import { isFreshMagicSession, nativeRolesRequested, resolveSessionTagScheme } from "./tag-scheme";
 import {
   dshSummaryCanCome,
   isCacheIdleExpired,
@@ -92,6 +93,14 @@ export interface ContextPlaneConfig {
    * keep replaying so the surface does not flip back and bust the cache).
    */
   pressureTruncation?: boolean;
+  /**
+   * Round 36 line G (plan N): native-role view for NEW sessions — no
+   * tool-call fold, per-node rewrites (tool/result content replace, user
+   * replace, each with a compaction/prune shadow price), assistant nodes never
+   * written or tagged. Default off; unset = env `MAGIC_CONTEXT_DSH_NATIVE_ROLES`.
+   * Frozen per session at its first pass (`agent/tag-scheme.ts`).
+   */
+  nativeRoles?: boolean;
 }
 
 /** Historian background-pass plane (Phase 4): trigger + fire. */
@@ -455,6 +464,7 @@ export function previewTagPayloadMessages(
   messages: readonly unknown[],
   contentIdsBySource: ReadonlyMap<string, ReadonlyMap<number, string>>,
   tail: PendingTailFold = { pending: false, textCount: 0 },
+  nativeRoles = false,
 ): void {
   try {
     const tagger = createTagger();
@@ -479,7 +489,8 @@ export function previewTagPayloadMessages(
       const sourceKind = msg.source?.kind;
       const content = Array.isArray(msg.content) ? msg.content : [];
       const hasToolCall = content.some((part) => part !== null && typeof part === "object" && part.type === "tool-call");
-      const ordinalOffset = foldPending ? foldTextCount : 0;
+      // Plan N: no message ever absorbs another's text, so no offset.
+      const ordinalOffset = foldPending && !nativeRoles ? foldTextCount : 0;
       if (msg.role === "assistant") {
         foldPending = hasToolCall;
         foldTextCount = hasToolCall
@@ -844,6 +855,12 @@ export async function runContextPlaneStep(
     let agentDropsApplied = false;
 
     if (deps.config?.enabled !== false) {
+      // Round 36 line G: freeze / read this session's view scheme first; every
+      // reader of the session's view (incl. the coordinator CAS) follows it.
+      const nativeRoles =
+        resolveSessionTagScheme(db, canonicalSessionId, nativeRolesRequested(deps.config?.nativeRoles), () =>
+          isFreshMagicSession(db, canonicalSessionId, sessionEvents(agent.session)),
+        ) === "native";
       const view = readDshTranscript({
         session: {
           events: sessionEvents(agent.session),
@@ -900,7 +917,8 @@ export async function runContextPlaneStep(
         canonicalSessionId,
         payload.messages,
         contentIdsBySource,
-        tailFoldAfterPass(agent, canonicalSessionId, view, plan !== null),
+        nativeRoles ? { pending: false, textCount: 0 } : tailFoldAfterPass(agent, canonicalSessionId, view, plan !== null),
+        nativeRoles,
       );
     }
 

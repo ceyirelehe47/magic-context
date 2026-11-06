@@ -25,6 +25,7 @@ import {
   deriveEventMessage,
   foldSurface,
 } from "@deepseek-ai/dsh-session/surface";
+import TokenMeter from "@deepseek-ai/dsh-token-meter";
 
 export {
   createAssistantMessage,
@@ -190,4 +191,94 @@ export function surfaceNodes(session: Session): readonly number[] {
 /** Current surface generation (CAS guard). */
 export function surfaceGeneration(session: Session): number {
   return session.surface.replaceGeneration;
+}
+
+/* ───────────── round 36 line G (plan N): native per-node rewrites ───────────── */
+
+/**
+ * Price of one model-visible message under DSH token-meter's FIXED heuristic
+ * (`estimateMessage`, the estimator the meter prices appends with). The
+ * `compaction/prune` shadow price must use it, or the meter's O(1) fold
+ * drifts. Fallback (meter package absent): 4 chars/token over the JSON.
+ */
+export function meterEstimateMessage(message: unknown): number {
+  try {
+    const proto = (TokenMeter as unknown as { prototype?: { estimateMessage?: (m: unknown) => unknown } }).prototype;
+    const value = proto?.estimateMessage?.call(undefined, message);
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+  } catch {
+    // fall through
+  }
+  return Math.ceil(JSON.stringify(message ?? null).length / 4);
+}
+
+/**
+ * Append the `compaction/prune` shadow-price event for ONE surface node. It
+ * must be immediately followed by the replace of exactly that node (the
+ * token-meter consumes the claim on the very next event).
+ */
+export function appendNodePrune(session: Session, seq: number): void {
+  const event = sessionEventAt(session, seq);
+  if (event === undefined) throw new Error(`magic-context: prune of missing event seq ${seq}`);
+  const message = deriveEventMessage(event);
+  (session.append as unknown as (type: string, data: unknown) => unknown).call(
+    session,
+    "compaction/prune",
+    {
+      shadowedRange: { start: SessionSeq(seq), end: SessionSeq(seq) },
+      shadowedSeqs: [SessionSeq(seq)],
+      shadowedTokenCount: message === null ? 0 : meterEstimateMessage(message),
+    },
+  );
+}
+
+/**
+ * Plan N: replace the CONTENT of one current `tool/result` node in place
+ * (DSH `assertToolResultRewrite`: exactly one current tool/result node, data
+ * deep-equal except `message.content` — callId, isError, turn and step are
+ * kept, so the assistant `tool_calls` pairing is untouched). The first text
+ * block takes `text`, later text blocks are removed (the view joins them with
+ * "\n"), non-text blocks stay. Preceded by the node's `compaction/prune`.
+ * Returns the replacement's seq.
+ */
+export function replaceToolResultContent(session: Session, seq: number, text: string): number {
+  const event = sessionEventAt(session, seq) as unknown as
+    | { type: string; data: { message: { content?: unknown } } & Record<string, unknown> }
+    | undefined;
+  if (event?.type !== "tool/result") throw new Error(`magic-context: seq ${seq} is not a tool/result node`);
+  const original = Array.isArray(event.data.message.content) ? (event.data.message.content as unknown[]) : [];
+  if (original.some((b) => b !== null && typeof b === "object" && (b as { type?: unknown }).type === "tool-result")) {
+    throw new Error(`magic-context: seq ${seq} carries a legacy tool-result wrapper; native rewrite refused`);
+  }
+  const content: unknown[] = [];
+  let placed = false;
+  for (const block of original) {
+    const isText = block !== null && typeof block === "object" && (block as { type?: unknown }).type === "text";
+    if (!isText) {
+      content.push(block);
+      continue;
+    }
+    if (placed) continue;
+    content.push({ ...(block as object), text });
+    placed = true;
+  }
+  if (!placed) content.unshift(textBlock(text));
+  appendNodePrune(session, seq);
+  return session.append(
+    "tool/result",
+    { ...event.data, message: { ...event.data.message, content } } as never,
+    {
+      surfaceOp: { op: "replace", startSeq: SessionSeq(seq), endSeq: SessionSeq(seq) },
+      sourceEventSeqs: [SessionSeq(seq)],
+    },
+  ).seq;
+}
+
+/**
+ * Plan N: replace one current `user/message` node with a Magic copy, preceded
+ * by the node's `compaction/prune`. Returns the replacement's seq.
+ */
+export function replaceUserNode(session: Session, seq: number, message: UserMessage): number {
+  appendNodePrune(session, seq);
+  return replaceSurfaceRange(session, seq, seq, message, [seq]);
 }
