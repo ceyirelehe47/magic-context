@@ -149,6 +149,11 @@ export interface ContextPlaneDeps {
       readonly provider: RawMessageProvider;
       /** Resolved model context window (drives the historian chunk budget). */
       readonly contextWindow?: number;
+      /**
+       * The DSH session id for the historian request's routing metadata
+       * (`GenerateOptions.sessionId`, compaction-basic parity; round 36 I1).
+       */
+      readonly routeSessionId?: string;
     }) => void;
     /** In-flight pass tracker (turn-end await + unload drain). */
     readonly drain?: HistorianDrain;
@@ -418,6 +423,7 @@ function maybeFireHistorian(
         directory,
         provider: historyContentProvider(agent as unknown as Agent, sessionId),
         contextWindow,
+        ...(dshSessionIdOf(agent) !== undefined ? { routeSessionId: dshSessionIdOf(agent) } : {}),
       });
     }
   } catch (error) {
@@ -1068,4 +1074,10 @@ function registerHistorianTurnEndAwait(
     if (awaitMs <= 0) return;
     await awaitHistorianAtTurnEnd(deps, payload.agent, awaitMs);
   });
+}
+
+/** The DSH session id the loop stamps on its own requests (`agent.session.id`). */
+function dshSessionIdOf(agent: unknown): string | undefined {
+  const id = (agent as { session?: { id?: unknown } } | undefined)?.session?.id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
 }

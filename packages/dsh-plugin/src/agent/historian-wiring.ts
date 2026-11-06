@@ -186,6 +186,13 @@ function currentRoute(ctx: Context): { provider: string; model: string } {
 export function createLlmSummarizeCall(
   ctx: Context,
   modelOverrideSource?: string | (() => string | undefined),
+  /**
+   * The DSH session id (`agent.session.id`) the request is routed under —
+   * compaction-basic parity (`sessionId` + `purpose: "compaction"`). Without it
+   * the shipped opencode-go route rejects the call with HTTP 400 MissingSessionID
+   * (no x-opencode-session; round 36 I1).
+   */
+  routeSessionId?: string,
 ): DshSummarizeCall {
   const llm = readLlm(ctx);
   if (llm === undefined) {
@@ -230,6 +237,7 @@ export function createLlmSummarizeCall(
       messages: [user],
       purpose: "compaction",
       signal,
+      ...(routeSessionId !== undefined ? { sessionId: routeSessionId as never } : {}),
     })) {
       if (streamChunk.type === "text-delta") text += streamChunk.text;
       if (streamChunk.type === "reasoning-delta") reasoningChars += streamChunk.text.length;
@@ -392,7 +400,6 @@ export function registerMagicHistorianPlane(
   ctx: Context,
   deps: MagicHistorianWiringDeps,
 ): void {
-  const summarize = createLlmSummarizeCall(ctx, deps.model);
   const log = deps.log ?? (() => {});
 
   const wrapper: MagicSummarizeHook = async (input, agent, signal) => {
@@ -406,6 +413,12 @@ export function registerMagicHistorianPlane(
       );
     }
     const sessionId = deps.host.canonicalKey(a.id);
+    const routeSessionId = (a as { session?: { id?: unknown } }).session?.id;
+    const summarize = createLlmSummarizeCall(
+      ctx,
+      deps.model,
+      typeof routeSessionId === "string" && routeSessionId.length > 0 ? routeSessionId : undefined,
+    );
     const bootstrap = await deps.host.ready;
     if (bootstrap.kind !== "ok") {
       throw new Error(

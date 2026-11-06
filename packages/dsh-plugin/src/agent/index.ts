@@ -575,7 +575,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
       // Explicit row thresholds (tests/presets) win; otherwise the core
       // resolver over jsonc + DSH overlay picks the per-model value.
       resolveExecuteThreshold,
-      fire: ({ db, sessionId, directory: fireDirectory, provider, contextWindow }) => {
+      fire: ({ db, sessionId, directory: fireDirectory, provider, contextWindow, routeSessionId }) => {
         // Fire-and-forget: the pass publishes atomically and only signals
         // deferred work; it must never block the pre-step chain.
         const pass = runDshHistorian({
@@ -583,7 +583,7 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
           sessionId,
           directory: fireDirectory,
           provider,
-          summarize: createLlmSummarizeCall(ctx, historianModel),
+          summarize: createLlmSummarizeCall(ctx, historianModel, routeSessionId),
           model: currentModel(ctx),
           currentContextLimit: contextWindow,
           onPublished: () => {
