@@ -7,6 +7,8 @@
 # calls and the prompt right after each compaction was back above the trigger
 # (thrash). At 200k native fires at 130 368 (65.2 %) and Magic Context's shipped
 # execute threshold is 65 % (130 000): the same trigger point for both systems.
+# maxTokens 32768 (cache-bench: 4096): in smoke 42235538885 every fold turn ended
+# with turn_end reason max-tokens after a 4096-token reasoning step (rc 1, no edits).
 - id: llm-pi-ai
   config:
     providers:
@@ -20,7 +22,7 @@
         models:
           - id: deepseek-v4.1-flash
             contextWindow: 200000
-            maxTokens: 4096
+            maxTokens: 32768
       bench-hist:
         displayName: OpenCode Go via bench proxy (200k, historian)
         apiKeyEnv: OPENCODE_API_KEY

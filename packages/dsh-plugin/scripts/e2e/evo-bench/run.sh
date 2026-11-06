@@ -15,7 +15,7 @@
 # instance image with that copy mounted at /testbed. After every turn the tree
 # is snapshotted in a git dir OUTSIDE the workspace and the cumulative source
 # diff is saved (patches/turn-NN.patch). At the end the last cumulative patch is
-# scored by score.py in a fresh container. Every model request goes through the
+# scored by score.py in a fresh container (a separate workflow step). Every model request goes through the
 # cache-bench recording proxy (record only; BENCH_ABLATE empty).
 #
 # Env: EVO_NET_BLOCK (1 = block code hosts / package indexes in /etc/hosts for the run),
@@ -143,5 +143,8 @@ json.dump(m, open(sys.argv[1], "w"))
 PY
 LAST="$(ls "$OUT"/patches/turn-*.patch 2>/dev/null | tail -n 1)"
 cp "${LAST:-/dev/null}" "$OUT/final.patch"
-python3 "$HERE/score.py" "$TD" "$OUT/final.patch" "$OUT/score" --label "$GROUP-$LABEL"
+# Scoring needs the release's test_patch, which must not sit on the agent's machine during
+# the run: the workflow re-fetches the task after this script and runs score.py
+# (EVO_SCORE_TASK lets a local caller score here).
+[[ -n "${EVO_SCORE_TASK:-}" ]] && python3 "$HERE/score.py" "$EVO_SCORE_TASK" "$OUT/final.patch" "$OUT/score" --label "$GROUP-$LABEL"
 echo "[evo $GROUP $LABEL] stop=$STOP requests=$(wc -l < "$OUT/requests.jsonl" 2>/dev/null || echo 0)"

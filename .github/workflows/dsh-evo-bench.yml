@@ -146,7 +146,9 @@ jobs:
         working-directory: packages/dsh-plugin/scripts/e2e/evo-bench
         run: |
           python3 prepare.py "${{ inputs.transition }}" "$RUNNER_TEMP/evo-task" --max-items "${{ inputs.max_items }}"
-          rm -f "$RUNNER_TEMP/evo-task/gold.patch"   # the answer never sits on the agent's machine
+          # the answer and the release tests never sit on the agent's machine during the run
+          # (re-fetched for the Score step after the run)
+          rm -f "$RUNNER_TEMP"/evo-task/{gold.patch,test.patch,tests.json,items.json}
           docker pull -q "$(jq -r .image "$RUNNER_TEMP/evo-task/instance.json")"
 
       - name: Bootstrap (filtered install + local DSH ${{ env.DSH_VERSION }})
@@ -189,12 +191,20 @@ jobs:
           [ -n "$EXTRA" ] && export EVO_BENCH_PATCH="$GITHUB_WORKSPACE/$EXTRA"
           E2E_XDG_DATA_HOME="$E2E_ROOT/xdg/data-evo" bash scripts/e2e/evo-bench/run.sh "${{ matrix.group }}" "run${{ matrix.run }}" "$BENCH_OUT" "$RUNNER_TEMP/evo-task"
 
+      - name: Score (final cumulative source patch, fresh container)
+        if: always()
+        working-directory: packages/dsh-plugin/scripts/e2e/evo-bench
+        run: |
+          [ -f "$BENCH_OUT/final.patch" ] || { echo "::error::no final.patch"; exit 1; }
+          python3 prepare.py "${{ inputs.transition }}" "$RUNNER_TEMP/evo-score-task" --max-items "${{ inputs.max_items }}"
+          python3 score.py "$RUNNER_TEMP/evo-score-task" "$BENCH_OUT/final.patch" "$BENCH_OUT/score" --label "${{ matrix.group }}-run${{ matrix.run }}"
+
       - name: Analyze + redact
         if: always()
         working-directory: packages/dsh-plugin
         run: |
           mkdir -p "$BENCH_OUT"
-          cp "$RUNNER_TEMP"/evo-task/{instance,items,requests,tests}.json "$BENCH_OUT/" 2>/dev/null || true
+          cp "$RUNNER_TEMP"/evo-score-task/{instance,items,requests,tests}.json "$BENCH_OUT/" 2>/dev/null || true
           python3 scripts/e2e/evo-bench/analyze.py "$BENCH_OUT/summary.md" "$BENCH_OUT" || true
           python3 scripts/e2e/ci-check.py redact "$BENCH_OUT"
           # request bodies (~600 per run) packed AFTER the text redaction (a binary file must not be rewritten)

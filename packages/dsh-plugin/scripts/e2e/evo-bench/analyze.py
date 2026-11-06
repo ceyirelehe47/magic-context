@@ -124,11 +124,21 @@ def run_stats(rd, gold=None):
     na, nex = net_attempts(rd)
     comp_ev = sum(1 for e in sess if e.get("type") == "compaction/start")
     turn_ms = sum(t.get("ms", 0) for t in turns)
+    ends = {}
+    for f in sorted(os.listdir(rd)):
+        if f.startswith("turn-") and f.endswith(".log"):
+            for line in open(os.path.join(rd, f), errors="replace"):
+                if '"phase":"turn_end"' in line:
+                    try:
+                        k = json.loads(line)["reason"]["kind"]
+                    except Exception:
+                        k = "?"
+                    ends[k] = ends.get(k, 0) + 1
     failed = [t["turn"] for t in turns if t.get("rc") != 0]
     peak = max((hm(r["usage"])[0] for r in main), default=0)
     return {
         "dir": rd, "group": meta["group"], "label": meta["label"], "stop": meta.get("stop"),
-        "turns_planned": meta.get("turns_planned"), "turns_run": len(turns), "failed_turns": failed,
+        "turns_planned": meta.get("turns_planned"), "turns_run": len(turns), "failed_turns": failed, "turn_end_reasons": ends,
         "pass_rate": sc.get("pass_rate"), "f2p": f"{sc.get('f2p_pass')}/{sc.get('f2p_total')}", "p2p": f"{sc.get('p2p_pass')}/{sc.get('p2p_total')}",
         "gold_valid": gold_rate, "score_parsed": sc.get("parsed_results"), "excluded_test_files": len(sc.get("excluded_test_files", [])), "source_files": len(sc.get("source_files", [])),
         "src_apply_rc": sc.get("src_apply_rc"),
@@ -176,7 +186,7 @@ def main():
         ba = "—" if not b else f"{st.mean(x['hit_before'] for x in b)*100:.1f} % → {st.mean(x['hit_after'] for x in b if x['hit_after'] is not None)*100:.1f} %"
         pr = "—" if r["pass_rate"] is None else f"{r['pass_rate']*100:.1f} %"
         hr = "—" if r["hit_rate"] is None else f"{r['hit_rate']*100:.1f} %"
-        L.append(f"| {r['group']} | {r['label']} | {r['turns_run']}/{r['turns_planned']} ({len(r['failed_turns'])}{': ' + ','.join(map(str, r['failed_turns'])) if r['failed_turns'] else ''}) | {pr} | {r['f2p']} | {r['p2p']} | {r['cost']:.4f} | {r['tok_input']} | {r['tok_hit']} | {r['tok_miss']} | {r['tok_out']} | {r['tok_reason']} | {hr} | {r['compaction_requests']['historian']} / {r['compaction_requests']['summarizer']} / {r['compaction_requests']['other']} | {r['net_attempts']} | {r['compaction_start_events']} | {len(b)} | {ba} | {r['peak_prompt']} | {r['turn_time_s']/60:.1f} | {r['stop']} |")
+        L.append(f"| {r['group']} | {r['label']} | {r['turns_run']}/{r['turns_planned']} ({len(r['failed_turns'])}{': ' + ','.join(map(str, r['failed_turns'])) if r['failed_turns'] else ''}) | {pr} | {r['f2p']} | {r['p2p']} | {r['cost']:.4f} | {r['tok_input']} | {r['tok_hit']} | {r['tok_miss']} | {r['tok_out']} | {r['tok_reason']} | {hr} | {r['compaction_requests']['historian']} / {r['compaction_requests']['summarizer']} / {r['compaction_requests']['other']} | {r['net_attempts']} | {r['compaction_start_events']} | {len(b)} | {ba} | {r['peak_prompt']} | {r['turn_time_s']/60:.1f} | {r['stop']} {r['turn_end_reasons']} |")
     if gold:
         L += ["", f"Gold-valid tests (pass with the gold patch here): F2P {gold['f2p_total'] - len(gold['f2p_failed'])}/{gold['f2p_total']}, P2P {gold['p2p_total'] - len(gold['p2p_failed'])}/{gold['p2p_total']}.", "",
               "| group | run | gold-valid pass rate | F2P | P2P |", "|---|---|---|---|---|"]
