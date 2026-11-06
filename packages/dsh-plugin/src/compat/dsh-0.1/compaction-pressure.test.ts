@@ -65,6 +65,8 @@ async function probe(opts: {
   regionThrowsAfter?: number;
   /** Round 23: an error thrown by compactIfNeeded is captured here instead of rejecting. */
   errors?: string[];
+  /** Round 36 line I (S6): pressure left after compaction-basic's tool-result pruner runs (default: unchanged). */
+  pruneToPct?: number;
 }): Promise<Rig> {
   const rig: Rig = { fired: false, compactRegionCalls: 0, result: undefined };
   const header = {
@@ -106,6 +108,7 @@ async function probe(opts: {
             ? {
                 pruneSession: () => {
                   rig.fired = true;
+                  if (opts.pruneToPct !== undefined) total = Math.floor(opts.window * opts.pruneToPct);
                 },
               }
             : undefined,
@@ -322,6 +325,33 @@ describe("native pressure backstop while a historian pass runs (round 21)", () =
     expect(results[1]!.fired).toBe(true);
     expect(logs.filter((l) => /native pressure backstop deferred/.test(l))).toHaveLength(1);
     expect(logs.some((l) => /already deferred once/.test(l))).toBe(true);
+  });
+
+  // Round 36 line I, S6 (200k stress evo bench 42238241963, native turn 6: 7×
+  // "already deferred once … compacting now", every one followed by
+  // outcome=none). The line was printed BEFORE compaction-basic ran; its own
+  // check prunes tool results first, re-measures, and returns null when the
+  // prune alone brought the session under the threshold — nothing was
+  // compacted although the log said so. The line must report what happened.
+  it("S6: the second over-backstop check logs the real outcome when compaction-basic's prune leaves nothing to compact", async () => {
+    const logs: string[] = [];
+    const results: Array<{ result: unknown; fired: boolean }> = [];
+    const rig = await probe({ window: 131_072, maxTokens: 8_192, pct: 0.91, busy: () => true, logs, thenPcts: [0.93], results, pruneToPct: 0.5 });
+    expect(results[1]!.fired).toBe(true); // compaction-basic ran its pruner
+    expect(results[1]!.result).toBeNull();
+    expect(rig.compactRegionCalls).toBe(0);
+    const line = logs.find((l) => /already deferred once/.test(l));
+    expect(line).toBeDefined();
+    expect(line).not.toMatch(/compacting now/);
+    expect(line).toMatch(/nothing compacted/);
+  });
+
+  it("S6: when the second check does compact, the line says so", async () => {
+    const logs: string[] = [];
+    await probe({ window: 131_072, maxTokens: 8_192, pct: 0.91, busy: () => true, logs, thenPcts: [0.93] });
+    const line = logs.find((l) => /already deferred once/.test(l));
+    expect(line).toMatch(/compacted/);
+    expect(line).not.toMatch(/nothing compacted/);
   });
 
   it("a new episode (pressure back under the backstop in between) may defer again", async () => {
