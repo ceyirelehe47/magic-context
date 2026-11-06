@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# Round 36 line I evo bench: ONE run of one group (CompactionBench-style).
+#
+#   evo-bench/run.sh <baseline|fold|native> <run-label> <out-dir> <task-dir>
+#
+# Preconditions (dsh-evo-bench.yml): env.sh environment, DSH bootstrapped;
+# fold/native: profile "test" with the plugin installed + `setup`; baseline:
+# profile "base" (shipped headless template, no plugin); task-dir from
+# prepare.py; docker available; OPENCODE_API_KEY set (never printed).
+#
+# One persistent DSH session per run: request k of requests.json is turn k
+# (`dsh --session-id` continues the same session, a fresh process per turn as
+# in cache-bench/ci-e2e). The agent works in a copy of the image's /testbed with
+# the git history removed; `evo-pytest` runs pytest in a container of the
+# instance image with that copy mounted at /testbed. After every turn the tree
+# is snapshotted in a git dir OUTSIDE the workspace and the cumulative source
+# diff is saved (patches/turn-NN.patch). At the end the last cumulative patch is
+# scored by score.py in a fresh container. Every model request goes through the
+# cache-bench recording proxy (record only; BENCH_ABLATE empty).
+#
+# Env: EVO_RUN_TIMEOUT (per turn, s, default 1800), EVO_COST_CAP (USD at
+# DeepSeek peak list price; stop starting new turns above it, default 0 = off),
+# EVO_DEADLINE (epoch s; stop starting new turns after it), EVO_SANDBOX
+# (DSH_PERMISSION_MODE for all groups, default danger-full-access: the agent
+# needs docker for evo-pytest, as the paper's agent runs inside the container).
+set -uo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+CB="$HERE/../cache-bench"
+source "$HERE/../env.sh"
+GROUP="$1"; LABEL="$2"; OUT="$(mkdir -p "$3" && cd "$3" && pwd)"; TD="$(cd "$4" && pwd)"
+RUN_TIMEOUT="${EVO_RUN_TIMEOUT:-1800}"
+case "$GROUP" in
+  baseline) PROFILE=base; PATCHES=(--patch "$CB/bench-model.yml"); unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
+  fold) PROFILE=test; PATCHES=(--patch "$CB/bench-model.yml" --patch "$CB/bench-plugin.yml"); unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
+  native) PROFILE=test; PATCHES=(--patch "$CB/bench-model.yml" --patch "$CB/bench-plugin.yml"); export MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 ;;
+  *) echo "group must be baseline|fold|native" >&2; exit 2 ;;
+esac
+[[ -n "${EVO_BENCH_PATCH:-}" ]] && PATCHES+=(--patch "$EVO_BENCH_PATCH")
+export DSH_PERMISSION_MODE="${EVO_SANDBOX:-danger-full-access}"
+export BENCH_ABLATE=""
+export BENCH_NONCE="$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
+export OPENCODE_SESSION="mc-evo-$GROUP-$LABEL-$(python3 -c 'import secrets; print(secrets.token_hex(4))')"
+export MAGIC_CONTEXT_DEBUG_HISTORIAN=1
+# Each turn is its own process: the historian must finish before it exits (as in cache-bench).
+export MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS=60000
+
+IMG="$(jq -r .image "$TD/instance.json")"; BASE="$(jq -r .base_commit "$TD/instance.json")"
+REPO_NAME="$(jq -r '.repo|split("/")[1]' "$TD/instance.json")"
+SCR="${RUNNER_TEMP:-/tmp}/evo/$GROUP-$LABEL"; rm -rf "$SCR"; mkdir -p "$SCR/bin"
+WS="$SCR/$REPO_NAME"; SNAP="$SCR/snap.git"; CT="evo-$GROUP-$LABEL-$$"
+NT=$(jq length "$TD/requests.json")
+printf '{"group":"%s","label":"%s","nonce":"%s","session_header":"%s","profile":"%s","native_roles":"%s","image":"%s","base_commit":"%s","turns_planned":%s,"run_timeout":%s,"cost_cap":"%s","sandbox":"%s","start":%s}\n' \
+  "$GROUP" "$LABEL" "$BENCH_NONCE" "$OPENCODE_SESSION" "$PROFILE" "${MAGIC_CONTEXT_DSH_NATIVE_ROLES-}" "$IMG" "$BASE" "$NT" "$RUN_TIMEOUT" "${EVO_COST_CAP:-0}" "$DSH_PERMISSION_MODE" "$(date +%s%3N)" > "$OUT/meta.json"
+
+# --- workspace: the image's /testbed at base_commit, git history and tags removed
+docker pull -q "$IMG" >/dev/null
+TMPC=$(docker create "$IMG" true)
+docker cp "$TMPC:/testbed" "$WS" && docker rm -f "$TMPC" >/dev/null
+git -C "$WS" checkout -q -f "$BASE" 2>"$OUT/checkout.err" || { git -C "$WS" fetch -q --depth 1 "https://github.com/$(jq -r .repo "$TD/instance.json")" "$BASE" && git -C "$WS" checkout -q -f "$BASE"; }
+HEADC="$(git -C "$WS" rev-parse HEAD)"
+[[ "$HEADC" == "$BASE" ]] || { echo "::error::workspace HEAD $HEADC != base $BASE"; exit 1; }
+find "$WS" -name .git -prune -exec rm -rf {} +  # repository + submodule git dirs: history, tags, packed future objects
+[[ -e "$WS/.git" ]] && { echo "::error::.git still present"; exit 1; }
+echo "{\"workspace_head_before_strip\":\"$HEADC\",\"git_removed\":true}" > "$OUT/workspace.json"
+
+snap() { git --git-dir="$SNAP" --work-tree="$WS" "$@"; }
+git init -q --bare "$SNAP"
+printf '__pycache__/\n*.pyc\n.pytest_cache/\n*.egg-info/\n' > "$SNAP/info/exclude"
+snap add -A >/dev/null 2>&1; snap -c user.name=bench -c user.email=bench@local commit -q -m base >/dev/null
+BASE_SNAP="$(snap rev-parse HEAD)"
+
+# --- test container: the agent's tree mounted at /testbed (its editable install path)
+docker run -d --name "$CT" -v "$WS:/testbed" "$IMG" sleep infinity >/dev/null
+cat > "$SCR/bin/evo-pytest" <<WRAP
+#!/usr/bin/env bash
+# pytest in the instance image (conda env "testbed"), run in the matching directory under /testbed
+rel="\$(python3 -c 'import os,sys; r=os.path.relpath(os.getcwd(), sys.argv[1]); print("" if r=="." or r.startswith("..") else r)' "$WS")"
+exec docker exec -i -w "/testbed/\$rel" "$CT" bash -c 'source /opt/miniconda3/bin/activate testbed 2>/dev/null; export PYTHONDONTWRITEBYTECODE=1; exec pytest -p no:cacheprovider "\$@"' evo-pytest "\$@"
+WRAP
+chmod +x "$SCR/bin/evo-pytest"
+export PATH="$SCR/bin:$PATH"
+(cd "$WS" && timeout 300 evo-pytest --version > "$OUT/evo-pytest-version.txt" 2>&1); echo "evo-pytest: $(tail -n 2 "$OUT/evo-pytest-version.txt" | tr '\n' ' ')"
+
+node "$CB/proxy.mjs" 18731 "$OUT" > "$OUT/proxy.out" 2>&1 &
+PROXY=$!
+for _ in $(seq 1 50); do (echo > /dev/tcp/127.0.0.1/18731) 2>/dev/null && break; sleep 0.1; done
+
+sid_of() { python3 - "$1" <<'PY'
+import json, sys
+for line in open(sys.argv[1], errors="replace"):
+    try: o = json.loads(line)
+    except Exception: continue
+    if o.get("type") == "session": print(o.get("sessionId", "")); break
+PY
+}
+cost_now() { python3 "$HERE/analyze.py" --cost "$OUT" 2>/dev/null || echo 0; }
+
+mkdir -p "$OUT/patches"
+SID=""; STOP="done"
+for k in $(seq 1 "$NT"); do
+  if [[ -n "${EVO_DEADLINE:-}" && $(date +%s) -ge $EVO_DEADLINE ]]; then STOP="deadline-before-turn-$k"; break; fi
+  if [[ "${EVO_COST_CAP:-0}" != 0 ]] && python3 -c "import sys; sys.exit(0 if float('$(cost_now)') > float('${EVO_COST_CAP}') else 1)"; then STOP="cost-cap-before-turn-$k"; break; fi
+  name="turn-$(printf %02d "$k")"
+  task="$(jq -r ".[$((k - 1))]" "$TD/requests.json")"
+  args=(--profile "$PROFILE" "${PATCHES[@]}" "$task" --json)
+  [[ -n "$SID" ]] && args+=(--session-id "$SID")
+  s=$(date +%s%3N)
+  (cd "$WS" && timeout "$RUN_TIMEOUT" node "$DSH_BIN" "${args[@]}" > "$OUT/$name.log" 2>&1)
+  rc=$?
+  e=$(date +%s%3N)
+  [[ -z "$SID" ]] && SID="$(sid_of "$OUT/$name.log")" && echo "$SID" > "$OUT/sid"
+  docker exec "$CT" chown -R "$(id -u):$(id -g)" /testbed 2>/dev/null
+  snap add -A >/dev/null 2>&1; snap -c user.name=bench -c user.email=bench@local commit -q --allow-empty -m "$name" >/dev/null
+  snap diff --binary "$BASE_SNAP" HEAD > "$OUT/patches/$name.patch"
+  files=$(snap diff --name-only "$BASE_SNAP" HEAD | wc -l)
+  printf '{"turn":%s,"rc":%s,"t0":%s,"t1":%s,"ms":%s,"cum_files":%s,"cum_patch_bytes":%s,"requests":%s}\n' "$k" "$rc" "$s" "$e" "$((e - s))" "$files" "$(stat -c %s "$OUT/patches/$name.patch")" "$(wc -l < "$OUT/requests.jsonl" 2>/dev/null || echo 0)" >> "$OUT/turns.jsonl"
+  echo "[evo $GROUP $LABEL] $name rc=$rc $(( (e - s) / 1000 ))s files=$files cost=\$$(cost_now)"
+  if [[ -z "$SID" ]]; then STOP="no-session"; break; fi
+done
+sleep 2; kill "$PROXY" 2>/dev/null; wait "$PROXY" 2>/dev/null
+docker rm -f "$CT" >/dev/null 2>&1
+if [[ -n "$SID" ]]; then
+  f="$(ls "$DSH_HOME"/sessions/*/"$SID"/session.v4.jsonl.zstd 2>/dev/null | head -n 1)"
+  [[ -n "$f" ]] && zstd -qdc "$f" > "$OUT/session.jsonl" 2>/dev/null
+fi
+python3 - "$OUT/meta.json" "$STOP" <<'PY'
+import json, sys, time
+m = json.load(open(sys.argv[1])); m["stop"] = sys.argv[2]; m["end"] = int(time.time() * 1000)
+json.dump(m, open(sys.argv[1], "w"))
+PY
+LAST="$(ls "$OUT"/patches/turn-*.patch 2>/dev/null | tail -n 1)"
+cp "${LAST:-/dev/null}" "$OUT/final.patch"
+python3 "$HERE/score.py" "$TD" "$OUT/final.patch" "$OUT/score" --label "$GROUP-$LABEL"
+echo "[evo $GROUP $LABEL] stop=$STOP requests=$(wc -l < "$OUT/requests.jsonl" 2>/dev/null || echo 0)"

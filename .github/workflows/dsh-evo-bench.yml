@@ -1,0 +1,238 @@
+# DSH fork, round 36 line I: CompactionBench-style same-task comparison
+# (Microsoft CompactionBench preprint, appendix A) on one SWE-EVO release
+# transition, three groups:
+#   baseline  profile "base": shipped DSH headless template, no plugin (native compaction)
+#   fold      profile "test": dsh-magic-context from this checkout + `setup` (defaults)
+#   native    same as fold + MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 (round 36 G, plan N)
+# Same DSH, model route (cache-bench/bench-model.yml: deepseek-v4.1-flash via
+# OpenCode Go, 100k main window), requests, workspace, test wrapper and
+# permission mode in every group. Each (group, run) is its own job (6 h cap).
+# Manual dispatch only (spends OPENCODE_API_KEY quota). See
+# packages/dsh-plugin/scripts/e2e/evo-bench/ and
+# docs/dsh/e2e/evidence-round36/i-evo-bench.md. New file, DSH branches only.
+name: dsh-evo-bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      groups:
+        description: "Comma list of groups: baseline,fold,native"
+        type: string
+        default: "baseline,fold,native"
+      runs:
+        description: "Runs per group (each run is its own parallel job)"
+        type: string
+        default: "1"
+      transition:
+        description: "SWE-EVO instance_id (release transition)"
+        type: string
+        default: "conan-io__conan_2.0.2_2.0.3"
+      max_items:
+        description: "Use only the first N changelog items (0 = all); recorded in the results"
+        type: string
+        default: "0"
+      dsh_version:
+        description: "@deepseek-ai/dsh version"
+        type: string
+        default: "0.2.1-rc.5"
+      cost_cap:
+        description: "Per-run cost cap, USD at DeepSeek peak list price: no new turn starts above it (0 = off)"
+        type: string
+        default: "3"
+      turn_timeout:
+        description: "Per-turn timeout, seconds"
+        type: string
+        default: "1800"
+      extra_patch:
+        description: "Optional DSH --patch file (repo path) applied to ALL groups, e.g. a smaller window / threshold; empty = none"
+        type: string
+        default: ""
+      validate:
+        description: "Also score the gold patch and the empty patch (harness check, no model calls)"
+        type: boolean
+        default: true
+      slot:
+        description: "Concurrency slot (use evo-*; never the e2e / soak slots)"
+        type: string
+        default: "evo-1"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: dsh-evo-bench-${{ inputs.slot }}
+  cancel-in-progress: false
+
+env:
+  BUN_VERSION: 1.4.2
+  DSH_VERSION: ${{ inputs.dsh_version }}
+
+jobs:
+  plan:
+    if: github.repository == 'ceyirelehe47/magic-context'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          GROUPS_IN: ${{ inputs.groups }}
+          RUNS_IN: ${{ inputs.runs }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          gs = [g.strip() for g in os.environ["GROUPS_IN"].split(",") if g.strip()]
+          bad = [g for g in gs if g not in ("baseline", "fold", "native")]
+          assert not bad, f"unknown groups {bad}"
+          n = int(os.environ["RUNS_IN"])
+          print("matrix=" + json.dumps({"include": [{"group": g, "run": i} for g in gs for i in range(1, n + 1)]}))
+          PY
+
+  validate:
+    if: github.repository == 'ceyirelehe47/magic-context' && inputs.validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packages/dsh-plugin/scripts/e2e
+      - name: Prepare task + score gold / empty
+        working-directory: packages/dsh-plugin/scripts/e2e/evo-bench
+        run: |
+          OUT="$RUNNER_TEMP/evo/validate"; mkdir -p "$OUT"
+          python3 prepare.py "${{ inputs.transition }}" "$OUT/task" --max-items "${{ inputs.max_items }}"
+          docker pull -q "$(jq -r .image "$OUT/task/instance.json")"
+          python3 score.py "$OUT/task" "$OUT/task/gold.patch" "$OUT/gold" --label gold
+          : > "$OUT/empty.patch"
+          python3 score.py "$OUT/task" "$OUT/empty.patch" "$OUT/empty" --label empty
+          rm -f "$OUT/task/gold.patch"
+          { echo "### evo-bench validate"; for x in gold empty; do jq -r --arg x $x '"- \($x): F2P \(.f2p_pass)/\(.f2p_total), P2P \(.p2p_pass)/\(.p2p_total), pass rate \(.pass_rate), parsed \(.parsed_results), \(.seconds)s"' "$OUT/$x/score.json"; done; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dsh-e2e-evobench-validate-${{ github.run_id }}
+          path: ${{ runner.temp }}/evo/validate
+          retention-days: 7
+
+  bench:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scratch dirs
+        run: |
+          echo "E2E_ROOT=$RUNNER_TEMP/e2e" >> "$GITHUB_ENV"
+          echo "BENCH_OUT=$RUNNER_TEMP/bench/${{ matrix.group }}-run${{ matrix.run }}" >> "$GITHUB_ENV"
+          echo "EVO_DEADLINE=$(( $(date +%s) + 300 * 60 ))" >> "$GITHUB_ENV"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.DSH_VERSION == '0.2.1-rc.5' && '22' || '24' }}
+
+      - name: Task (${{ inputs.transition }})
+        working-directory: packages/dsh-plugin/scripts/e2e/evo-bench
+        run: |
+          python3 prepare.py "${{ inputs.transition }}" "$RUNNER_TEMP/evo-task" --max-items "${{ inputs.max_items }}"
+          rm -f "$RUNNER_TEMP/evo-task/gold.patch"   # the answer never sits on the agent's machine
+          docker pull -q "$(jq -r .image "$RUNNER_TEMP/evo-task/instance.json")"
+
+      - name: Bootstrap (filtered install + local DSH ${{ env.DSH_VERSION }})
+        working-directory: packages/dsh-plugin
+        env:
+          INSTALL_TIMEOUT: "600"
+        run: |
+          bash scripts/e2e/bootstrap.sh
+          got="$(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version")"
+          [ "$got" = "$DSH_VERSION" ] || { echo "::error::installed DSH $got, requested $DSH_VERSION"; exit 1; }
+
+      - name: Profile (${{ matrix.group }})
+        working-directory: packages/dsh-plugin
+        run: |
+          source scripts/e2e/env.sh
+          if [ "${{ matrix.group }}" != baseline ]; then
+            bun run build
+            bash scripts/e2e/install-profile.sh test headless
+            node dist/cli.js setup --profile test
+            node dist/cli.js doctor --profile test || true
+          else
+            timeout 60 node "$DSH_BIN" --profile headless --dump-default-config >/dev/null
+            rm -rf "$DSH_HOME/profiles/base"
+            cp -r "$DSH_HOME/profiles/headless" "$DSH_HOME/profiles/base"
+            sed -i 's/dsh-profile-headless/dsh-profile-base/' "$DSH_HOME/profiles/base/package.json"
+            if grep -rq magic-context "$DSH_HOME/profiles/base" --include='*.yml' --include='package.json'; then
+              echo "::error::baseline profile mentions magic-context"; exit 1
+            fi
+          fi
+
+      - name: Bench run
+        working-directory: packages/dsh-plugin
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          EVO_COST_CAP: ${{ inputs.cost_cap }}
+          EVO_RUN_TIMEOUT: ${{ inputs.turn_timeout }}
+          EXTRA: ${{ inputs.extra_patch }}
+        run: |
+          if [ -z "$OPENCODE_API_KEY" ]; then echo "::error::secret OPENCODE_API_KEY is not set"; exit 1; fi
+          [ -n "$EXTRA" ] && export EVO_BENCH_PATCH="$GITHUB_WORKSPACE/$EXTRA"
+          E2E_XDG_DATA_HOME="$E2E_ROOT/xdg/data-evo" bash scripts/e2e/evo-bench/run.sh "${{ matrix.group }}" "run${{ matrix.run }}" "$BENCH_OUT" "$RUNNER_TEMP/evo-task"
+
+      - name: Analyze + redact
+        if: always()
+        working-directory: packages/dsh-plugin
+        run: |
+          mkdir -p "$BENCH_OUT"
+          cp "$RUNNER_TEMP"/evo-task/{instance,items,requests}.json "$BENCH_OUT/" 2>/dev/null || true
+          python3 scripts/e2e/evo-bench/analyze.py "$BENCH_OUT/summary.md" "$BENCH_OUT" || true
+          python3 scripts/e2e/ci-check.py redact "$BENCH_OUT"
+          # request bodies (~600 per run) packed AFTER the text redaction (a binary file must not be rewritten)
+          if [ -d "$BENCH_OUT/bodies" ]; then tar -C "$BENCH_OUT" -I 'zstd -q -10' -cf "$BENCH_OUT/bodies.tar.zst" bodies && rm -rf "$BENCH_OUT/bodies"; fi
+          echo "### dsh-evo-bench ${{ matrix.group }} run${{ matrix.run }} · ${{ inputs.transition }} · DSH $(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || echo unknown)" >> "$GITHUB_STEP_SUMMARY"
+          cat "$BENCH_OUT/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-e2e-evobench-${{ matrix.group }}-run${{ matrix.run }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/bench/${{ matrix.group }}-run${{ matrix.run }}
+          retention-days: 7
+          if-no-files-found: warn
+
+  compare:
+    needs: bench
+    if: always() && needs.bench.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packages/dsh-plugin/scripts/e2e
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dsh-e2e-evobench-*-run*-${{ github.run_id }}
+          path: ${{ runner.temp }}/all
+      - name: Compare groups
+        run: |
+          dirs=$(ls -d "$RUNNER_TEMP"/all/*/ 2>/dev/null)
+          [ -n "$dirs" ] || { echo "::error::no runs"; exit 1; }
+          python3 packages/dsh-plugin/scripts/e2e/evo-bench/analyze.py "$RUNNER_TEMP/compare.md" $dirs
+          cat "$RUNNER_TEMP/compare.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-e2e-evobench-compare-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/compare.md
+            ${{ runner.temp }}/compare.md.json
+          retention-days: 7
