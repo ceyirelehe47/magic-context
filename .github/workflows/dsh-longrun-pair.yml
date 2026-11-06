@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 55
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         arm: [baseline, plugin]
     env:
@@ -100,7 +101,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: longrun-live-${{ matrix.arm }}-${{ github.run_id }}
+          name: longrun-live-${{ matrix.arm }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/live-pair/${{ matrix.arm }}/*.json
             ${{ runner.temp }}/live-pair/${{ matrix.arm }}/*.jsonl

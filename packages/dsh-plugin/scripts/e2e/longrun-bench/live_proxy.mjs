@@ -51,7 +51,7 @@ const UP = new URL(process.env.BENCH_UPSTREAM ?? "https://opencode.ai");
 fs.mkdirSync(path.join(outDir, "bodies"), { recursive: true });
 fs.mkdirSync(path.join(outDir, "resp"), { recursive: true });
 const log = fs.createWriteStream(path.join(outDir, "requests.jsonl"), { flags: "a" });
-let n = 0, forwarded = 0, estimate = 0;
+let n = 0, forwarded = 0, estimate = 0, coolUntil = 0;
 const MAX_REQUESTS = Number(process.env.LONGRUN_MAX_REQUESTS ?? 300);
 const STOP_USD = Number(process.env.LONGRUN_ESTIMATE_STOP_USD ?? 4);
 const deadline = Date.now() + Number(process.env.LONGRUN_SECONDS ?? 2400) * 1000;
@@ -175,9 +175,11 @@ function kindOf(body, tag) {
 http.createServer((req, res) => {
   const chunks = [];
   req.on("data", (c) => chunks.push(c));
-  req.on("end", () => {
+  req.on("end", async () => {
     const id = ++n;
     const t0 = Date.now();
+    // Respect upstream capacity advice between SDK retries; do not add retries.
+    if (coolUntil > Date.now()) await new Promise(resolve => setTimeout(resolve, coolUntil - Date.now()));
     if (forwarded >= MAX_REQUESTS || estimate >= STOP_USD || Date.now() >= deadline) {
       const stopped = { n:id, status:429, kind:'guard', reason:'request/time/observed-estimate limit', forwarded, estimate, t0 };
       fs.writeFileSync(path.join(outDir, 'proxy-stopped.json'), JSON.stringify(stopped));
@@ -202,6 +204,7 @@ http.createServer((req, res) => {
     const headers = { ...req.headers, host: UP.host, "accept-encoding": "identity", "content-length": String(raw.length) };
     const lib = UP.protocol === "http:" ? http : https;
     const up = lib.request({ protocol: UP.protocol, hostname: UP.hostname, port: UP.port || (UP.protocol === "http:" ? 80 : 443), path: p, method: req.method, headers }, (ur) => {
+      if (ur.statusCode === 429) coolUntil = Math.max(coolUntil, Date.now() + 30000);
       res.writeHead(ur.statusCode ?? 502, ur.headers);
       let buf = "", usage = null, tFirst = null, finish = null;
       let rText = "", rReason = "";

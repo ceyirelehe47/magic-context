@@ -151,8 +151,8 @@ def run(args):
                 'checkpoints':checkpoints,'native_compactions':native_compactions(events),'plugin_runtime':runtime,
                 'observed_usage':observed_usage(req),'limits':{'proxy_forwarded_requests':300,'wall_seconds':2400,'turn_seconds':300,
                 'driver_retries':0,'proxy_request_timeout_seconds':120,'observed_estimate_stop_usd':4},
-                'limitations':['One run per arm, parallel independent jobs; no statistical significance.',
-                'Provider SDK/background retries may exist; proxy request/time limits bound only observed route.',
+                'limitations':['One run per arm, serial independent jobs; no statistical significance.',
+                'Provider SDK/background retries may exist; proxy adds 30s cooldown after 429 but no retry; request/time limits bound only observed route.',
                 'No sole-egress isolation or guaranteed total dollar cap; costs are estimates, not bills.',
                 'Compaction completion, persisted MC compartments, served-context drops and checkpoint quality are distinct observations.',
                 'Synthetic release-inventory memory task, not an end-to-end software engineering outcome.']}

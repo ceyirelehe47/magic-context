@@ -10,7 +10,7 @@ Each arm has the same 24 batches, 192 files and 3 recovery checkpoints, fresh
 state/nonce, at most 300 proxy forwards, 40 minutes and no driver-level retries.
 The proxy stops new requests after its direct-price estimate reaches USD 4 per
 arm. This is observational stop-loss, not an OpenCode bill or all-call guarantee.
-One arm of each type runs in parallel; it is not a statistically powered AB/BA
+One arm of each type runs serially; it is not a statistically powered AB/BA
 experiment. Persisted compactions/compartments and exact recovery scores are
 reported separately. A failed or incomplete task is retained, never called a win.
 Push is limited to `bench/longrun-real-20261106`; it is a paid live workflow.
