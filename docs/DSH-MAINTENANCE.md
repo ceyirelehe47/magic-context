@@ -68,7 +68,7 @@ PASS; R0 / R7 = provider 429 overload) — known limitation 30, `evidence-round3
 **Line G** (user-approved plan N, adapter only, core untouched): native roles behind an **experimental switch,
 default off** (`context.nativeRoles` / env `MAGIC_CONTEXT_DSH_NATIVE_ROLES`) — RED `16e6fe2e8`, FEAT `8e095e315`,
 bench input `bc74ce513`, N11 RED `73cf540e6` / FIX `5d19db4aa`; push CI 42215396157 `dsh-plugin` **689** / `adapter-api`
-15 / `contracts:dsh` **109** ×3 / ci-check 33 (690 with the N12 pin of the docs commit). Cache-bench (plugin, switch on)
+15 / `contracts:dsh` **109** ×3 / ci-check 33; with the N12 pin `dsh-plugin` **690** (push CI 42218759538 @ `ae60fe811`). Cache-bench (plugin, switch on)
 42214443375 and 42215740858: 94.3 % hit, 0 divergences, **$0.0274 / run** (line C fold view $0.041), reasoning
 9–18 tokens / step (fold 290–325). Open: the ctx_reduce nudge does not fire in native sessions (measurement
 attributes the tool tag to the call part; not fixed). Known limitation 31, `evidence-round36/g-native-roles.md`.
@@ -2654,8 +2654,8 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       with their assertions untouched).
     - **Commits / CI:** RED `16e6fe2e8` (9 / 13 FAIL before), FEAT `8e095e315`, bench input `bc74ce513`,
       N11 RED `73cf540e6` / FIX `5d19db4aa` (drop gate: Magic's native rewrites are not a "rewritten served
-      prefix" ride, like `mc-op:` copies); N12 pin in the docs commit. Push CI 42215396157 @ `5d19db4aa`:
-      689 / 15 / 109 ×3 / 33.
+      prefix" ride, like `mc-op:` copies); N12 pin `b1e5f96fc` / `ae60fe811`. Push CI 42215396157 @ `5d19db4aa`:
+      689 / 15 / 109 ×3 / 33; 42218759538 @ `ae60fe811`: 690 / 15 / 109 ×3 / 33.
     - **Preview-tags observation (env on, old test):** the preview payload leaves a tool result without
       `§N§` — expected: the preview only rewrites user input (DSH's pre-step payload is `UserMessage[]`),
       the tool result is tagged on the surface in the same pass and is served tagged (bench: 32 / 32 first

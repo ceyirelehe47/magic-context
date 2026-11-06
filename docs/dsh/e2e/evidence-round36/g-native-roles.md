@@ -30,11 +30,13 @@ turned on later, and a native session stays native if it is turned off.
 | `bc74ce513` | CI — `dsh-cache-bench.yml` input `native_roles` (off \| on), recorded in `meta.json` |
 | `73cf540e6` | RED N11 — a native tool/result tag rewrite of a just-served node was read by the drop gate as a "rewritten served prefix" ride, so queued drops landed without a real ride (when the log has no request header) |
 | `5d19db4aa` | FIX N11 — drop gate treats Magic's native rewrites (text starting `§N§` / `[dropped §N§]` / `[truncated §N§]`) like the fold view's `mc-op:` copies |
-| (this commit) | TEST N12 pin (below) + docs — this file, `g-*.txt`, `g-scripts/`, DSH-MAINTENANCE, RELEASE-NOTES |
+| `b1e5f96fc` / `ae60fe811` | TEST N12 pin (below) + docs — this file, `g-*.txt`, `g-scripts/`, DSH-MAINTENANCE, RELEASE-NOTES; `ae60fe811` = N12 test-file typecheck |
 
 Push CI 42215396157 @ `5d19db4aa`: green — `dsh-plugin` **689**, `adapter-api` **15**, `contracts:dsh`
 **109** × 3 (rc.5 / alpha.3 / rc.1), ci-check unit **33**. After this commit `dsh-plugin` is **690**
-(+1 N12); CI run id in DSH-MAINTENANCE / the round summary.
+(+1 N12): push CI 42218759538 @ `ae60fe811` green — `dsh-plugin` **690**, `adapter-api` 15, `contracts:dsh`
+109 × 3, test-file typecheck 0, ci-check 33. (The docs push 42218348760 @ `b1e5f96fc` failed only on the N12
+test-file typecheck, TS2352; fixed in `ae60fe811`.)
 
 ## preview-tags observation (switch on via env, old test) — expected, not a defect
 
