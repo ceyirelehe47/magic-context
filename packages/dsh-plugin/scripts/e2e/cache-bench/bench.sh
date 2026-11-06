@@ -54,8 +54,8 @@ export OPENCODE_SESSION="mc-bench-$MODE-$LABEL-$(python3 -c 'import secrets; pri
 export MAGIC_CONTEXT_DEBUG_HISTORIAN=1
 export MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS=60000
 export BENCH_ABLATE="${BENCH_ABLATE-}"
-printf '{"mode":"%s","label":"%s","nonce":"%s","session_header":"%s","profile":"%s","max_turns":%s,"ablate":"%s","start":%s}\n' \
-  "$MODE" "$LABEL" "$BENCH_NONCE" "$OPENCODE_SESSION" "$PROFILE" "$MAX_TURNS" "$BENCH_ABLATE" "$(date +%s%3N)" > "$OUT/meta.json"
+printf '{"mode":"%s","label":"%s","nonce":"%s","session_header":"%s","profile":"%s","max_turns":%s,"ablate":"%s","native_roles":"%s","start":%s}\n' \
+  "$MODE" "$LABEL" "$BENCH_NONCE" "$OPENCODE_SESSION" "$PROFILE" "$MAX_TURNS" "$BENCH_ABLATE" "${MAGIC_CONTEXT_DSH_NATIVE_ROLES-}" "$(date +%s%3N)" > "$OUT/meta.json"
 
 node "$HERE/proxy.mjs" 18731 "$OUT" > "$OUT/proxy.out" 2>&1 &
 PROXY=$!

@@ -38,6 +38,11 @@ on:
         description: "Round 36 D, diagnosis only: BENCH_ABLATE for the baseline group (same list). Empty = unchanged"
         type: string
         default: ""
+      native_roles:
+        description: "Round 36 G: plugin group runs with MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 (plan N, native-role view for new sessions). off = unchanged"
+        type: choice
+        options: ["off", "on"]
+        default: "off"
       slot:
         description: "Concurrency slot (use cache-*; never the e2e line's slots)"
         type: string
@@ -119,9 +124,13 @@ jobs:
           # `a && b || c` would hand the plugin group the baseline's list (42172028320).
           ABLATE_PLUGIN: ${{ inputs.ablate_plugin }}
           ABLATE_BASELINE: ${{ inputs.ablate_baseline }}
+          NATIVE_ROLES: ${{ inputs.native_roles }}
         run: |
           if [ "${{ matrix.mode }}" = plugin ]; then export BENCH_ABLATE="$ABLATE_PLUGIN"; else export BENCH_ABLATE="$ABLATE_BASELINE"; fi
           echo "BENCH_ABLATE=${BENCH_ABLATE:-<none>}"
+          # Round 36 G: plan N switch, plugin group only (the baseline has no Magic).
+          if [ "${{ matrix.mode }}" = plugin ] && [ "$NATIVE_ROLES" = on ]; then export MAGIC_CONTEXT_DSH_NATIVE_ROLES=1; else unset MAGIC_CONTEXT_DSH_NATIVE_ROLES; fi
+          echo "MAGIC_CONTEXT_DSH_NATIVE_ROLES=${MAGIC_CONTEXT_DSH_NATIVE_ROLES:-<unset>}"
           if [ -z "$OPENCODE_API_KEY" ]; then echo "::error::secret OPENCODE_API_KEY is not set"; exit 1; fi
           mkdir -p "$BENCH_OUT"
           for i in $(seq 1 "${{ inputs.runs }}"); do
@@ -137,7 +146,7 @@ jobs:
           mkdir -p "$BENCH_OUT"
           python3 scripts/e2e/cache-bench/analyze.py "$BENCH_OUT/summary.md" "$BENCH_OUT"/run* || true
           python3 scripts/e2e/ci-check.py redact "$BENCH_OUT"
-          echo "### dsh-cache-bench ${{ matrix.mode }} · DSH version (installed): $(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || echo unknown) · plugin $(node -p "require('./package.json').version") · node $(node -v) · GITHUB_SHA $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "### dsh-cache-bench ${{ matrix.mode }} · DSH version (installed): $(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || echo unknown) · plugin $(node -p "require('./package.json').version") · node $(node -v) · native_roles ${{ inputs.native_roles }} · GITHUB_SHA $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
           cat "$BENCH_OUT/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
       - name: Upload
