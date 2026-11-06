@@ -439,6 +439,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       // The episode ends when a check finds the lease free or the session
       // back under the backstop.
       const session = agent.session as unknown as object;
+      let afterDeferral: { pct?: number; thresholdPct: number | string } | null = null;
       if (readHostHistorianBusy(this.ctx, agent)) {
         const deferred = await this.backstopWouldFire(main, agent, probe);
         if (deferred) {
@@ -451,17 +452,27 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
             );
             return null;
           }
-          logInfo(
-            this.ctx,
-            `[magic-context] native pressure backstop already deferred once for this historian episode (pressure ${deferred.pct ?? "?"} % ≥ ${deferred.thresholdPct} %); compacting now — the summarize hook waits for the historian's lease`,
-          );
+          afterDeferral = deferred;
         } else {
           this.backstopDeferred.delete(session);
         }
       } else {
         this.backstopDeferred.delete(session);
       }
-      return this.compactOnce(main, agent, trigger, signal, probe, note);
+      if (afterDeferral === null) return this.compactOnce(main, agent, trigger, signal, probe, note);
+      // Round 36 line I (S6): report the outcome, not the intent. compaction-basic
+      // re-checks with its own meter after its tool-result pruner and returns
+      // null when the prune alone brought the session under its threshold
+      // (200k stress evo bench: 7 "compacting now" lines, all outcome=none).
+      const head = `[magic-context] native pressure backstop already deferred once for this historian episode (pressure ${afterDeferral.pct ?? "?"} % ≥ ${afterDeferral.thresholdPct} %)`;
+      const result = await this.compactOnce(main, agent, trigger, signal, probe, note);
+      logInfo(
+        this.ctx,
+        result !== null
+          ? `${head}; compacted without waiting for the episode to end — the summarize hook waited for the historian's lease`
+          : `${head}; nothing compacted — compaction-basic's own check (after its tool-result pruner) found nothing to compact; the next pressure check retries`,
+      );
+      return result;
     }
     this.notePressureThreshold(base, agent, probe, note);
     try {
