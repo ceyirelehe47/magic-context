@@ -303,3 +303,30 @@ A′ 也只是把这件事推迟到 ride 之后。
 4. 实施后，`fold-format.test.ts` 等测试里「折叠格式」相关断言需要改写（行为变了，不是放宽），是否批准。
 5. 验证用的 bench（slot `cache-7` 起）、e2e 和 soak 是否批准运行。
 6. C3：方案 N 顺带修了 meter 漂移，与第 34 轮「C3 等上游修复」的决定不同，是否同意由我们这边修。
+
+## 7. pi 参考（第 36 轮 F 线，2026-11-06）
+
+详见 [`pi-plugin-comparison.md`](./pi-plugin-comparison.md)。对方案 N 的修订：
+
+1. **写模型照 `pi-plugin/src/transcript-pi.ts`**。pi 的 core 视图同样把 toolResult 并进后面的（合成）user，但每个 part 回指一条源消息，
+   `commit()` 按源消息写回，所以角色不变。DSH 现在照的是 pi 的只读模型 `read-session-pi.ts`，还多折了 assistant tool-call 节点，
+   并按视图消息合并成一个跨节点 replace。§4 第 3 步改为：`walkDshLog` 只去掉 `pendingAssistant` 折叠；`RecordingPart` 记住源节点 seq；
+   op 按源 seq 分组，事件类型由源节点角色决定；assistant 节点上的 part 在 setter 层返回 false。
+2. **删掉 §4 第 5 步**。`RecordingPart` 没有 `remove`，core `cannotRemove()` 为真，`planNewToolDrop` 自动选 `skeleton_real`
+   （spike F2/F3 已复现）。换成一条约束：native 模式下 tool_use part 的 `setToolInput` / `setText` / `replaceWithSentinel`
+   返回 false（F4 已复现：此时旧 full 重放只改结果节点）。
+3. **assistant 文本仍会分配 tag**（F4 已复现），字节上没有 §N§。建议 native 模式下不分配（把 kind 报成非 taggable），待用户决定。
+4. **tag scheme 标志**：去掉 assistant 折叠会改变曾吸收 assistant 文本的 user 消息的文本 tag 键（`pendingFoldTextCount`），
+   参照 pi `pi_stable_id_scheme`（PARITY §8）在 session_meta 记标志、会话创建时冻结，只对新会话生效；可与 §4 第 8 步的开关合并。
+5. core 不需要 dsh 分支：pi 的特殊需求全部通过 `Transcript` 的可选能力（`remove?`、`canRemove?`、`requiresToolArcSkeleton?` 等）表达。
+6. 不借鉴：LKG / served-array ledger（DSH surface 本身持久）、splice 删除、Responses 原生信封逻辑。
+
+改动量（静态估计）：core 0；适配层比原估计少一到两成，主要省在不用另写 drop 模式路径、不用重新设计 core 面对的视图形态。
+
+spike：本地分支 `r36e-spike` commit `f5763b6c1`（未 push），`packages/dsh-plugin/src/agent/pi-mapping.spike.test.ts` 5/5。
+
+新增待决事项（接 §6）：
+
+7. 是否按本节修订方案 N。
+8. assistant 文本 tag：不分配（推荐）还是分配但保证 no-op。
+9. tag scheme：只对新会话生效（推荐）还是一次性迁移旧会话。
