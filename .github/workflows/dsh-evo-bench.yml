@@ -194,12 +194,12 @@ jobs:
         working-directory: packages/dsh-plugin
         run: |
           mkdir -p "$BENCH_OUT"
-          cp "$RUNNER_TEMP"/evo-task/{instance,items,requests}.json "$BENCH_OUT/" 2>/dev/null || true
+          cp "$RUNNER_TEMP"/evo-task/{instance,items,requests,tests}.json "$BENCH_OUT/" 2>/dev/null || true
           python3 scripts/e2e/evo-bench/analyze.py "$BENCH_OUT/summary.md" "$BENCH_OUT" || true
           python3 scripts/e2e/ci-check.py redact "$BENCH_OUT"
           # request bodies (~600 per run) packed AFTER the text redaction (a binary file must not be rewritten)
           if [ -d "$BENCH_OUT/bodies" ]; then tar -C "$BENCH_OUT" -I 'zstd -q -10' -cf "$BENCH_OUT/bodies.tar.zst" bodies && rm -rf "$BENCH_OUT/bodies"; fi
-          echo "### dsh-evo-bench ${{ matrix.group }} run${{ matrix.run }} · ${{ inputs.transition }} · DSH $(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || echo unknown)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### dsh-evo-bench ${{ matrix.group }} run${{ matrix.run }} · ${{ inputs.transition }} · DSH version (installed): $(node -p "require('$E2E_ROOT/dsh/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || echo unknown) · plugin $(node -p "require('./package.json').version") · node $(node -v) · GITHUB_SHA $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
           cat "$BENCH_OUT/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
       - name: Upload
@@ -212,7 +212,7 @@ jobs:
           if-no-files-found: warn
 
   compare:
-    needs: bench
+    needs: [bench, validate]
     if: always() && needs.bench.result != 'skipped'
     runs-on: ubuntu-latest
     steps:
@@ -223,11 +223,16 @@ jobs:
         with:
           pattern: dsh-e2e-evobench-*-run*-${{ github.run_id }}
           path: ${{ runner.temp }}/all
+      - uses: actions/download-artifact@v4
+        if: inputs.validate
+        with:
+          name: dsh-e2e-evobench-validate-${{ github.run_id }}
+          path: ${{ runner.temp }}/validate
       - name: Compare groups
         run: |
           dirs=$(ls -d "$RUNNER_TEMP"/all/*/ 2>/dev/null)
           [ -n "$dirs" ] || { echo "::error::no runs"; exit 1; }
-          python3 packages/dsh-plugin/scripts/e2e/evo-bench/analyze.py "$RUNNER_TEMP/compare.md" $dirs
+          python3 packages/dsh-plugin/scripts/e2e/evo-bench/analyze.py "$RUNNER_TEMP/compare.md" --gold "$RUNNER_TEMP/validate/gold/score.json" $dirs
           cat "$RUNNER_TEMP/compare.md" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
