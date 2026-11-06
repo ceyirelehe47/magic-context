@@ -1,0 +1,14 @@
+# Round 36 line H — g-nudge-diag re-run after the fix (3f1d66f68), same script as g-nudge-diag.txt
+# Nfalse = fold (switch off), Ntrue = native. U = undropped reclaimable tokens, T = live tail tokens.
+Nfalse turn1 msgs=8 toolTags=12 U=18042 T=27062 c2={"evaluable":true,"shouldTrigger":false,"reclaimableTokens":18042,"tailTokens":27064,"severity":0.6666420336979013,"band":"quiet","verdictReason":"tail-below-minimum"}
+Nfalse turn2 msgs=16 toolTags=24 U=45106 T=54126 c2={"evaluable":true,"shouldTrigger":false,"reclaimableTokens":45106,"tailTokens":54128,"severity":0.8333210168489507,"band":"quiet","verdictReason":"tail-below-minimum"}
+Nfalse turn3 msgs=24 toolTags=36 U=72170 T=81190 c2={"evaluable":true,"shouldTrigger":true,"reclaimableTokens":72170,"tailTokens":81192,"severity":0.8888806778993005,"band":"channel2","verdictReason":"ceiling-threshold-met"}
+Nfalse turn4 msgs=32 toolTags=48 U=99234 T=108254 c2={"evaluable":true,"shouldTrigger":true,"reclaimableTokens":99234,"tailTokens":108256,"severity":0.9166605084244753,"band":"channel2","verdictReason":"ceiling-threshold-met"}
+Nfalse turn5 msgs=40 toolTags=60 U=126298 T=135318 c2={"evaluable":true,"shouldTrigger":true,"reclaimableTokens":126298,"tailTokens":135320,"severity":0.9333284067395803,"band":"channel2","verdictReason":"ceiling-threshold-met"}
+Nfalse logs [magic-context] channel1 nudge fired: level=urgent U=54130 T=63150 reason=band-crossing || [magic-context] channel2 nudge delivered: reclaimable~54k
+Ntrue turn1 msgs=14 toolTags=6 U=13532 T=27062 c2={"evaluable":true,"shouldTrigger":false,"reclaimableTokens":13532,"tailTokens":27064,"severity":0.5,"band":"quiet","verdictReason":"tail-below-minimum"}
+Ntrue turn2 msgs=28 toolTags=12 U=40594 T=54126 c2={"evaluable":true,"shouldTrigger":false,"reclaimableTokens":40594,"tailTokens":54128,"severity":0.7499630505468519,"band":"quiet","verdictReason":"tail-below-minimum"}
+Ntrue turn3 msgs=42 toolTags=18 U=67656 T=81190 c2={"evaluable":true,"shouldTrigger":true,"reclaimableTokens":67656,"tailTokens":81192,"severity":0.8332840673958025,"band":"channel2","verdictReason":"ceiling-threshold-met"}
+Ntrue turn4 msgs=56 toolTags=24 U=94718 T=108254 c2={"evaluable":true,"shouldTrigger":true,"reclaimableTokens":94718,"tailTokens":108256,"severity":0.8749445758202778,"band":"channel2","verdictReason":"ceiling-threshold-met"}
+Ntrue turn5 msgs=70 toolTags=30 U=121780 T=135318 c2={"evaluable":true,"shouldTrigger":true,"reclaimableTokens":121780,"tailTokens":135320,"severity":0.899940880874963,"band":"channel2","verdictReason":"ceiling-threshold-met"}
+Ntrue logs [magic-context] channel1 nudge fired: level=urgent U=49616 T=63150 reason=band-crossing || [magic-context] channel2 nudge delivered: reclaimable~54k

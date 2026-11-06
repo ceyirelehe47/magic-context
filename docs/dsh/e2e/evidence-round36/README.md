@@ -133,6 +133,17 @@ No product code changed; fix options A / A′ await a user decision.
 the env-on preview-tags observation (expected: tool results are tagged on the surface, the preview only
 rewrites user input; N12 pin), and the two native cache-bench rounds 42214443375 / 42215740858 (94.3 %, 0
 divergences, $0.0274 / run vs $0.041 fold; reasoning 9–18 vs 290–325 tokens / step). Open: the ctx_reduce
-nudge never fires in native sessions ([g-nudge-diag.txt](g-nudge-diag.txt)). Round-2 summary
+nudge never fires in native sessions ([g-nudge-diag.txt](g-nudge-diag.txt); fixed in line H). Round-2 summary
 [g-bench-42215740858-summary.md](g-bench-42215740858-summary.md), counts [g-bench-stats.txt](g-bench-stats.txt),
 scripts in [g-scripts/](g-scripts/).
+
+## Line H — ctx_reduce nudge in native sessions (limitation 31, fixed)
+
+[h-native-nudge.md](h-native-nudge.md): root cause (core's walk keys a `{type:"tool"}` part to the message it
+sits in; native output sat on the tool-result message, the tag on the call), fix in `agent/nudge.ts`
+(`pairedNativeToolPart`: native call / output → `tool_use` / `tool_result`, Pi arc pairing), commits
+`efa9c4aab` / `3f1d66f68` / `b65acb3f9`, RED → GREEN [h-red-green.txt](h-red-green.txt), diagnostic re-run
+[h-nudge-diag-after.txt](h-nudge-diag-after.txt), push CI 42221751881 (692 / 15 / 109 ×3 / 33), cache-bench
+42221195453 (94.5 %, 0 divergences, reminder at body 33–34, ctx_reduce 1 / 5 / 1;
+[h-bench-42221195453-summary.md](h-bench-42221195453-summary.md), [h-bench-stats.txt](h-bench-stats.txt),
+[h-scripts/](h-scripts/)).

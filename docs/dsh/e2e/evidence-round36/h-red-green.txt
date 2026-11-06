@@ -1,0 +1,13 @@
+Expected: > 9021
+Received: 32
+(fail) round 36 line H — ctx_reduce nudge measurement, native roles > H1 native: U counts tool-result output (same order as fold) and channel 1 / 2 fire [1380.24ms]
+(pass) round 36 line H — ctx_reduce nudge measurement, native roles > H2 fold (switch off): measurement and nudge log unchanged (pinned pre-fix values) [558.30ms]
+ 1 pass
+ 1 fail
+--- after fix (3f1d66f68 / b65acb3f9) ---
+H1 fold   U=18042,45106,72170,99234,126298 T=27062,54126,81190,108254,135318 c2=quiet,quiet,trigger,trigger,trigger logs=[magic-context] channel1 nudge fired: level=urgent U=54130 T=63150 reason=band-crossing || [magic-context] channel2 nudge delivered: reclaimable~54k
+H1 native U=13532,40594,67656,94718,121780 T=27062,54126,81190,108254,135318 c2=quiet,quiet,trigger,trigger,trigger logs=[magic-context] channel1 nudge fired: level=urgent U=49616 T=63150 reason=band-crossing || [magic-context] channel2 nudge delivered: reclaimable~54k
+(pass) round 36 line H — ctx_reduce nudge measurement, native roles > H1 native: U counts tool-result output (same order as fold) and channel 1 / 2 fire [1474.23ms]
+(pass) round 36 line H — ctx_reduce nudge measurement, native roles > H2 fold (switch off): measurement and nudge log unchanged (pinned pre-fix values) [535.48ms]
+ 2 pass
+ 0 fail

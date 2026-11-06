@@ -51,9 +51,17 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   price (the C3 meter drift is fixed for these sessions only). Existing sessions keep the fold view. With
   the switch off nothing changes. Real rc.5 cache-bench with the switch on (42214443375, 42215740858):
   94.3 % prompt-cache hit, 0 prefix breaks, about $0.027 per bench run vs $0.041 with the fold view
-  (far fewer reasoning tokens). Known gap: the `ctx_reduce` reminder does not fire in native sessions.
-  Not covered by e2e / soak yet. Commits `16e6fe2e8` / `8e095e315` / `5d19db4aa`; push CI 42215396157.
-  Detail: `docs/dsh/e2e/evidence-round36/g-native-roles.md`.
+  (far fewer reasoning tokens). Not covered by e2e / soak yet. Commits `16e6fe2e8` / `8e095e315` /
+  `5d19db4aa`; push CI 42215396157. Detail: `docs/dsh/e2e/evidence-round36/g-native-roles.md`.
+- **Round 36 line H — `ctx_reduce` reminder in native-roles sessions (adapter only, core unchanged;
+  user-approved 2026-11-06 20:43 CST):** with the switch on, the reminder that asks the model to drop
+  spent tool outputs never fired, because the measurement only counted the tool-call arguments, not the
+  outputs. It now counts them (paired with their call, as in Pi), so the reminder fires at the same point
+  as with the fold view; sessions with the switch off are unchanged. Real rc.5 cache-bench with the switch
+  on (42221195453): reminder and `ctx_reduce` in every run, 94.5 % prompt-cache hit, 0 prefix breaks before
+  the first compaction, and after it the dropped outputs leave together with the historian's rewrite
+  (prompt about ⅓ the size). Commits `efa9c4aab` / `3f1d66f68` / `b65acb3f9`; push CI 42221751881
+  (692 / 15 / 109). Detail: `docs/dsh/e2e/evidence-round36/h-native-nudge.md`.
 - Known (unchanged by dsh.8): `@deepseek-ai/dsh-tools` and `@deepseek-ai/dsh-subagent` are loaded
   from DSH's own tree without being declared (works with npm and pnpm's default hoisting; not with a
   strict non-hoisting layout).

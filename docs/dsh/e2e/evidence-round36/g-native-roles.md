@@ -106,7 +106,7 @@ Two independent reasons:
    35 / 44 / 37 vs historian 35 / 40 / 34 / 43 / 36), i.e. after the cutoff; the one pre-cutoff
    ctx_reduce (42166613496 run2) came without a reminder. So a 0 inside the window is not by itself a
    change.
-2. **In native sessions the nudge measurement is blind to tool output (defect, not fixed this line).**
+2. **In native sessions the nudge measurement is blind to tool output (defect, not fixed this line; fixed in line H, `h-native-nudge.md`).**
    After the cutoff the native runs (requests 34–39) never get a reminder, where fold runs do. Local
    diagnostic (`g-nudge-diag.txt`, script `g-scripts/diag-nudge-native.test.ts.txt`): with 30 reads of
    ~4.5k tokens, fold measures U = 18k → 126k undropped tokens and fires channel 1 (urgent) and

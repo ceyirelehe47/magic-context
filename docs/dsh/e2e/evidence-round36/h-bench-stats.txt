@@ -1,0 +1,10 @@
+r36h/bench/42221195453 run1 native 1 requests 40 first historian 35 first nudge body 33 ctx_reduce 1 reads 32 repeat 0
+r36h/bench/42221195453 run2 native 1 requests 52 first historian 33 first nudge body 34 ctx_reduce 5 reads 40 repeat 0
+r36h/bench/42221195453 run3 native 1 requests 40 first historian 34 first nudge body 33 ctx_reduce 1 reads 32 repeat 0
+
+42221195453 run1 historian 35 ctx_reduce 1 pre: n=33 hit=0.948 cost=$0.0280 cost/req=$0.00085 out/req=55 reas/req=4 | post: n=5 hit=0.972 cost=$0.0053 cost/req=$0.00105 out/req=66 reas/req=4 breaks(n,prev,prompt,cached) []
+42221195453 run2 historian 33 ctx_reduce 5 pre: n=31 hit=0.944 cost=$0.0276 cost/req=$0.00089 out/req=82 reas/req=20 | post: n=19 hit=0.944 cost=$0.0196 cost/req=$0.00103 out/req=175 reas/req=90 breaks(n,prev,prompt,cached) [(35, 63272, 21397, 9984)]
+42221195453 run3 historian 34 ctx_reduce 1 pre: n=32 hit=0.944 cost=$0.0281 cost/req=$0.00088 out/req=60 reas/req=9 | post: n=6 hit=0.917 cost=$0.0089 cost/req=$0.00149 out/req=82 reas/req=22 breaks(n,prev,prompt,cached) [(38, 66595, 24405, 9984)]
+42215740858 run1 historian 33 ctx_reduce 0 pre: n=31 hit=0.943 cost=$0.0270 cost/req=$0.00087 out/req=58 reas/req=7 | post: n=6 hit=0.835 cost=$0.0231 cost/req=$0.00385 out/req=146 reas/req=88 breaks(n,prev,prompt,cached) [(36, 64273, 66266, 9984)]
+42215740858 run2 historian 33 ctx_reduce 0 pre: n=31 hit=0.943 cost=$0.0277 cost/req=$0.00089 out/req=71 reas/req=20 | post: n=6 hit=0.836 cost=$0.0225 cost/req=$0.00375 out/req=62 reas/req=4 breaks(n,prev,prompt,cached) [(36, 64679, 66681, 9984)]
+42215740858 run3 historian 34 ctx_reduce 0 pre: n=32 hit=0.944 cost=$0.0276 cost/req=$0.00086 out/req=51 reas/req=0 | post: n=5 hit=0.800 cost=$0.0225 cost/req=$0.00449 out/req=77 reas/req=15 breaks(n,prev,prompt,cached) [(38, 67880, 69882, 9984)]

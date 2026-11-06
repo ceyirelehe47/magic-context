@@ -70,8 +70,15 @@ default off** (`context.nativeRoles` / env `MAGIC_CONTEXT_DSH_NATIVE_ROLES`) —
 bench input `bc74ce513`, N11 RED `73cf540e6` / FIX `5d19db4aa`; push CI 42215396157 `dsh-plugin` **689** / `adapter-api`
 15 / `contracts:dsh` **109** ×3 / ci-check 33; with the N12 pin `dsh-plugin` **690** (push CI 42218759538 @ `ae60fe811`). Cache-bench (plugin, switch on)
 42214443375 and 42215740858: 94.3 % hit, 0 divergences, **$0.0274 / run** (line C fold view $0.041), reasoning
-9–18 tokens / step (fold 290–325). Open: the ctx_reduce nudge does not fire in native sessions (measurement
-attributes the tool tag to the call part; not fixed). Known limitation 31, `evidence-round36/g-native-roles.md`.
+9–18 tokens / step (fold 290–325). Known limitation 31, `evidence-round36/g-native-roles.md`.
+**Line H** (user-approved 20:43 CST, adapter only, core untouched): the ctx_reduce nudge now fires in native
+sessions — `agent/nudge.ts` `nudgeMeasurementMessages` re-labels the native call / output parts as `tool_use` /
+`tool_result` in the measurement copy so core's walk pairs the output with the call that owns the tag (Pi arc
+semantics); fold view untouched. RED `efa9c4aab`, FIX `3f1d66f68`, test ids `b65acb3f9`; push CI 42221751881
+`dsh-plugin` **692** / `adapter-api` 15 / `contracts:dsh` 109 ×3 / ci-check 33. Cache-bench 42221195453 (cache-9,
+plugin, switch on): 94.5 % hit, 0 divergences, $0.0279 / run, reminder at body 33–34, ctx_reduce 1 / 5 / 1;
+after the cutoff the drops ride the historian publication (prompt 63k → 21k) and cost / request falls ~65 % vs G.
+Limitation 31 nudge item **fixed**, `evidence-round36/h-native-nudge.md`.
 Evidence: `docs/dsh/e2e/evidence-round36/README.md`.
 
 Previous baseline (round 35, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
@@ -2663,11 +2670,17 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     - **Real model (cache-bench, plugin group, switch on):** 42214443375 @ `bc74ce513` and 42215740858 @
       `5d19db4aa`: hit 94.3 %, 0 divergences, steps to first compaction 31, $0.0274 / run (line C fold
       $0.040–0.041), reasoning 9–18 tokens / step (fold 290–325), 8 reads per turn with no re-read.
-    - **Open (not fixed): ctx_reduce nudge blind in native sessions.** Core tail hygiene attributes a tool
-      tag to `(toolOwnerMessageId, callID)`, which in the native view is the assistant's call part, not the
-      synthetic tool-result message holding the output; U stays at argument size (local diagnostic: 280 vs
-      126k tokens) and channel 1 / 2 never fire. Bench: no reminder after the cutoff in native runs, fold
-      runs get one right after the first historian request.
+    - **Fixed in round 36 line H (2026-11-06): ctx_reduce nudge blind in native sessions.** Was: core tail
+      hygiene attributes a tool tag to `(toolOwnerMessageId, callID)`, which in the native view is the
+      assistant's call part, not the synthetic tool-result message holding the output; U stayed at argument
+      size (local diagnostic: 280 vs 126k tokens) and channel 1 / 2 never fired. Fix (adapter only,
+      `agent/nudge.ts` `pairedNativeToolPart`): in the native measurement copy the call part becomes
+      `tool_use` and the output part `tool_result`, so core's existing pairing gives the output the call's
+      owner (Pi's call/result arc); `ctxReduceCallIds` accepts `tool_use`. Evidence: RED `efa9c4aab` (H1: U 32
+      vs fold 18042) → FIX `3f1d66f68` (native U 13532 … 121780, channel 1 urgent + channel 2 at turn 3; H2
+      fold U / T / log pinned unchanged), push CI 42221751881 692 / 15 / 109 ×3 / 33; cache-bench 42221195453
+      reminder at body 33 / 34 / 33, ctx_reduce 1 / 5 / 1, hit 94.5 %, 0 divergences
+      (`evidence-round36/h-native-nudge.md`). Not covered: e2e / soak with the switch on.
     - **Not run with the switch on:** e2e, soak, install acceptance. Evidence:
       `docs/dsh/e2e/evidence-round36/g-native-roles.md`.
 
