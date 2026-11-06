@@ -18,7 +18,7 @@ Links (PR / docs URLs) are removed from the request text: the agent has web
 tools and the PR diff would be the answer (a stricter rule than the paper,
 which only strips git history; see i-evo-bench.md).
 """
-import json, os, re, sys, urllib.request
+import json, os, re, sys, time, urllib.request
 
 DS = "Fsoft-AIC/SWE-EVO"
 
@@ -29,7 +29,15 @@ def fetch_rows(path=None):
     rows, off = [], 0
     while True:
         url = f"https://datasets-server.huggingface.co/rows?dataset={DS}&config=default&split=test&offset={off}&length=100"
-        d = json.load(urllib.request.urlopen(url, timeout=120))
+        for attempt in range(4):  # run 42255053410 baseline 2: IncompleteRead from datasets-server
+            try:
+                d = json.load(urllib.request.urlopen(url, timeout=120))
+                break
+            except Exception as e:
+                if attempt == 3:
+                    raise
+                print(f"rows fetch retry {attempt + 1}: {type(e).__name__}", file=sys.stderr)
+                time.sleep(10 * (attempt + 1))
         rows += d["rows"]
         off += 100
         if off >= d.get("num_rows_total", 0):
