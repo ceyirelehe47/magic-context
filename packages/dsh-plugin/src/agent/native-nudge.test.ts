@@ -218,6 +218,8 @@ describe("round 36 line H — ctx_reduce nudge measurement, native roles", () =>
   it("H1 native: U counts tool-result output (same order as fold) and channel 1 / 2 fire", async () => {
     const fold = await runReads(false);
     const native = await runReads(true);
+    console.log(`H1 fold   U=${fold.u.join(",")} T=${fold.t.join(",")} c2=${fold.c2.join(",")} logs=${fold.logs.join(" || ")}`);
+    console.log(`H1 native U=${native.u.join(",")} T=${native.t.join(",")} c2=${native.c2.join(",")} logs=${native.logs.join(" || ")}`);
     // T (live tail) already agreed before the fix; U must now too.
     for (let i = 0; i < TURNS; i += 1) {
       expect(native.u[i]).toBeGreaterThan(fold.u[i] * 0.5);

@@ -61,6 +61,7 @@ import {
 import { observedProtectionWindow, type DshProtectionOptions } from "./protection";
 import {
   isKnowledgeBaselineMessage,
+  isNativeView,
   isSkillCatalogBaselineMessage,
   readDshTranscript,
 } from "./transcript";
@@ -197,9 +198,55 @@ export function nudgeMeasurementMessages(agent: Agent, sessionId: string): Messa
     },
     canonicalSessionId: sessionId,
   });
+  const native = isNativeView(view);
   return view.messages
     .filter((message) => !isKnowledgeBaselineMessage(message) && !isSkillCatalogBaselineMessage(message))
-    .map((message) => ({ info: { id: message.id, role: message.role }, parts: message.parts }));
+    .map((message) => ({
+      info: { id: message.id, role: message.role },
+      parts: native ? message.parts.map(pairedNativeToolPart) : message.parts,
+    }));
+}
+
+/**
+ * Round 36 line H (limitation 31) — native-role view only: the measurement
+ * shape of a tool part is Pi's call/result arc, not OpenCode's single part.
+ *
+ * In the fold view a call and its output are ONE `{type:"tool"}` part per
+ * call inside one message, and the tag row is owned by that message. In the
+ * native view the assistant keeps its call part (`state.input` only) and the
+ * output sits on a separate tool-result message, while the tag row stays owned
+ * by the assistant call (`toolOwnerMessageId`). Core's walk keys a
+ * `{type:"tool"}` part on the message it sits in, so the output part matched
+ * no tag and U counted call arguments only (≈5 tokens a read).
+ *
+ * Pi (`tail-hygiene-walk-pi` arcs) pairs a `toolResult` with the call that
+ * owns it. Core's walk already has that pairing for the Anthropic-shaped
+ * parts: a `tool_result` takes the owner of the preceding `tool_use` with the
+ * same call id. So the measurement view re-labels native parts — input-only
+ * call part → `tool_use`, output part → `tool_result` — with identical
+ * serialised content (same tokens), and nothing else changes: the surface,
+ * the tags and the drop/truncation paths never see these copies.
+ */
+function pairedNativeToolPart(part: unknown): unknown {
+  if (part === null || typeof part !== "object") return part;
+  const p = part as { type?: unknown; tool?: unknown; callID?: unknown; state?: unknown };
+  if (p.type !== "tool" || typeof p.callID !== "string") return part;
+  const state = p.state !== null && typeof p.state === "object" ? (p.state as Record<string, unknown>) : null;
+  if (state === null) return part;
+  const hasInput = state.input !== undefined;
+  const hasOutput = state.output !== undefined || state.error !== undefined || state.result !== undefined;
+  if (hasInput && !hasOutput) {
+    return { type: "tool_use", id: p.callID, callID: p.callID, name: p.tool, tool: p.tool, input: state.input };
+  }
+  if (hasOutput && !hasInput) {
+    return {
+      type: "tool_result",
+      tool_use_id: p.callID,
+      tool: p.tool,
+      content: state.output !== undefined ? state.output : state.error !== undefined ? state.error : state.result,
+    };
+  }
+  return part;
 }
 
 /** ctx_reduce call ids present in the transcript (DSH `{type:"tool", tool, callID}` parts). */
@@ -209,7 +256,10 @@ export function ctxReduceCallIds(messages: readonly MessageLike[]): Set<string> 
     for (const part of message.parts) {
       if (part === null || typeof part !== "object") continue;
       const p = part as { type?: unknown; tool?: unknown; callID?: unknown };
-      if (p.type === "tool" && p.tool === "ctx_reduce" && typeof p.callID === "string") ids.add(p.callID);
+      // `tool_use` is the native-view measurement shape of a call (round 36 line H).
+      if ((p.type === "tool" || p.type === "tool_use") && p.tool === "ctx_reduce" && typeof p.callID === "string") {
+        ids.add(p.callID);
+      }
     }
   }
   return ids;
