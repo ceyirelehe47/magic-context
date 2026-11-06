@@ -546,7 +546,7 @@ describe("round 36 line G: native roles (plan N), switch on, new session", () =>
           session.surface.nodes
             .map((seq) => sessionEventAt(session, seq))
             .map((event) => (event ? deriveEventMessage(event) : undefined))
-            .filter((m) => m !== undefined) as Array<{ role: string; content: Array<{ type: string; text?: string }> }>;
+            .filter((m) => m !== undefined) as unknown as Array<{ role: string; content: Array<{ type: string; text?: string }> }>;
         const messages = payload(h.session);
         const toolBefore = JSON.stringify(messages.filter((m) => m.role !== "user"));
         await h.step({ messages });
