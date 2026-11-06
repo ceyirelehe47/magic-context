@@ -52,7 +52,7 @@ async function scenario(
   const dir = mkdtempSync(join(tmpdir(), "dsh-magic-native-"));
   const db = await createTestDb(join(dir, "c.db"));
   seqId += 1;
-  const sid = `sess-native-${seqId}`;
+  const sid = `sess-h-nudge-${seqId}`; // own ids: the tag-scheme registry is process-global (bun test runs files in one process)
   const key = `dsh:a1b2c3d4:${sid}`;
   try {
     const session = Session.create(SessionId(sid));
@@ -207,7 +207,7 @@ async function runReads(native: boolean): Promise<Measured> {
         const c2 = evaluateChannel2(b) as unknown as { shouldTrigger: boolean; reason?: string };
         out.c2.push(c2.shouldTrigger ? "trigger" : "quiet");
       }
-      out.logs = h.logs.filter((l) => /nudge/.test(l));
+      out.logs = h.logs.filter((l) => /channel[12] nudge|nudge evaluation/.test(l));
     },
     { native },
   );
