@@ -23,13 +23,14 @@ jobs:
       matrix:
         arm: [baseline, plugin]
     env:
-      E2E_ROOT: ${{ runner.temp }}/longrun-runtime
       DSH_VERSION: '0.2.1-rc.5'
       BUN_VERSION: '1.4.2'
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Scratch directories
+        run: echo "E2E_ROOT=$RUNNER_TEMP/longrun-runtime" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
