@@ -100,7 +100,7 @@ export function planeDeps(db: Database, log?: (m: string) => void): ContextPlane
       ready: Promise.resolve({ kind: "ok", db, storageDir: "", livenessPath: "" }),
       canonicalKey: keyOf,
     } as never,
-    config: {},
+    config: { nativeRoles: false }, // round 37: legacy fold view pinned (default is native for new sessions)
     ...(log ? { log } : {}),
   };
 }

@@ -3,46 +3,63 @@
  *
  * Two ways to map a DSH surface onto core's transcript:
  *
- *   - `fold`   (default, every session before round 36 G): a tool-call
- *              assistant node and its tool results fold into the following
- *              user / synthetic user message and every rewrite is ONE user
- *              replace over that range (known limitation 1);
- *   - `native` (plan N, behind a switch, default off): every surface node keeps
- *              its own role. Rewrites go back per SOURCE node, like
- *              pi-plugin's `transcript-pi.ts` commit: user text through a
- *              single-node `user/message` replace, tool results through a
- *              single-node, content-only `tool/result` replace, each preceded by
- *              a `compaction/prune` shadow price. Assistant nodes are never
- *              written and their text is never tagged.
+ *   - `fold`   (every session before round 36 G; since round 37 only sessions
+ *              already worked on in it, or new sessions with the explicit
+ *              opt-out): a tool-call assistant node and its tool results fold
+ *              into the following user / synthetic user message and every
+ *              rewrite is ONE user replace over that range (known limitation 1);
+ *   - `native` (plan N; round 37 I3: the DEFAULT for sessions Magic has not
+ *              worked on yet): every surface node keeps its own role. Rewrites
+ *              go back per SOURCE node, like pi-plugin's `transcript-pi.ts`
+ *              commit: user text through a single-node `user/message` replace,
+ *              tool results through a single-node, content-only `tool/result`
+ *              replace, each preceded by a `compaction/prune` shadow price.
+ *              Assistant nodes are never written and their text is never
+ *              tagged, so their tool calls, reasoning blocks and replay
+ *              metadata reach the provider as DSH recorded them.
  *
  * The scheme changes the core text-tag keys (`${viewMessageId}:pN`) and the
  * tool-tag owner ids, so it is FROZEN per session when the session is first
- * seen with the switch on, like pi's `pi_stable_id_scheme`:
+ * seen with the switch on (default), like pi's `pi_stable_id_scheme`:
  *   - a fresh session (no Magic tag rows, no Magic surface copy) → `native`;
- *   - a session Magic already worked on → `fold` (kept forever, no migration).
- * With the switch off nothing is written; a session already frozen as
- * `native` stays native (its surface holds per-node rewrites a fold view
- * would misread).
+ *   - a session Magic already worked on → `fold` (kept forever, no migration,
+ *     never mixed: its tag keys, message identities and write rules stay fold).
+ * With the explicit opt-out nothing is written (new sessions get the fold
+ * view); a session already frozen as `native` stays native (its surface holds
+ * per-node rewrites a fold view would misread).
  *
- * The decision lives in an adapter-owned table created only when the switch
- * is used (`dsh_session_tag_scheme`), and in a process registry keyed by the
- * canonical session id so every reader of the session's view (context plane,
+ * The decision lives in an adapter-owned table (`dsh_session_tag_scheme`,
+ * created on first use), and in a process registry keyed by the canonical
+ * session id so every reader of the session's view (context plane,
  * coordinator CAS, nudges, historian provider, ctx_* tools) uses one scheme.
  */
 import type { Database } from "@magic-context/core/shared/sqlite";
 
 export type DshTagScheme = "fold" | "native";
 
-/** Environment switch (`1` / `true` / `on`): request plan N for new sessions. */
+/**
+ * Environment override: `0` / `false` / `off` / `no` opts new sessions out
+ * (legacy fold view); `1` / `true` / `on` / `yes` keeps the default (native).
+ */
 export const NATIVE_ROLES_ENV = "MAGIC_CONTEXT_DSH_NATIVE_ROLES";
 
-/** The switch: explicit row config wins, else the environment variable. Default off. */
+/**
+ * Whether a session Magic sees for the first time may start on the native
+ * view: explicit row config wins, else the environment variable, else the
+ * default. Round 37 (I3): the default is ON — the fold view rewrote every
+ * finished tool step into a user message without the assistant tool_calls,
+ * tool results and reasoning, and on the real 1M route the model re-derived
+ * its state every step (reasoning median 10 704 vs 120 tokens per request,
+ * every turn timed out). Sessions already worked on stay as they were frozen
+ * (see {@link resolveSessionTagScheme}); this only decides fresh sessions.
+ */
 export function nativeRolesRequested(config?: boolean, env: NodeJS.ProcessEnv = process.env): boolean {
   if (typeof config === "boolean") return config;
   const raw = env[NATIVE_ROLES_ENV];
-  if (typeof raw !== "string") return false;
+  if (typeof raw !== "string" || raw.trim().length === 0) return true;
   const value = raw.trim().toLowerCase();
-  return value === "1" || value === "true" || value === "on" || value === "yes";
+  if (value === "0" || value === "false" || value === "off" || value === "no") return false;
+  return true;
 }
 
 const MAX_REGISTRY = 1024;

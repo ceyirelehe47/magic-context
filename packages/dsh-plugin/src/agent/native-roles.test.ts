@@ -11,8 +11,10 @@
  * pi-plugin's `transcript-pi.ts` commit (per source node), see
  * docs/dsh/design/native-roles-plan.md §7.
  *
- * Off (default) and for sessions Magic already worked on, nothing changes:
- * the existing suite is the regression guard (no assertion changed).
+ * Round 37 (I3): the switch defaults to ON for new sessions
+ * (default-native-roles.test.ts). Explicitly off, and for sessions Magic
+ * already worked on, nothing changes: the fold suites pin `nativeRoles: false`
+ * and stay the regression guard of the legacy path (no assertion changed).
  */
 import { describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -592,17 +594,22 @@ describe("round 36 line G: native rewrites are Magic's own (drop-gate parity wit
 
 describe("round 36 line G: tag scheme is frozen when the session is first seen", () => {
   it("S1 a session Magic already worked on stays on the fold view when the switch is turned on", async () => {
-    await scenario(async (h) => {
-      addToolTurn(h.session, 1, 50);
-      await h.step();
-      addToolTurn(h.session, 2, 50);
-      h.setNative(true);
-      await h.step();
-      // fold view: the tool-call assistant + result are folded into a Magic user copy
-      expect(wire(h.session).some((m) => m.content.includes("Magic Context note"))).toBe(true);
-      expect(replaces(h.session).some((e) => e.type === "tool/result")).toBe(false);
-      expect(events(h.session).some((e) => e.type === "compaction/prune")).toBe(false);
-    });
+    // Round 37: the switch defaults to on, so the pre-change history (fold,
+    // nothing frozen) is reproduced with the explicit opt-out for the first pass.
+    await scenario(
+      async (h) => {
+        addToolTurn(h.session, 1, 50);
+        await h.step();
+        addToolTurn(h.session, 2, 50);
+        h.setNative(true);
+        await h.step();
+        // fold view: the tool-call assistant + result are folded into a Magic user copy
+        expect(wire(h.session).some((m) => m.content.includes("Magic Context note"))).toBe(true);
+        expect(replaces(h.session).some((e) => e.type === "tool/result")).toBe(false);
+        expect(events(h.session).some((e) => e.type === "compaction/prune")).toBe(false);
+      },
+      { native: false },
+    );
   });
 
   it("S2 a native session stays native when the switch is turned off later", async () => {
@@ -622,12 +629,15 @@ describe("round 36 line G: tag scheme is frozen when the session is first seen",
     );
   });
 
-  it("S3 switch off (default): a new session gets the legacy fold view", async () => {
-    await scenario(async (h) => {
-      addToolTurn(h.session, 1, 50);
-      await h.step();
-      expect(wire(h.session).some((m) => m.content.includes("Magic Context note"))).toBe(true);
-      expect(events(h.session).some((e) => e.type === "compaction/prune")).toBe(false);
-    });
+  it("S3 switch explicitly off (round 37: the default is on): a new session gets the legacy fold view", async () => {
+    await scenario(
+      async (h) => {
+        addToolTurn(h.session, 1, 50);
+        await h.step();
+        expect(wire(h.session).some((m) => m.content.includes("Magic Context note"))).toBe(true);
+        expect(events(h.session).some((e) => e.type === "compaction/prune")).toBe(false);
+      },
+      { native: false },
+    );
   });
 });

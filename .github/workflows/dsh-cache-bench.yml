@@ -39,10 +39,10 @@ on:
         type: string
         default: ""
       native_roles:
-        description: "Round 36 G: plugin group runs with MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 (plan N, native-role view for new sessions). off = unchanged"
+        description: "Plugin group view for new sessions. Round 37: default = shipped default (native roles, env unset); off = legacy fold (MAGIC_CONTEXT_DSH_NATIVE_ROLES=0); on = MAGIC_CONTEXT_DSH_NATIVE_ROLES=1"
         type: choice
-        options: ["off", "on"]
-        default: "off"
+        options: ["default", "off", "on"]
+        default: "default"
       slot:
         description: "Concurrency slot (use cache-*; never the e2e line's slots)"
         type: string
@@ -128,8 +128,11 @@ jobs:
         run: |
           if [ "${{ matrix.mode }}" = plugin ]; then export BENCH_ABLATE="$ABLATE_PLUGIN"; else export BENCH_ABLATE="$ABLATE_BASELINE"; fi
           echo "BENCH_ABLATE=${BENCH_ABLATE:-<none>}"
-          # Round 36 G: plan N switch, plugin group only (the baseline has no Magic).
-          if [ "${{ matrix.mode }}" = plugin ] && [ "$NATIVE_ROLES" = on ]; then export MAGIC_CONTEXT_DSH_NATIVE_ROLES=1; else unset MAGIC_CONTEXT_DSH_NATIVE_ROLES; fi
+          # Round 36 G / round 37: plan N switch, plugin group only (the baseline has no Magic).
+          # Since round 37 native roles are the default for new sessions; "off" pins the legacy fold view.
+          unset MAGIC_CONTEXT_DSH_NATIVE_ROLES
+          if [ "${{ matrix.mode }}" = plugin ] && [ "$NATIVE_ROLES" = on ]; then export MAGIC_CONTEXT_DSH_NATIVE_ROLES=1; fi
+          if [ "${{ matrix.mode }}" = plugin ] && [ "$NATIVE_ROLES" = off ]; then export MAGIC_CONTEXT_DSH_NATIVE_ROLES=0; fi
           echo "MAGIC_CONTEXT_DSH_NATIVE_ROLES=${MAGIC_CONTEXT_DSH_NATIVE_ROLES:-<unset>}"
           if [ -z "$OPENCODE_API_KEY" ]; then echo "::error::secret OPENCODE_API_KEY is not set"; exit 1; fi
           mkdir -p "$BENCH_OUT"

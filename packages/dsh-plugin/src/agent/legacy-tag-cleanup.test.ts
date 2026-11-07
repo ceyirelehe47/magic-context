@@ -81,7 +81,7 @@ function depsFor(db: Database, dir: string): ContextPlaneDeps {
       ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }),
       canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}`,
     },
-    config: {},
+    config: { nativeRoles: false }, // round 37: legacy fold view pinned (default is native for new sessions)
     log: () => {},
   };
 }

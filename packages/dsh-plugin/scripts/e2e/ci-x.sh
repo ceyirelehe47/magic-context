@@ -222,14 +222,16 @@ fi
 # unreplaced fold. Checks F1–F3 (ci-check.py check_f).
 #   f-1  two reads planned; killed before step 2 (crash point logged)
 #   f-2  restart, one turn
+# Round 37: the tail-fold window exists only in the legacy fold view (native roles are the
+# default for new sessions since round 37), so this scenario pins the fold view for both runs.
 export OPENCODE_SESSION="mc-ci-f-$(date +%s)"
-MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_CRASH_AT=tail-fold-pending MC_HISTORIAN_THRESHOLD=95 RUN_TIMEOUT=120 \
+MAGIC_CONTEXT_DSH_NATIVE_ROLES=0 MAGIC_CONTEXT_DSH_E2E=1 MAGIC_CONTEXT_DSH_E2E_CRASH_AT=tail-fold-pending MC_HISTORIAN_THRESHOLD=95 RUN_TIMEOUT=120 \
   xrun f-1 "Read the two files as planned. [[MOCK:f1]]"
 FSID="$(session_of "$OUT/f-1.log")"
 echo "$FSID" > "$OUT/f.sid"
 if [[ -n "$FSID" ]]; then
   xdb "$FSID" f-1k
-  MC_HISTORIAN_THRESHOLD=95 xrun f-2 "Reply when done. [[MOCK:f2]]" "$FSID"
+  MAGIC_CONTEXT_DSH_NATIVE_ROLES=0 MC_HISTORIAN_THRESHOLD=95 xrun f-2 "Reply when done. [[MOCK:f2]]" "$FSID"
   xdb "$FSID" f-2
   f="$(ls "$DSH_HOME"/sessions/*/"$FSID"/session.v4.jsonl.zstd 2>/dev/null | head -n 1)"
   [[ -n "$f" ]] && zstd -qdc "$f" > "$OUT/f-session.jsonl" 2>/dev/null

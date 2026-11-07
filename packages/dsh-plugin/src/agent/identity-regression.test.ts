@@ -103,7 +103,7 @@ async function scenario(fn: (ctx: Ctx) => Promise<void>) {
     let nowOffset = 0;
     const deps: ContextPlaneDeps = {
       host: { ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }), canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}` },
-      config: {},
+      config: { nativeRoles: false }, // round 37: legacy fold view pinned (default is native for new sessions)
       cacheTtl: "5m",
       now: () => Date.now() + nowOffset,
       log: (m) => {

@@ -2,8 +2,10 @@
 # (Microsoft CompactionBench preprint, appendix A) on one SWE-EVO release
 # transition, three groups:
 #   baseline  profile "base": shipped DSH headless template, no plugin (native compaction)
-#   fold      profile "test": dsh-magic-context from this checkout + `setup` (defaults)
-#   native    same as fold + MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 (round 36 G, plan N)
+#   fold      profile "test": dsh-magic-context from this checkout + `setup`, legacy fold view
+#             pinned with MAGIC_CONTEXT_DSH_NATIVE_ROLES=0 (the plugin default before round 37)
+#   native    same profile, env unset = the plugin default since round 37 (native roles, plan N;
+#             before round 37 this group set MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 — same view)
 # Same DSH, model route (evo-bench/evo-model.yml: deepseek-v4.1-flash via
 # OpenCode Go; default route = shipped opencode-go catalog, 1M window), requests, workspace, test wrapper, permission
 # mode, web tools off (bench-evo.yml) and network block in every group. Each (group, run) is its own job (6 h cap).

@@ -97,8 +97,11 @@ export interface ContextPlaneConfig {
    * Round 36 line G (plan N): native-role view for NEW sessions — no
    * tool-call fold, per-node rewrites (tool/result content replace, user
    * replace, each with a compaction/prune shadow price), assistant nodes never
-   * written or tagged. Default off; unset = env `MAGIC_CONTEXT_DSH_NATIVE_ROLES`.
-   * Frozen per session at its first pass (`agent/tag-scheme.ts`).
+   * written or tagged. Round 37 (I3): default ON for sessions Magic has not
+   * worked on yet; `false` (or env `MAGIC_CONTEXT_DSH_NATIVE_ROLES=0`) keeps the
+   * legacy fold view for new sessions. Frozen per session at its first pass
+   * (`agent/tag-scheme.ts`): a session already processed in the fold view stays
+   * fold (no migration).
    */
   nativeRoles?: boolean;
 }

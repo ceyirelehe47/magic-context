@@ -72,7 +72,7 @@ describe("new input after a pending fold is pre-tagged under core's exact :pN ke
       session.append("user/message", first as never, { surfaceOp: "append" });
       const deps: ContextPlaneDeps = {
         host: { ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }), canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}` },
-        config: {},
+        config: { nativeRoles: false }, // round 37: legacy fold view pinned (default is native for new sessions)
         log: () => {},
       };
       const state = createContextPlaneState();
@@ -141,7 +141,7 @@ describe("new input after a pending fold is pre-tagged under core's exact :pN ke
       session.append("tool/result", { turn: 1, step: 1, message: result } as never, { surfaceOp: "append" });
       const deps: ContextPlaneDeps = {
         host: { ready: Promise.resolve({ kind: "ok", db, storageDir: dir, livenessPath: "" }), canonicalKey: (id: string) => `dsh:a1b2c3d4:${id}` },
-        config: {},
+        config: { nativeRoles: false }, // round 37: legacy fold view pinned (default is native for new sessions)
         log: () => {},
       };
       const prompt = createUserMessage({ content: [{ type: "text", text: "steer now" }], source: { kind: "user" } });

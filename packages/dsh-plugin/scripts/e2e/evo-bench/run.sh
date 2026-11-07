@@ -40,8 +40,9 @@ STRESS=0; [[ "$MODEL_PATCH" == evo-model-200k-stress.yml ]] && STRESS=1
 PATCHES=(--patch "$HERE/$MODEL_PATCH")
 case "$GROUP" in
   baseline) PROFILE=base; unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
-  fold) PROFILE=test; unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
-  native) PROFILE=test; export MAGIC_CONTEXT_DSH_NATIVE_ROLES=1 ;;
+  # Round 37: native roles are the plugin default for new sessions; fold pins the legacy view.
+  fold) PROFILE=test; export MAGIC_CONTEXT_DSH_NATIVE_ROLES=0 ;;
+  native) PROFILE=test; unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
   *) echo "group must be baseline|fold|native" >&2; exit 2 ;;
 esac
 [[ "$STRESS" == 1 && "$GROUP" != baseline ]] && PATCHES+=(--patch "$CB/bench-plugin.yml")
