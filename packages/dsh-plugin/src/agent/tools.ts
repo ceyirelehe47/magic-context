@@ -166,7 +166,7 @@ export interface CtxToolsOptions extends CtxRuntimeOptions {
   /** When false, omit the Pi-parity `todowrite` tool. */
   todowriteEnabled?: boolean;
   /** Raw-message source for ctx_expand. Defaults to the agent-session adapter below. */
-  readRawMessages?: (agent: Agent) => RawMessage[];
+  readRawMessages?: (agent: Agent, canonicalSessionId?: string) => RawMessage[];
 }
 
 /** Resolve the shared DB lazily (host bootstrap fallback). */
@@ -1265,7 +1265,7 @@ interface CtxExpandArgs {
  * different messages (real rc.5 log, round 23). Op copies are expanded back
  * into their source events, so a dropped tool output stays recoverable.
  */
-export function readRawMessagesFromAgent(agent: Agent): RawMessage[] {
+export function readRawMessagesFromAgent(agent: Agent, canonicalSessionId = ""): RawMessage[] {
   const session = agent.session as unknown as {
     surface?: { nodes?: readonly number[]; replaceGeneration?: number };
     header?: { cwd?: string };
@@ -1276,18 +1276,22 @@ export function readRawMessagesFromAgent(agent: Agent): RawMessage[] {
   // <project-memory>, <ctx-search-hint>) is not conversation — OpenCode/Pi
   // never store it, so their ctx_expand never shows it. Same filter as the
   // historian / FTS input (round 24c); ordinals and ids are unchanged.
+  // Round 37 phase 2: read with the session's canonical key, so a native-roles
+  // session is walked natively — its in-place tool/result rewrites (drops,
+  // truncations) are followed back to the ORIGINAL output. With "" the scheme
+  // lookup found nothing and the fold walk read `[dropped §N§]` as the content.
   return readDshHistory({
       session: {
         events: sessionEvents(agent.session),
         surface: session.surface,
         header: { cwd: session.header?.cwd },
       } as never,
-      canonicalSessionId: "",
+      canonicalSessionId,
     }).messages.map(withoutInjectedText);
 }
 
 export function createCtxExpandTool(ctx: Context, opts: CtxToolsOptions): ToolDefinition {
-  const readRawMessages = opts.readRawMessages ?? readRawMessagesFromAgent;
+  const readRawMessages = opts.readRawMessages ?? ((agent: Agent, sessionId?: string) => readRawMessagesFromAgent(agent, sessionId));
   return defineTool({
     name: "ctx_expand",
     description: CTX_EXPAND_DESCRIPTION,
@@ -1327,7 +1331,7 @@ export function createCtxExpandTool(ctx: Context, opts: CtxToolsOptions): ToolDe
 
       // Register the DSH raw-message source for the duration of this one call.
       const unregister = setRawMessageProvider(sessionId, {
-        readMessages: () => readRawMessages(agent),
+        readMessages: () => readRawMessages(agent, sessionId),
       });
       try {
         if (typeof params.message === "number" && params.message >= 1) {
