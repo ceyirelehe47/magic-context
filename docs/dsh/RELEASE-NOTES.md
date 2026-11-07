@@ -62,6 +62,20 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   and keep the old behaviour; start a new session to get the fix. Opt-out for new sessions:
   `context.nativeRoles: false` / `MAGIC_CONTEXT_DSH_NATIVE_ROLES=0`. Not covered by e2e / soak yet.
   Commits `81a441e96` (RED) / `b3310120c`. Detail: `docs/dsh/e2e/evidence-round37/i3-native-default.md`.
+- **Round 37 phase 2 (adapter + bench only, core unchanged; user request 2026-11-07 16:53 CST):**
+  (1) **I4** — after a historian publication the new `<session-history>` baseline now replaces the live one
+  in place (m0 and m1 stay two messages, cache split kept; resume and repeated pre-steps write nothing; a
+  crash between publication and baseline update keeps the raw history visible); before, every publication
+  appended another full baseline to the request. Verified offline (K1–K7, CI 42358893700); **not yet seen in a
+  real publication** (the 200k test route returned 429 twice). (2) `ctx_expand` after a real native drop now
+  returns the original stored output instead of the drop marker. (3) The native backstop logs what it did on
+  every step (executed / skipped with reason / deferred / failed, plus predicted vs measured size); real runs
+  so far only show the skipped classes. (4) Cold-process resume of an unfinished tool call checked for native
+  sessions; legacy fold sessions keep their known behaviour (limitation 1, not changed by decision).
+  (5) Bench only: evo-bench now runs DSH in an isolated namespace with an environment allowlist and checks
+  the boundary with an access probe before every paid run; pre-isolation results keep their caveat and are
+  not directly comparable. Commits `edb79efbf`…`b36e0d104`. Detail:
+  `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md`.
 - **Round 36 line H — `ctx_reduce` reminder in native-roles sessions (adapter only, core unchanged;
   user-approved 2026-11-06 20:43 CST):** with the switch on, the reminder that asks the model to drop
   spent tool outputs never fired, because the measurement only counted the tool-call arguments, not the

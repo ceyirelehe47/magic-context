@@ -1762,6 +1762,11 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
    in it (frozen `fold` on their next pass, never migrated, never mixed) and to new sessions with the
    explicit opt-out `context.nativeRoles: false` / `MAGIC_CONTEXT_DSH_NATIVE_ROLES=0`. Those sessions keep
    this limitation, including the I3 reasoning blow-up (`evidence-round37/i3-native-default.md`).
+   **Unfinished tool call in a legacy fold session (round 37 phase 2, not fixed by decision 2026-11-07
+   18:30 CST — keep legacy fold behaviour unchanged):** when a fold session is reopened in a new process
+   with a tool call that has no result yet, the open call is already folded into a "no result recorded" note
+   and the late result becomes its own note (no native call / result pair). Characterized by
+   `agent/cold-resume.test.ts` R2 (`bd9835061`); native sessions (R1) resume the call id and pairing intact.
 2. **Core borrows the `opencode` model harness** (`historian.opencode`,
    `dreamer.opencode`); there is no first-class `dsh` harness in core. See
    open point 1.
@@ -2728,7 +2733,7 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     - **Not run with the switch on:** e2e, soak, install acceptance. Evidence:
       `docs/dsh/e2e/evidence-round36/g-native-roles.md`.
 
-32. **Round 37 (2026-11-07) — evo-bench isolation leak (bench only; recorded, not fixed).** The evo agent
+32. **Round 37 (2026-11-07) — evo-bench isolation leak (bench only). FIXED in round 37 phase 2 (`1911f8a00`, `0df97f353`, `22606ea31`, `b498ada3a`, `b36e0d104`; REDs `4fc70d8ae`, `bf2d6f94b`, `f7d74d31d`, `05bf8205d`); text below is the original finding.** The evo agent
     runs as the runner user with `danger-full-access` and, unprompted, reads files outside its task:
     `$RUNNER_TEMP/evo-task/requests.json` (every later changelog item) and `instance.json`; the bench output
     dir `$RUNNER_TEMP/bench/<group>-<run>/` (`meta.json` names the group; the proxy's `requests.jsonl`,
@@ -2742,14 +2747,41 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     unix user or a mount namespace for DSH plus feeding the items from memory (DSH must still read the
     plugin) — a bench redesign that needs approval and its own validation runs. Every evo-bench result
     carries this caveat. Evidence: `docs/dsh/e2e/evidence-round37/i3-native-default.md` §7.
+    **Fix (round 37 phase 2):** `evo-bench/launch.sh` (`EVO_ISOLATE=1`, default) runs the whole DSH process in a
+    bwrap mount namespace without the task dir, bench output, controller scratch, repo checkout or runner home;
+    agent bash runs through DSH's workspace-write executor whose runner hides `E2E_ROOT` (DSH runtime, session
+    store, Magic DB); ripgrep and the in-process file tools are fenced the same way; the key stays in the proxy;
+    the DSH process starts from an empty environment and gets back an allowlist (PATH, locale, `DSH_*`, `XDG_*`,
+    `MAGIC_CONTEXT_*`, `MC_*`, `OPENCODE_SESSION`, …; no `BENCH_*` / `EVO_*` / `GITHUB_*` / `RUNNER_*` /
+    `ACTIONS_*`). Every bench job first runs `evo-bench/probe.sh` (mock model, real DSH tools, canaries in 10
+    locations incl. a controller-only env variable, 11 from `b36e0d104` with the bench patch files, on its own
+    DSH_HOME / Magic DB) and stops on a leak. Second gap found in a real run (catalog-hist 42365663370: the
+    agent read the bench patch files under the controller scratch `iso/patches`, bind-mounted for the host):
+    RED `05bf8205d`, fix `b36e0d104` (tmpfs over `iso/patches` in the agent runner and ripgrep fence, fs-fence
+    hidden root); local probe 0 / 11, CI 42367999555, runner smoke 42368007721 probe passed.
+    Evidence: RED probes `4fc70d8ae` (9 / 9 locations leak), `bf2d6f94b`, `f7d74d31d` (env canary reached the
+    model); runner probes 0 leaks in smoke 42362017411 and every phase-2 run after it (env canary included from
+    `b498ada3a` on). **Residual boundary (accepted by the user 2026-11-07 18:30 CST):** the allowed `DSH_*` /
+    `XDG_*` values name host paths (e.g. `DSH_HOME`); the directories are hidden, so names are visible, contents
+    are not. Permission mode under isolation is workspace-write + approval never for all groups (accepted
+    17:40 CST): isolated results are not directly comparable with the pre-isolation ones, which keep the caveat
+    above. Detail: `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md`.
 
-33. **Round 37 (2026-11-07) — repeated `<session-history>` baselines on DSH (I4; recorded, not fixed).** The m0
+33. **Round 37 (2026-11-07) — repeated `<session-history>` baselines on DSH (I4). FIXED in round 37 phase 2 (`6713a5394`, RED `edb79efbf`); text below is the original finding.** The m0
     baseline is a durable `magic-context` user message appended to the surface (`agent/knowledge-gate.ts`),
     not a per-call transform as on OpenCode / Pi. After each historian publication the forced
     re-materialization appends a new full baseline (project memory + all compartments) and the earlier
     baselines stay in the served history: evo run 42348192506 bodies 139 / 161 carry the empty baseline,
     one with compartment 1–3 and one with 1–3 + 4–18 (1–3 twice). Cost grows with every publication. Not
     checked in the fold view. Evidence: `docs/dsh/e2e/evidence-round37/i3-native-default.md` §6 L4, §7.9.
+    **Fix:** live baselines are identified by the controlled Magic source + the gate's own watermark id (never
+    by text); a new materialization replaces the live m0 and its m1 in place (one atomic DSH node replace each,
+    priced by a `compaction/prune` shadow; m0 / m1 stay two messages, cache split kept); resume with the same
+    watermark writes nothing; older duplicate baselines are retired to a short stand-in; the durable log keeps
+    every version. Queued drops wait while the live baseline is older than the latest publication (crash
+    between publication and baseline update: raw history stays visible). Offline `knowledge-baseline-retire.test.ts`
+    K1–K7 (5 / 6 RED on `c6208045c`), CI 42358893700. Real-run check (200k catalog-hist route): see
+    `evidence-round37/phase2-i4-isolation-integration.md` §I4-real.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

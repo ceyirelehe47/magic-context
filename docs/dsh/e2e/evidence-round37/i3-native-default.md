@@ -150,7 +150,7 @@ Per run:
 | run | group | turns completed / started / planned | stop | turn s | cum. files changed (end of each turn) | main requests | main bodies with hist. assistant / tool / tool_calls / reasoning_content | cost USD (all kinds) | F2P / P2P |
 |---|---|---|---|---|---|---|---|---|---|
 | 42345522531 | fold | 0 / 1 / 3 | turn-timeout-turn-1 | 1200 | 0 | 18 | 0 / 0 / 0 / 0 of 17 | 0.1311 | 0/8, 309/317 |
-| 42345522531 | native | **3 / 3 / 3** | completed | 1061, 157, 295 | 4, 7, 9 | 129 | 128 / 128 / 128 / 128 of 128 | 0.2434 | 0/8, 309/317 |
+| 42345522531 | native | **3 / 3 / 3** | completed | 1061, 157, 295 | 4, 7, 9 | 129 (3 turns, ≈ 1513 s; turn 1: 78) | 128 / 128 / 128 / 128 of 128 | 0.2434 | 0/8, 309/317 |
 | 42348194793 run1 | fold | 0 / 1 / 3 | turn-timeout-turn-1 | 1201 | 0 | 17 | 0 / 0 / 0 / 0 of 16 | 0.1358 | 0/8, 309/317 |
 | 42348194793 run2 | fold | 0 / 1 / 3 | turn-timeout-turn-1 | 1200 | 0 | 25 | 0 / 0 / 0 / 0 of 24 | 0.1193 | 0/8, 309/317 |
 | 42348194793 run1 | native | 0 / 1 / 3 | turn-timeout-turn-1 | 1200 | 2 | 80 | 79 / 79 / 79 / 79 of 79 | 0.2470 | 0/8, 309/317 |
@@ -179,12 +179,20 @@ Reading:
   its run, no orphan, no duplicate, no unanswered call) is clean on all 386 native main + subagent bodies of the three native runs (and on the 86 of L3).
 - **Reasoning and latency**: per request an order of magnitude lower with native (median 133 vs 3 047,
   p90 1 509 vs 9 875), requests ~6× faster — same direction and size as the 22-item runs of round 36.
-- **Progress**: in the same 1200 s, fold made 17–25 main requests and changed 0 files in all three runs;
-  native made 80–129 main requests and changed 2–4 files in turn 1, and one native run finished all three
-  items. Item 1 is hard: two of three native runs also hit the 1200 s timeout on it, so this is "native
-  moves, fold stalls", not "native solves the item". F2P is 0 / 8 for every run.
+- **Progress** (corrected in round 37 phase 2; the unit of comparison is the paired run, not the request):
+  within the **same observation window, turn 1 (≤ 1200 s)**, fold made 17–25 main requests and changed 0
+  files in all three runs; native made 80 and 94 main requests in the two runs that hit the 1200 s turn-1
+  timeout (2–3 files changed) and **78 main requests in turn 1 (1061 s, 4 files)** of the third run
+  (42345522531, split by the turn's t0 / t1 in `turns.jsonl` and the request t0 in `requests.jsonl`).
+  That run then finished turns 2–3; its **129 main requests are the total of three turns over ≈ 1513 s**
+  (1061 + 157 + 295 s; 78 + 27 + 24) and are not comparable with the 1200 s window of the other runs (an
+  earlier version of this paragraph said "in the same 1200 s native made 80–129 main requests", which
+  mixed the two windows; the same-window range is **78–94**). Item 1 is hard: two of three native runs also hit the 1200 s timeout on it, so
+  this is "native moves, fold stalls", not "native solves the item". F2P is 0 / 8 for every run. Three
+  pairs are three experiments: the hundreds of requests inside them are not independent samples, and the
+  per-request medians above describe the runs, they do not add statistical power.
 - **Cost**: native costs more per run (≈ $0.24 vs $0.13) because it makes 4–5× more requests in the same
-  wall time (input / cache-hit tokens); per main request native is cheaper ($0.0019 vs $0.0064), and fold's
+  wall time (input / cache-hit tokens; reasoning tokens are part of output tokens and are billed once, as output); per main request native is cheaper ($0.0019 vs $0.0064), and fold's
   output is 95 % reasoning.
 - **Repeated calls**: identical tool calls in main responses fold 1 / 0, native 12 / 4 — almost all
   `list_agents` polling of running subagents and re-running the same test command after an edit; no
