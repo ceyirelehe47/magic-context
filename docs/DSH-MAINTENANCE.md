@@ -48,7 +48,30 @@ RAM-backed, a full unfiltered `bun install` is also OOM-killed because the bun
 cache (~3 GB) lands in `~/.bun/install/cache`; use the filtered install above
 and point `BUN_INSTALL_CACHE_DIR` at a disk-backed directory.
 
-Baseline (round 36, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
+Baseline (round 37, 2026-11-07, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
+core v0.49.35 unchanged; version still **`0.49.35-dsh.8`, untagged**; user request 13:44 CST: fix the I3
+fold-view reasoning blow-up, new-session default may change, no migration of old sessions). **I3 fix
+(adapter only):** native roles are the **default for new sessions** (`agent/tag-scheme.ts`
+`nativeRolesRequested()`; RED `81a441e96` 6 / 7 fail on `a2c58a49a`, FIX `b3310120c`); sessions Magic
+already processed are frozen `fold` on their next pass and keep the fold view and I3 (no migration, no
+mixing); opt-out `context.nativeRoles: false` / `MAGIC_CONTEXT_DSH_NATIVE_ROLES=0`; fold suites pin the
+opt-out (setup only, no assertion changed). **Bench:** evo loop stops after a turn timeout by default
+(`EVO_ON_TIMEOUT=stop`, `continue` explicit and flagged), stop classes and turns completed / started /
+planned in `analyze.py` (RED `b876646df`, FIX `6d8e115c4`); historian-on-catalog route
+`evo-model-200k-catalog-hist.yml` (`853606914`). Push CI 42345305410 @ `6d8e115c4` and 42345513122 @
+`853606914` green: `dsh-plugin` **710 / 0**, `adapter-api` 15, `contracts:dsh` 109 ×3, python bench tests
+44, wf-lint 0, typecheck 0. **Real runs** (`853606914`, DSH rc.5, opencode-go `deepseek-v4.1-flash`): three
+fold / native pairs on the 1M catalog route, 3 items (42345522531, 42348194793 × 2), first request identical
+in all six: main reasoning / request median **3 047 vs 133** (p90 9 875 vs 1 509), request time 36.2 s vs
+5.7 s, fold 0 files changed in 3 / 3 runs, native 2–4 files in turn 1 and one run 3 / 3 items; native
+keeps assistant / tool / `tool_calls` / `reasoning_content` in 300 / 300 bodies, fold 0 / 57; F2P 0 / 8 in
+every run. 200k context-management runs: L3 42345528229 (historian fired, no request — fewer than 5 user
+turns; drops landed with the protocol intact) and L4 42348192506 (10 items, `on_timeout=continue`; results in the evidence doc). New, recorded only: the evo
+agent can read the task's future items, the proxy log of its own history, its DSH session store and the
+repo (whose evidence docs held one F2P test id, redacted) — limitation 32. Not run: e2e / soak with the new
+default (needs approval). Evidence: `docs/dsh/e2e/evidence-round37/i3-native-default.md`.
+
+Previous baseline (round 36, 2026-11-06, same declared DSH set `0.2.1-rc.5 || 0.2.2-alpha.3 || 0.2.2-rc.1`,
 core v0.49.35 unchanged; version still **`0.49.35-dsh.8`, untagged**; no product code changed in line A).
 User-approved runs on `2e96be4c1` (09:00 CST). **Line A:** rc.5 e2e 42141100109 **132 / 2 / 1** — R9 / R15
 FAIL (scenario L lock-a 400 s timeout, third consecutive rc.5 occurrence after 42070363765 / 42077125011;
@@ -1733,7 +1756,12 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
    roles: assistant nodes are never replaced (drops keep the call skeleton via core `skeleton_real`, assistant
    text is not tagged), tagging / drops / truncation rewrite only the single `tool/result` or `user/message`
    node, each replace preceded by a priced `compaction/prune`. The scheme is frozen per session (a session
-   Magic already worked on stays on the fold view described above). Not the default; see limitation 31.
+   Magic already worked on stays on the fold view described above). See limitation 31.
+   **Round 37 (2026-11-07, user-approved I3 fix): native roles are the DEFAULT for new sessions** (a session
+   Magic has not worked on yet). The fold view above now applies only to sessions Magic already processed
+   in it (frozen `fold` on their next pass, never migrated, never mixed) and to new sessions with the
+   explicit opt-out `context.nativeRoles: false` / `MAGIC_CONTEXT_DSH_NATIVE_ROLES=0`. Those sessions keep
+   this limitation, including the I3 reasoning blow-up (`evidence-round37/i3-native-default.md`).
 2. **Core borrows the `opencode` model harness** (`historian.opencode`,
    `dreamer.opencode`); there is no first-class `dsh` harness in core. See
    open point 1.
@@ -2663,7 +2691,9 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       the gate; E2 WARN.
     - **Not observed on a real model (tests only):** force-band, executeReclaim and cache-TTL rides.
 
-31. **Round 36 line G (2026-11-06) — native roles (plan N) behind an experimental switch, default off.**
+31. **Round 36 line G (2026-11-06) — native roles (plan N) behind an experimental switch, default off.
+    Round 37 (2026-11-07): default ON for new sessions (I3 fix, RED `81a441e96` / FIX `b3310120c`);
+    `false` / env `0` opts out; frozen fold sessions unchanged.**
     - **What:** `context.nativeRoles` (settings) / env `MAGIC_CONTEXT_DSH_NATIVE_ROLES=1`. A session seen
       for the first time with the switch on gets the native scheme (`agent/tag-scheme.ts`, frozen per
       session; worked-on sessions stay fold, native sessions stay native). `walkDshLog` drops the
@@ -2697,6 +2727,21 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
       (`evidence-round36/h-native-nudge.md`). Not covered: e2e / soak with the switch on.
     - **Not run with the switch on:** e2e, soak, install acceptance. Evidence:
       `docs/dsh/e2e/evidence-round36/g-native-roles.md`.
+
+32. **Round 37 (2026-11-07) — evo-bench isolation leak (bench only; recorded, not fixed).** The evo agent
+    runs as the runner user with `danger-full-access` and, unprompted, reads files outside its task:
+    `$RUNNER_TEMP/evo-task/requests.json` (every later changelog item) and `instance.json`; the bench output
+    dir `$RUNNER_TEMP/bench/<group>-<run>/` (`meta.json` names the group; the proxy's `requests.jsonl`,
+    `resp/`, `bodies/` hold its own full, uncompacted history — a bypass of the context management under
+    test); its DSH session store under `$RUNNER_TEMP/e2e/home/`; and the repo checkout including bench
+    scripts, committed evidence docs and git history (one F2P test id was in
+    `evidence-round36/i-evo-bench.md`, redacted in round 37; it stays in history). The scoring files are
+    deleted before the run and were not found. Seen in 42274076026, 42345522531, 42345528229, 42348194793
+    (one native run spent most of its turn grepping docs / `git log -p` for test names). Effect: future items
+    visible from turn 1, turn time lost to leak-hunting, context comparisons biased. A fix needs a separate
+    unix user or a mount namespace for DSH plus feeding the items from memory (DSH must still read the
+    plugin) — a bench redesign that needs approval and its own validation runs. Every evo-bench result
+    carries this caveat. Evidence: `docs/dsh/e2e/evidence-round37/i3-native-default.md` §7.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

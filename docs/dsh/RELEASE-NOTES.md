@@ -53,6 +53,15 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   94.3 % prompt-cache hit, 0 prefix breaks, about $0.027 per bench run vs $0.041 with the fold view
   (far fewer reasoning tokens). Not covered by e2e / soak yet. Commits `16e6fe2e8` / `8e095e315` /
   `5d19db4aa`; push CI 42215396157. Detail: `docs/dsh/e2e/evidence-round36/g-native-roles.md`.
+- **Round 37 — native roles are the default for NEW sessions (I3 fix; adapter only, core unchanged):**
+  the fold view rewrote every finished tool step (including the one just completed) into a user message
+  without the assistant tool calls, tool results and reasoning; on the real 1M opencode-go route the model
+  then re-derived its state at every step (reasoning median 10 704 vs 120 tokens per request, every fold
+  turn timed out). A session Magic has not worked on yet now keeps DSH's roles, tool-call pairing and
+  reasoning by default. Sessions Magic already processed stay on the fold view (no migration, no mixing)
+  and keep the old behaviour; start a new session to get the fix. Opt-out for new sessions:
+  `context.nativeRoles: false` / `MAGIC_CONTEXT_DSH_NATIVE_ROLES=0`. Not covered by e2e / soak yet.
+  Commits `81a441e96` (RED) / `b3310120c`. Detail: `docs/dsh/e2e/evidence-round37/i3-native-default.md`.
 - **Round 36 line H — `ctx_reduce` reminder in native-roles sessions (adapter only, core unchanged;
   user-approved 2026-11-06 20:43 CST):** with the switch on, the reminder that asks the model to drop
   spent tool outputs never fired, because the measurement only counted the tool-call arguments, not the
