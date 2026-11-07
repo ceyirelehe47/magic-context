@@ -210,11 +210,13 @@ gets `sessionId = agent.session.id`. Whether the real route accepts it is what L
 
 - **Historian: fired, sent nothing.** `turn-01.log:457–…`: 19 `historian trigger … fires=true` lines from
   63 % to 73 % of the window; **0 historian requests** reached the proxy (`analyze.py`: "fired but no
-  successful historian request"). Cause (code, not a failure): the pass's eligible range ends at the
-  protected tail, which is the last **5 meaningful user turns** (core `PROTECTED_TAIL_USER_TURNS = 5`,
-  `read-session-chunk.ts:1266`); with one user turn the range is empty and the pass returns `noop`
-  ("nothing to compact") before any LLM call. The noop reason only goes to `ctx.logger`, which the bench
-  does not capture (§7). So L3 does **not** test I1 on the real route.
+  successful historian request"). The pass outcome is not visible: it goes to `ctx.logger`, which the
+  bench does not capture (§7). Most likely cause (**inferred** from code and message counts, not from a
+  log line): the eligible range ends at the protected tail, the last **5 meaningful user messages** (core
+  `PROTECTED_TAIL_USER_TURNS = 5`, `read-session-chunk.ts:1266`; Magic's own injected messages excluded);
+  turn 1 had fewer, so the range was empty and the pass returned `noop` before any LLM call. L4 fits the
+  same rule: its first historian request came at the turn 3 → 4 boundary, when the session had enough user
+  messages. So L3 does **not** test I1 on the real route; L4 does.
 - **Drop path landed in native roles, protocol kept.** Req 85 → 86: prompt 146 274 → 112 928 tokens,
   `[dropped …]` placeholders 2 → 58 (queued `ctx_reduce` drops landing on a ride), cache hit 99.9 % →
   9.1 % for that one request (the expected re-prefill after a rewrite). Body 86: roles intact (81
@@ -227,23 +229,57 @@ gets `sessionId = agent.session.id`. Whether the real route accepts it is what L
 
 ### L4 — 42348192506 (slot evo-12, 10 items, turn timeout 2400 s, `on_timeout=continue`, cap $2.5)
 
-Running at the time of this commit (dispatched 14:42 CST, commit `853606914`, native = default, route
-`evo-model-200k-catalog-hist.yml`). The trajectory after any turn timeout is **contaminated** (the next
-item is appended to an unfinished session, flagged `continued_after_timeout`). Results follow in a later
-commit.
+Dispatched 14:42 CST, commit `853606914`, native = default (env unset), route
+`evo-model-200k-catalog-hist.yml`, historian awaited 60 s at turn end, `on_timeout=continue` as requested.
+**No turn timed out**, so the `continue` policy never applied and no turn is flagged
+`continued_after_timeout`; the run is still reported under that policy.
+
+| turns completed / started / planned | stop | turn s | cum. files | main requests (with usage) | reasoning / main request median / p90 / max | request ms median | cost | HTTP | F2P / P2P |
+|---|---|---|---|---|---|---|---|---|---|
+| 4 / 5 / 10 | `turn-failed-rc1-turn-5` — the turn ended on a provider 429 (`RATE_LIMIT`, `prefill_cap_refused`, `turn-05.log:175`) | 1480, 136, 230, 382, 898 | 0, 3, 6, 9, 9 | 164 (151) | 220 / 1 513 / 5 154 | 7 763 | $0.4429 | 154 × 200, 13 × 429 (all main, capacity) | 0/8, 309/317 |
+
+- **Historian on the real catalog route: requests accepted and published (I1 verified on the route).**
+  46 `fires=true` lines (turn 1: 2, turn 3: 6, turn 4: 15, turn 5: 23). Two historian requests, both
+  **HTTP 200**: n 118 at the turn 3 → 4 boundary (35.7 s, prompt 14 467, output 2 773 of which reasoning
+  1 831) and n 134 at the turn 4 → 5 boundary (18.0 s, prompt 14 731 with 14 080 cached, output 1 367).
+  The route has no static `x-opencode-session` header and the same upstream answered 400
+  `MissingSessionID` in 42274076026; the proxy does not log request headers, so "the header was sent" is
+  inferred from the 200, not read. Outputs: one compartment each, `1–3` ("Set up conan 2.0.2→2.0.3
+  incremental implementation session") and `4–18` ("Explored Conan download/auth internals …").
+- **Publication reached the model.** First main request after publication 1 (n 125): `[dropped …]`
+  placeholders 60 → 67 — the covered raw messages, including the first task message `§1§`, whose content
+  is in compartment 1–3 — and a `<session-history>` user message with compartment 1–3; prompt 133 296 →
+  126 143 (−5 %), cache hit 0 on that request (prefix rewrite). Publication 2 (n 139): placeholders
+  67 → 78, a second `<session-history>` with compartments 1–3 and 4–18; prompt 137 856 → 133 563, hit
+  74.6 %. Both chunks were small (~14 k tokens of input), so the reduction is small; the only ≥ 15 % prompt
+  drop of the run is a drop ride in turn 1 (n 63 → 64, 129 892 → 87 026).
+- **After compaction, protocol and execution chain intact.** All 163 main bodies after the first keep
+  historical assistant / tool / `tool_calls` / `reasoning_content`; pairing check clean on all 166 main +
+  historian bodies; no fold note in any body; the model kept working (turn 4 and 5 edits, files 6 → 9); no
+  repeated edit or test plan (the only identical repeated call is one `job_output` poll); one session id
+  over five turns (one process per turn), no resume mismatch.
+- **Reasoning around the publications** (main requests with usage): before n 118 median 180 / p90 1 407 /
+  max 5 109 (116 requests); between the publications 69 / 304 / 520 (14); after n 134 549 / 3 689 / 5 154
+  (21, turn 5 at 75–88 % of the window). No fold-like blow-up (max unchanged); the higher median late in
+  turn 5 rests on 21 requests and a much fuller context — not attributed.
+- **Not reached:** native backstop compaction. In turn 5 the debug line reported pct 84.2–87.9 % above
+  `thresholdPct=83.6` on 6 checks with `outcome=none`; the last served prompt was 164 223 tokens (82.1 %).
+  Inferred: compaction-basic's own measure was still below its line (the debug pct is the plugin's
+  projection) — not verified. The turn then ended on the 429.
+- Leak: this run also read the bench output dir, `evo-task/requests.json` and the bench scripts (§7.4).
 
 ## 7. Remaining issues
 
 1. **Old fold sessions keep I3.** Sessions Magic processed before this change are frozen `fold` and still
    lose roles / call pairing / reasoning at every step; there is no in-place migration (§3). Workaround: a
    new session.
-2. **Historian is a no-op inside one long user turn (core semantics, recorded only).** The protected tail
-   is the last 5 meaningful user turns (`PROTECTED_TAIL_USER_TURNS = 5`,
+2. **Historian is (most likely) a no-op until the session has enough user messages (core semantics,
+   recorded only; inferred, see §6 L3).** The protected tail is the last 5 meaningful user messages (`PROTECTED_TAIL_USER_TURNS = 5`,
    `packages/plugin/src/hooks/magic-context/read-session-chunk.ts:1266`); with fewer user turns the
    eligible range is empty and the pass returns `noop` ("nothing to compact") without a request. L3
    (42345528229): 19 `fires=true` lines from 63 % to 73 % of the 200k window in turn 1, 0 historian
-   requests; the only relief before the turn timeout was a drop ride (§6). Same rule as OpenCode / Pi —
-   not changed here (core).
+   requests; the only relief before the turn timeout was a drop ride (§6). In L4 the first request came at
+   the turn 3 → 4 boundary. Same rule as OpenCode / Pi — not changed here (core).
 3. **The historian's outcome is invisible in the bench.** Pass results (`noop` reasons, failures, publish)
    go to `ctx.logger.info` only; the bench captures stderr (`MAGIC_CONTEXT_DEBUG_HISTORIAN=1` prints the
    trigger line, not the outcome). Judged here from proxy requests (`kind=historian`), prompt boundaries
@@ -266,7 +302,7 @@ commit.
      in git history, which the agent can read.
    Seen in 42274076026 fold (`session.jsonl` tool calls seq 254, 276–293, 563–607, 957, 1448) and native
    (seq 338–563, 692, 734, 1597), 42345522531 fold (seq 237), 42345528229 native (seq 284–308, 416, 426
-   reads `requests.jsonl`, 472–482, 571–631), 42348194793 native run1 (seq 406–476, 823) and run2 (above). Scoring files did not leak from the task dir: the workflow deletes
+   reads `requests.jsonl`, 472–482, 571–631), 42348194793 native run1 (seq 406–476, 823) and run2 (above), 42348192506 (seq 199–409, 616–684, 1686). Scoring files did not leak from the task dir: the workflow deletes
    `gold.patch`, `test.patch`, `tests.json`, `items.json` before the run (the agent's `find` for them at
    42345528229 seq 631 returned nothing) and re-fetches them only for `score.py` after the run. Impact:
    trajectories can be steered by future items, a run can burn its turn on leak-hunting (native run2 above
@@ -283,6 +319,19 @@ commit.
    several runs; retried by DSH, counted separately, not a plugin error.
 8. **Not covered by e2e / soak yet** with the new default (needs user approval).
 
+9. **New (I4, recorded): every re-materialization appends a full `<session-history>` baseline and the
+   earlier ones stay.** On DSH the m0 baseline is a durable `magic-context` user message appended to the
+   surface (`agent/knowledge-gate.ts`), not a per-call transform as on OpenCode / Pi. In 42348192506 every
+   request after publication 2 carries three baselines: the empty one at index 1, one with compartment
+   1–3 (index 265, 2 245 chars) and one with 1–3 + 4–18 (index 294, 3 691 chars) — compartment 1–3 twice
+   (bodies 139, 161). Small here, but it grows with every publication (each copy repeats all earlier
+   compartments). Not fixed this round (product change, not in this segment's brief); whether the fold view
+   behaves the same was not checked.
+10. **Native backstop not exercised on the real route** (L4 turn 5: debug pct above the 83.6 % line with
+    `outcome=none`; inferred measurement difference, §6 L4).
+11. **Provider capacity ended L4 early** (turn 5, HTTP 429 → `rc 1`), so the planned 10 items and a third
+    publication were not reached; a re-run is needed for a longer post-compaction trajectory.
+
 ## 8. Commits
 
 | commit | what | CI |
@@ -292,4 +341,5 @@ commit.
 | `b876646df` | RED bench: loop appends after timeouts, stop not classified | — |
 | `6d8e115c4` | FIX bench: stop after timeout by default, stop classes, turns completed / started / planned | 42345305410 ✓ |
 | `853606914` | bench route `evo-model-200k-catalog-hist.yml` (historian on the shipped catalog provider) | 42345513122 ✓ |
-
+| `65321c44d` | docs: round-37 evidence (layer 2, L3), DSH-MAINTENANCE baseline + limitation 32, RELEASE-NOTES, i-evo-bench | 42350864804 ✓ |
+| (this commit) | docs: L4 historian real-route result, I4 (limitation 33), I1 row verified | see push CI |

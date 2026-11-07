@@ -65,8 +65,8 @@ fold / native pairs on the 1M catalog route, 3 items (42345522531, 42348194793 �
 in all six: main reasoning / request median **3 047 vs 133** (p90 9 875 vs 1 509), request time 36.2 s vs
 5.7 s, fold 0 files changed in 3 / 3 runs, native 2–4 files in turn 1 and one run 3 / 3 items; native
 keeps assistant / tool / `tool_calls` / `reasoning_content` in 300 / 300 bodies, fold 0 / 57; F2P 0 / 8 in
-every run. 200k context-management runs: L3 42345528229 (historian fired, no request — fewer than 5 user
-turns; drops landed with the protocol intact) and L4 42348192506 (10 items, `on_timeout=continue`; results in the evidence doc). New, recorded only: the evo
+every run. 200k context-management runs: L3 42345528229 (historian fired, no request — most likely fewer than 5 user
+messages, inferred; drops landed with the protocol intact) and L4 42348192506 (native, 10 items planned, 4 completed, stopped by a provider 429 in turn 5; no timeout, so `continue` never applied): **two historian requests on the shipped catalog route, both HTTP 200** (I1 verified on the real route), two compartments published, covered raw messages dropped, protocol / reasoning intact in all later requests, no reasoning blow-up after compaction; new I4 — each re-materialization appends another full `<session-history>` baseline and earlier copies stay (limitation 33). New, recorded only: the evo
 agent can read the task's future items, the proxy log of its own history, its DSH session store and the
 repo (whose evidence docs held one F2P test id, redacted) — limitation 32. Not run: e2e / soak with the new
 default (needs approval). Evidence: `docs/dsh/e2e/evidence-round37/i3-native-default.md`.
@@ -2742,6 +2742,14 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     unix user or a mount namespace for DSH plus feeding the items from memory (DSH must still read the
     plugin) — a bench redesign that needs approval and its own validation runs. Every evo-bench result
     carries this caveat. Evidence: `docs/dsh/e2e/evidence-round37/i3-native-default.md` §7.
+
+33. **Round 37 (2026-11-07) — repeated `<session-history>` baselines on DSH (I4; recorded, not fixed).** The m0
+    baseline is a durable `magic-context` user message appended to the surface (`agent/knowledge-gate.ts`),
+    not a per-call transform as on OpenCode / Pi. After each historian publication the forced
+    re-materialization appends a new full baseline (project memory + all compartments) and the earlier
+    baselines stay in the served history: evo run 42348192506 bodies 139 / 161 carry the empty baseline,
+    one with compartment 1–3 and one with 1–3 + 4–18 (1–3 twice). Cost grows with every publication. Not
+    checked in the fold view. Evidence: `docs/dsh/e2e/evidence-round37/i3-native-default.md` §6 L4, §7.9.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
