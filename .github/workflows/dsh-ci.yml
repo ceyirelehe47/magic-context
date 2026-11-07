@@ -111,7 +111,7 @@ jobs:
         run: |
           set -o pipefail
           rc=0
-          for t in test_ci_check_r14.py test_ci_check_y2.py test_ci_check_empty.py test_ci_check_ids.py test_evo_analyze.py test_evo_turn_policy.py; do
+          for t in test_ci_check_r14.py test_ci_check_y2.py test_ci_check_empty.py test_ci_check_ids.py test_evo_analyze.py test_evo_turn_policy.py test_evo_probe_storage.py; do
             echo "== $t"
             python3 "packages/dsh-plugin/scripts/e2e/$t" -v 2>&1 | tee -a "$RUNNER_TEMP/ci-check-tests.log" || rc=1
           done
