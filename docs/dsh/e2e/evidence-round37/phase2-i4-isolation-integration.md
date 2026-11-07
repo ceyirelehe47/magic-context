@@ -120,6 +120,11 @@ the window. It says nothing about native vs fold. Pair A repeats the pre-isolati
 moves: 91 requests, 6 files; fold stalls: 20 requests, 0 files) under isolation, but it is **one pair on one
 item, turn 1 only**; no item was solved (F2P 0 / 8 everywhere; P2P 309 / 317 is the unchanged baseline).
 
+Single native smoke 4 42368007721 (`b36e0d104`, isolation check after the iso/patches fix, not part of the
+comparison): probe 0 / 11 leaks, positives pass (docker, write, ctx tool, session resume); bench 0 / 1 / 2
+turns, turn-1 timeout (1200 s), 17 main requests, 0 files, TTFT median 41.8 s (slow upstream, as pair B),
+backstop 18 lines all skipped, $0.0342, F2P 0 / 8, P2P 309 / 317.
+
 Single native smoke 3 42364900456 (`ab88e100b`, same route, 2 items, no fold partner, not part of the
 comparison): 2 / 2 turns done (651 s, 112 s), 4 files, 76 main requests, cache hit 97.6 %, $0.1185,
 F2P 0 / 8.
