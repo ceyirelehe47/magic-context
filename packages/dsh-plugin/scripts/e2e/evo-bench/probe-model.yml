@@ -1,0 +1,22 @@
+# Round 37 phase 2 — evo bench ACCESS PROBE route (probe.sh only): the deterministic
+# mock model (../mock-llm.mjs) on MOCK_LLM_PORT drives the agent's REAL DSH tools
+# (bash / read / glob / grep / ctx_*) through a fixed plan of tool calls; no paid
+# model call. Window 1M (never enforced here).
+- id: llm-pi-ai
+  config:
+    providers:
+      evo-probe:
+        displayName: evo access probe (mock)
+        apiKeyEnv: MOCK_LLM_KEY
+        api: openai-completions
+        baseURL: !!js "'http://127.0.0.1:' + (process.env.MOCK_LLM_PORT ?? '18578') + '/w1000000/v1'"
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: probe-model
+            contextWindow: 1000000
+            maxTokens: 8192
+- id: agent-default-model
+  config:
+    provider: evo-probe
+    model: probe-model

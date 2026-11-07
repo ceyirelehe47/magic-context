@@ -31,6 +31,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CB="$HERE/../cache-bench"
 source "$HERE/../env.sh"
+source "$HERE/launch.sh"  # round 37: the agent launch (shared with the access probe probe.sh)
 GROUP="$1"; LABEL="$2"; OUT="$(mkdir -p "$3" && cd "$3" && pwd)"; TD="$(cd "$4" && pwd)"
 RUN_TIMEOUT="${EVO_RUN_TIMEOUT:-1800}"
 ON_TIMEOUT="${EVO_ON_TIMEOUT:-stop}"
@@ -164,7 +165,7 @@ for k in $(seq 1 "$NT"); do
   args=(--profile "$PROFILE" "${PATCHES[@]}" "$task" --json)
   [[ -n "$SID" ]] && args+=(--session-id "$SID")
   s=$(date +%s%3N)
-  (cd "$WS" && timeout -k 30 "$RUN_TIMEOUT" node "$DSH_BIN" "${args[@]}" > "$OUT/$name.log" 2>&1)
+  evo_dsh_turn "$OUT/$name.log" "$RUN_TIMEOUT" "${args[@]}"
   rc=$?
   e=$(date +%s%3N)
   [[ -z "$SID" ]] && SID="$(sid_of "$OUT/$name.log")" && echo "$SID" > "$OUT/sid"
