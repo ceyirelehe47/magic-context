@@ -21,6 +21,9 @@
 # Env: EVO_NET_BLOCK (1 = block code hosts / package indexes in /etc/hosts for the run),
 # EVO_RUN_TIMEOUT (per turn, s, default 1800; SIGKILL 30 s after SIGTERM), EVO_COST_CAP (USD at
 # DeepSeek peak list price; stop starting new turns above it, default 0 = off),
+# EVO_ON_TIMEOUT (round 37: stop | continue, default stop — after a turn timeout (rc 124 / 137)
+# stop and keep the session + workspace as they are; "continue" appends the next item anyway
+# and flags the turn continued_after_timeout; any other failed turn or a missing session stops),
 # EVO_DEADLINE (epoch s; stop starting new turns after it), EVO_SANDBOX
 # (DSH_PERMISSION_MODE for all groups, default danger-full-access: the agent
 # needs docker for evo-pytest, as the paper's agent runs inside the container).
@@ -30,6 +33,8 @@ CB="$HERE/../cache-bench"
 source "$HERE/../env.sh"
 GROUP="$1"; LABEL="$2"; OUT="$(mkdir -p "$3" && cd "$3" && pwd)"; TD="$(cd "$4" && pwd)"
 RUN_TIMEOUT="${EVO_RUN_TIMEOUT:-1800}"
+ON_TIMEOUT="${EVO_ON_TIMEOUT:-stop}"
+[[ "$ON_TIMEOUT" == stop || "$ON_TIMEOUT" == continue ]] || { echo "EVO_ON_TIMEOUT must be stop|continue" >&2; exit 2; }
 # Model route: EVO_MODEL_PATCH (file in this dir). Default evo-model.yml = the shipped
 # opencode-go catalog route, nothing overridden but the proxy baseURL (1M window, catalog
 # maxTokens, default historian = main model, no historian await). evo-model-200k-stress.yml
@@ -65,8 +70,8 @@ REPO_NAME="$(jq -r '.repo|split("/")[1]' "$TD/instance.json")"
 SCR="${RUNNER_TEMP:-/tmp}/evo/$GROUP-$LABEL"; rm -rf "$SCR"; mkdir -p "$SCR/bin"
 WS="$SCR/$REPO_NAME"; SNAP="$SCR/snap.git"; CT="evo-$GROUP-$LABEL-$$"
 NT=$(jq length "$TD/requests.json")
-printf '{"group":"%s","label":"%s","nonce":"%s","session_header":"%s","profile":"%s","native_roles":"%s","image":"%s","base_commit":"%s","turns_planned":%s,"run_timeout":%s,"cost_cap":"%s","sandbox":"%s","model_patch":"%s","historian_await":"%s","start":%s}\n' \
-  "$GROUP" "$LABEL" "$BENCH_NONCE" "$OPENCODE_SESSION" "$PROFILE" "${MAGIC_CONTEXT_DSH_NATIVE_ROLES-}" "$IMG" "$BASE" "$NT" "$RUN_TIMEOUT" "${EVO_COST_CAP:-0}" "$DSH_PERMISSION_MODE" "$MODEL_PATCH" "${MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS-}" "$(date +%s%3N)" > "$OUT/meta.json"
+printf '{"group":"%s","label":"%s","nonce":"%s","session_header":"%s","profile":"%s","native_roles":"%s","image":"%s","base_commit":"%s","turns_planned":%s,"run_timeout":%s,"cost_cap":"%s","sandbox":"%s","model_patch":"%s","historian_await":"%s","on_timeout":"%s","start":%s}\n' \
+  "$GROUP" "$LABEL" "$BENCH_NONCE" "$OPENCODE_SESSION" "$PROFILE" "${MAGIC_CONTEXT_DSH_NATIVE_ROLES-}" "$IMG" "$BASE" "$NT" "$RUN_TIMEOUT" "${EVO_COST_CAP:-0}" "$DSH_PERMISSION_MODE" "$MODEL_PATCH" "${MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS-}" "$ON_TIMEOUT" "$(date +%s%3N)" > "$OUT/meta.json"
 
 # --- workspace: the image's /testbed at base_commit, git history and tags removed
 docker pull -q "$IMG" >/dev/null
@@ -164,9 +169,11 @@ for k in $(seq 1 "$NT"); do
   snap add -A >/dev/null 2>&1; snap -c user.name=bench -c user.email=bench@local commit -q --allow-empty -m "$name" >/dev/null
   snap diff --binary "$BASE_SNAP" HEAD > "$OUT/patches/$name.patch"
   files=$(snap diff --name-only "$BASE_SNAP" HEAD | wc -l)
-  printf '{"turn":%s,"rc":%s,"t0":%s,"t1":%s,"ms":%s,"cum_files":%s,"cum_patch_bytes":%s,"requests":%s}\n' "$k" "$rc" "$s" "$e" "$((e - s))" "$files" "$(stat -c %s "$OUT/patches/$name.patch")" "$(wc -l < "$OUT/requests.jsonl" 2>/dev/null || echo 0)" >> "$OUT/turns.jsonl"
-  echo "[evo $GROUP $LABEL] $name rc=$rc $(( (e - s) / 1000 ))s files=$files cost=\$$(cost_now)"
-  if [[ -z "$SID" ]]; then STOP="no-session"; break; fi
+  read -r ACTION REASON < <(python3 "$HERE/turn_policy.py" after-turn "$rc" "$ON_TIMEOUT" "$([[ -n "$SID" ]] && echo 1 || echo 0)" "$k")
+  CAT=false; [[ "$ACTION" == continue-after-timeout ]] && CAT=true
+  printf '{"turn":%s,"rc":%s,"t0":%s,"t1":%s,"ms":%s,"cum_files":%s,"cum_patch_bytes":%s,"requests":%s,"continued_after_timeout":%s}\n' "$k" "$rc" "$s" "$e" "$((e - s))" "$files" "$(stat -c %s "$OUT/patches/$name.patch")" "$(wc -l < "$OUT/requests.jsonl" 2>/dev/null || echo 0)" "$CAT" >> "$OUT/turns.jsonl"
+  echo "[evo $GROUP $LABEL] $name rc=$rc $(( (e - s) / 1000 ))s files=$files cost=\$$(cost_now) next=$ACTION"
+  if [[ "$ACTION" == stop ]]; then STOP="$REASON"; break; fi
 done
 sleep 2; kill "$PROXY" 2>/dev/null; wait "$PROXY" 2>/dev/null
 docker rm -f "$CT" >/dev/null 2>&1; docker rmi -f "$SAN" >/dev/null 2>&1

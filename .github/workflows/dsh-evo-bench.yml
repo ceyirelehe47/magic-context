@@ -45,6 +45,11 @@ on:
         description: "Per-turn timeout, seconds (SIGKILL 30 s after SIGTERM)"
         type: string
         default: "1200"
+      on_timeout:
+        description: "Round 37: after a turn timeout (rc 124 / 137): stop (default; keep the session + workspace for diagnosis) or continue (append the next item anyway; every such turn is flagged continued_after_timeout and the trajectory after it is contaminated)"
+        type: choice
+        options: ["stop", "continue"]
+        default: "stop"
       model_patch:
         description: "Model route file in scripts/e2e/evo-bench, ALL groups: evo-model.yml (shipped opencode-go catalog route, 1M, default maxTokens / historian) or evo-model-200k-stress.yml (smoke-2 stress setting)"
         type: string
@@ -188,6 +193,7 @@ jobs:
           EVO_COST_CAP: ${{ inputs.cost_cap }}
           EVO_RUN_TIMEOUT: ${{ inputs.turn_timeout }}
           EVO_MODEL_PATCH: ${{ inputs.model_patch }}
+          EVO_ON_TIMEOUT: ${{ inputs.on_timeout }}
         run: |
           if [ -z "$OPENCODE_API_KEY" ]; then echo "::error::secret OPENCODE_API_KEY is not set"; exit 1; fi
           [ -f "scripts/e2e/evo-bench/$EVO_MODEL_PATCH" ] || { echo "::error::no model patch $EVO_MODEL_PATCH"; exit 1; }
