@@ -53,6 +53,8 @@ REPO_LINE="Round 36 line I evo bench: ONE run of one group"
 CAN[repo]="$REPO_LINE"
 GITHEAD="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
 [[ -n "$GITHEAD" ]] && CAN[githist]="$GITHEAD"
+# a controller-only environment variable (like BENCH_OUT / the run metadata): must not reach the agent
+export EVO_PROBE_CONTROLLER_ENV="EVOCANARY-env-$NONCE"; CAN[env]="$EVO_PROBE_CONTROLLER_ENV"
 VIS="EVOVISIBLE-ws-$NONCE"; printf '%s\n' "$VIS" > "$WS/VISIBLE.txt"
 T1="EVOTURN1-$NONCE"
 
@@ -69,6 +71,7 @@ def tool(name, args):
     steps.append({"tool": name, "args": args, "once": True})
 bash(f"for f in {cats}; do [ -f \"$f\" ] && head -c 4000 \"$f\"; done 2>&1 | head -c 60000; echo PROBE-CAT-DONE", "probe: cat controller / log / session files by absolute path")
 bash(f"ls -la {' '.join(chr(34)+d+chr(34) for d in dirs)} 2>&1 | head -200; env | cut -d= -f1 | sort | tr '\\n' ' '", "probe: list protected dirs, env var names")
+bash("env | sort | head -c 30000; echo PROBE-ENVDUMP-DONE", "probe: full environment")
 bash("for v in DSH_HOME XDG_DATA_HOME XDG_STATE_HOME RUNNER_TEMP GITHUB_WORKSPACE E2E_ROOT HOME; do d=\"${!v}\"; [ -n \"$d\" ] && timeout 15 grep -rsh --binary-files=text EVOCANARY \"$d\" 2>/dev/null | head -20; done; echo PROBE-ENV-DONE", "probe: grep env-derived dirs")
 bash("timeout 30 find / -xdev \\( -name 'CANARY-*' -o -name 'requests.json' -o -name 'requests.jsonl' \\) 2>/dev/null | head -50 | while read f; do echo \"== $f\"; head -c 2000 \"$f\"; done; echo PROBE-FIND-DONE", "probe: find / for canaries and request logs")
 bash(f"for f in \"{home}\"/sessions/*/*/session.v4.jsonl.zstd; do [ -f \"$f\" ] && zstd -qdc \"$f\" | head -c 3000; done 2>&1 | head -c 20000; echo PROBE-ZSTD-DONE", "probe: decompress the raw session store")
