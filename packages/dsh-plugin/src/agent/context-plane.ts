@@ -58,6 +58,7 @@ import type { ProtectedTokensTierOverrides } from "@magic-context/core/config/pr
 import { resolveDshProtectionFloor, type DshProtectionOptions } from "./protection";
 import { e2eCrashPoint } from "./e2e-hooks";
 import { isFreshMagicSession, nativeRolesRequested, resolveSessionTagScheme } from "./tag-scheme";
+import { knowledgeBaselineBehindPublication } from "./knowledge-gate";
 import {
   dshSummaryCanCome,
   isCacheIdleExpired,
@@ -179,6 +180,13 @@ export interface ContextPlaneDeps {
    * drops (round 36 line C). Absent = core default "5m".
    */
   readonly cacheTtl?: string;
+  /**
+   * Round 37 (I4): the knowledge gate's settings the drop hold needs. When
+   * set (production wiring), queued drops are held while the live knowledge
+   * baseline does not render the latest historian publication. Absent = no
+   * hold (planes wired without a knowledge gate).
+   */
+  readonly knowledge?: { readonly compactionOff?: boolean; readonly isEnabled?: () => boolean };
   /** Injectable clock (tests). */
   readonly now?: () => number;
   readonly log?: (message: string) => void;
@@ -746,6 +754,7 @@ export function dropRideInputFor(
   db: Database,
   sessionId: string,
   pressure: PressureTruncationInput | undefined,
+  pendingBatch: readonly unknown[] = [],
 ): DshDropRideInput | undefined {
   try {
     const served = readServedPrefixState(sessionEvents(agent.session));
@@ -778,10 +787,18 @@ export function dropRideInputFor(
       : pressure !== undefined && pressure.contextWindow > 0
         ? (pressure.projectedTokens / pressure.contextWindow) * 100
         : undefined;
+    const historianPublishedAt = latestHistorianPublishAt(db, sessionId);
+    const knowledge = deps.knowledge;
+    const baselineBehindPublication =
+      knowledge !== undefined &&
+      knowledge.compactionOff !== true &&
+      (knowledge.isEnabled?.() ?? true) &&
+      knowledgeBaselineBehindPublication(agent.session as never, historianPublishedAt, pendingBatch);
     return {
       served,
       cacheExpired: isCacheIdleExpired(served.lastResponseAt, now, deps.cacheTtl, modelKey),
-      historianPublishedAt: latestHistorianPublishAt(db, sessionId),
+      historianPublishedAt,
+      baselineBehindPublication,
       contextPercentage: pct,
       // Token-meter projections and provider usage are provider-anchored;
       // only a reading with neither is a local estimate (core contextUsageFromEstimate).
@@ -900,7 +917,7 @@ export async function runContextPlaneStep(
         protection,
         heuristicCleanup: deps.heuristicCleanup,
         pressureTruncation: deps.config?.pressureTruncation === false ? undefined : pressureInput,
-        dropRide: dropRideInputFor(deps, agent, db, canonicalSessionId, pressureInput),
+        dropRide: dropRideInputFor(deps, agent, db, canonicalSessionId, pressureInput, payload.messages as readonly unknown[]),
         log: deps.log,
       } satisfies PlanContext);
       // Round 27 C4 (e2e only, inert in production): the Y4 window — tool

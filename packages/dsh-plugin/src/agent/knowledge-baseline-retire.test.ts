@@ -474,4 +474,36 @@ describe("round 37 I4: a new knowledge baseline replaces the old one in the acti
       expect(liveM0(w).length).toBe(1);
     });
   });
+
+  it("K7 a session written before the fix (duplicate full baselines on the surface) is cleaned once on resume", async () => {
+    await scenario(async (h) => {
+      await h.turn(1);
+      await h.turn(2);
+      // pre-round-37 leftovers: an older full baseline pair still live at the tail
+      for (const id of ["mc-kb:1000:legacy0000000000", "mc-kb:1000:legacy0000000000:m1"]) {
+        appendUserEvent(
+          h.session,
+          createUserMessage({
+            content: [{ type: "text", text: id.endsWith(":m1") ? "<session-history-since>old</session-history-since>" : "<session-history>OLD-LEGACY</session-history>" }],
+            source: { kind: "magic-context", plugin: "magic-context", messageId: id, revision: "1000" } as never,
+          }),
+        );
+      }
+      expect(liveM0(wire(h.session)).length).toBe(2);
+      h.restart();
+      await h.turn(3);
+      const w = wire(h.session);
+      expect(liveM0(w).length).toBe(1);
+      expect(liveM1(w).length).toBe(1);
+      expect(w.map((m) => m.content).join("\n")).not.toContain("OLD-LEGACY");
+      const before = sessionEvents(h.session).length;
+      await h.pass();
+      await h.pass();
+      // at most the tag of the last tool result (its compaction/prune + tool/result replace), never a baseline write
+      const after = sessionEvents(h.session).slice(before) as Array<SessionEvent & { data?: { source?: { messageId?: string } } }>;
+      expect(after.filter((e) => e.type === "user/message").length).toBe(0);
+      expect(after.length).toBeLessThanOrEqual(2);
+      expect(liveM0(wire(h.session)).length).toBe(1);
+    });
+  });
 });

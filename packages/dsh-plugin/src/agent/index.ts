@@ -567,6 +567,12 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
     // Round 36 line C: the cache-TTL idle-expiry ride uses the same TTL the
     // knowledge gate's HARD-bust signal uses.
     cacheTtl: config.knowledge?.cacheTtl,
+    // Round 37 (I4): hold queued drops while the live knowledge baseline does
+    // not render the latest historian publication (same switches the gate reads).
+    knowledge: {
+      compactionOff: config.knowledge?.compactionOff === true,
+      isEnabled: () => (config.knowledge?.enabled === false ? false : liveEnabled()),
+    },
     now: config.now,
     isEnabled: liveEnabled,
     historian: {

@@ -254,6 +254,14 @@ export interface DshDropRideInput {
   /** Usable window for core's 2 % executeReclaim floor; 0/undefined = only the 3-held-pass rule. */
   readonly usableWindow?: number;
   readonly summaryCanCome: boolean;
+  /**
+   * Round 37 (I4): the live knowledge baseline does not render the latest
+   * historian publication yet (`knowledgeBaselineBehindPublication`). Queued
+   * drops are HELD while it is true — landing the publication's drops before
+   * its summary is live would leave both the raw history and its summary
+   * invisible (crash / failed gate between publish and baseline update).
+   */
+  readonly baselineBehindPublication?: boolean;
 }
 
 export interface DropRideDecision {
@@ -355,13 +363,15 @@ export function decideDropRide(args: {
       signals.executeReclaim = false; // optional lane: defer on any failure
     }
   }
-  const permitted = reclaimRidePermitted(signals, gate);
+  const held = input?.baselineBehindPublication === true;
+  const permitted = !held && reclaimRidePermitted(signals, gate);
   const unprotectTail = pct !== undefined && pct >= DROP_GATE_UNPROTECT_PERCENTAGE;
   const detail =
     input === undefined
       ? "no ride input"
       : `context=${pct === undefined ? "?" : pct.toFixed(1)}% served=${input.served.servedBoundarySeq}` +
         (input.served.rewrittenBySeq !== null ? ` rewrittenBy=${input.served.rewrittenByType ?? "?"}@${input.served.rewrittenBySeq}` : "") +
-        (input.cacheExpired ? " ttlExpired" : "");
+        (input.cacheExpired ? " ttlExpired" : "") +
+        (held ? " held=knowledge-baseline-behind-publication" : "");
   return { permitted, signals, gate, label: reclaimRideLabel(signals), unprotectTail, detail };
 }

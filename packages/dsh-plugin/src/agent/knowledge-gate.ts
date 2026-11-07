@@ -53,6 +53,7 @@ import type { Database } from "@magic-context/core/shared/sqlite";
 import {
   isMagicSource,
   magicUserMessage,
+  replaceUserNode,
   sessionEventAt,
   type MagicMessageSource,
 } from "../compat/dsh-0.1/session";
@@ -327,6 +328,119 @@ export function isMagicWatermarkOnSurface(
   return false;
 }
 
+/** Watermark prefix of a Magic knowledge baseline (`mc-kb:<revision>:<digest>`; m1 adds `:m1`). */
+export const KNOWLEDGE_WATERMARK_PREFIX = "mc-kb:";
+/** Message-id prefix of a superseded baseline node's stand-in (round 37 I4). */
+export const RETIRED_BASELINE_PREFIX = "mc-kb-retired:";
+/** Text of a superseded baseline node's stand-in (legacy duplicates only). */
+export const RETIRED_BASELINE_TEXT = "(superseded Magic Context knowledge baseline; the current one is above)";
+
+/** One LIVE Magic knowledge-baseline node on the surface (identified by source, never by text). */
+export interface LiveKnowledgeNode {
+  readonly seq: number;
+  readonly part: "m0" | "m1";
+  readonly messageId: string;
+  /** Materialization epoch (`source.revision`, or the watermark's revision field). */
+  readonly revision: string;
+  readonly text: string;
+}
+
+function textOfMessage(message: unknown): string {
+  const content = (message as { content?: unknown } | null)?.content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((b) => (b !== null && typeof b === "object" && (b as { type?: unknown }).type === "text" ? String((b as { text?: unknown }).text ?? "") : ""))
+    .join("");
+}
+
+/**
+ * Round 37 (I4): the knowledge-baseline nodes that are LIVE on the surface, in
+ * surface order. Identity is the controlled Magic source (`magic-context`
+ * kind) plus the gate's own watermark id (`mc-kb:<revision>:<digest>`, m1 with
+ * `:m1`) — a user message that merely quotes `<session-history>` has a `user`
+ * source and is never matched. Shadowed (replaced) baselines are not live.
+ */
+export function liveKnowledgeBaselines(session: KnowledgeSessionView): LiveKnowledgeNode[] {
+  const out: LiveKnowledgeNode[] = [];
+  for (const seq of session.surface.nodes) {
+    const event = sessionEventAt(session, seq) as
+      | { type?: string; data?: { source?: unknown } & Record<string, unknown> }
+      | undefined;
+    if (!event || event.type !== "user/message") continue;
+    const source = event.data?.source;
+    if (!isMagicSource(source)) continue;
+    const messageId = source.messageId;
+    if (typeof messageId !== "string" || !messageId.startsWith(KNOWLEDGE_WATERMARK_PREFIX)) continue;
+    const part = messageId.endsWith(":m1") ? "m1" : "m0";
+    const revision =
+      typeof source.revision === "string" && source.revision.length > 0
+        ? source.revision
+        : (messageId.slice(KNOWLEDGE_WATERMARK_PREFIX.length).split(":")[0] ?? "");
+    out.push({ seq, part, messageId, revision, text: textOfMessage(event.data) });
+  }
+  return out;
+}
+
+/**
+ * Round 37 (I4): true when the surface's live knowledge baseline does not yet
+ * render the latest historian publication — the window between a committed
+ * publication (compartments + queued drops) and the baseline that shows those
+ * compartments. While it is open, the publication's drops must not land, or
+ * the covered raw history and its summary are both invisible (a crash in that
+ * window used to lose them). `pendingBatch` are the messages the current
+ * pre-step will append (a first baseline delivered in the batch counts).
+ * Fail-open false (no guard) on read errors.
+ */
+export function knowledgeBaselineBehindPublication(
+  session: KnowledgeSessionView,
+  latestPublishAt: number,
+  pendingBatch: readonly unknown[] = [],
+): boolean {
+  if (!(latestPublishAt > 0)) return false;
+  try {
+    const live = liveKnowledgeBaselines(session).filter((n) => n.part === "m0");
+    const revisions = live.map((n) => Number(n.revision)).filter((n) => Number.isFinite(n));
+    for (const message of pendingBatch) {
+      const source = (message as { source?: unknown } | null)?.source;
+      if (!isMagicSource(source)) continue;
+      const id = source.messageId;
+      if (typeof id !== "string" || !id.startsWith(KNOWLEDGE_WATERMARK_PREFIX) || id.endsWith(":m1")) continue;
+      const revision = Number(source.revision ?? id.slice(KNOWLEDGE_WATERMARK_PREFIX.length).split(":")[0]);
+      if (Number.isFinite(revision)) revisions.push(revision);
+    }
+    if (revisions.length === 0) return false; // no Magic baseline at all (knowledge off / never injected)
+    return Math.max(...revisions) < latestPublishAt;
+  } catch {
+    return false;
+  }
+}
+
+/** Replace each node with the retired stand-in (single-node user replace + prune, later nodes first). */
+function retireBaselineNodes(
+  session: import("@deepseek-ai/dsh-session").Session,
+  nodes: readonly LiveKnowledgeNode[],
+  revision: string,
+): void {
+  for (const node of [...nodes].sort((a, b) => b.seq - a.seq)) {
+    replaceUserNode(
+      session,
+      node.seq,
+      magicUserMessage(RETIRED_BASELINE_TEXT, {
+        kind: "magic-context",
+        plugin: "magic-context",
+        messageId: `${RETIRED_BASELINE_PREFIX}${node.messageId}`,
+        revision,
+      }, []),
+    );
+  }
+}
+
+type SurfaceWriter = { append: (...args: never[]) => unknown };
+
+function canRewriteSurface(session: KnowledgeSessionView): session is KnowledgeSessionView & SurfaceWriter {
+  return typeof (session as unknown as { append?: unknown }).append === "function";
+}
+
 /** Inject the knowledge baseline once per (session, surface generation). */
 export async function maybeInjectKnowledge(
   state: KnowledgeGateState,
@@ -353,8 +467,56 @@ export async function maybeInjectKnowledge(
   );
   if (blocks === null) return;
 
+  // Round 37 (I4): the live baselines decide between resume (no write), a
+  // tail m1 delta, an in-place supersession and a first delivery.
+  const live = liveKnowledgeBaselines(agent.session);
+  const liveM0 = live.filter((n) => n.part === "m0");
+  const liveM1 = live.filter((n) => n.part === "m1");
+  const currentM0 = liveM0[0];
   if (isMagicWatermarkOnSurface(agent.session, blocks.watermark)) {
     // Resume: the persisted surface already carries this exact baseline.
+    // Sessions written before round 37 can still hold older full baselines
+    // next to it: retire those (other revisions only — same-revision m1
+    // deltas stay) once, in place.
+    const stale = live.filter((n) => n.revision !== blocks.revision);
+    if (stale.length > 0 && canRewriteSurface(agent.session)) {
+      try {
+        retireBaselineNodes(agent.session as never, stale, blocks.revision);
+        deps.log?.(
+          `[magic-context] retired ${stale.length} superseded knowledge baseline node(s) next to live ${blocks.watermark} for ${magicSessionId}`,
+        );
+      } catch (error) {
+        deps.log?.(
+          `[magic-context] baseline retirement failed (fail-open): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    state.injectedGenerations.set(magicSessionId, agent.session.surface.replaceGeneration);
+    return;
+  }
+  if (
+    currentM0 !== undefined &&
+    liveM0.length === 1 &&
+    currentM0.revision === blocks.revision &&
+    currentM0.text === blocks.m0Text
+  ) {
+    // Same materialization, only the soft m1 delta moved (memories added
+    // since): never rewrite the stable m0/m1 prefix without a new
+    // materialization — append the fresh m1 at the tail, once.
+    const m1Id = `${blocks.watermark}:m1`;
+    const latestM1 = liveM1[liveM1.length - 1];
+    if (latestM1 === undefined || (latestM1.messageId !== m1Id && latestM1.text !== blocks.m1Text)) {
+      state.lastInjectedMessages = [
+        magicUserMessage(blocks.m1Text, {
+          kind: "magic-context",
+          plugin: "magic-context",
+          messageId: m1Id,
+          revision: blocks.revision,
+          digest: blocks.digest,
+        }, []),
+      ];
+      deps.log?.(`[magic-context] knowledge m1 delta ${m1Id} appended for ${magicSessionId} (m0 unchanged)`);
+    }
     state.injectedGenerations.set(magicSessionId, generation);
     return;
   }
@@ -407,7 +569,38 @@ export async function maybeInjectKnowledge(
   // finished with plain text no longer ends the turn (DSH 0.2.1-rc.5 loop:
   // `turnEnds && inbox.nextStep.length === 0`) — an extra model call that
   // re-sends the baseline, verified on a real headless run.
-  const delivered: unknown[] = [m0Message, m1Message];
+  const delivered: unknown[] = [];
+  // Round 37 (I4): a NEW baseline supersedes the live one IN PLACE (one
+  // single-node user replace each for m0 and m1, preceded by its
+  // compaction/prune shadow price) instead of appending a second full
+  // <session-history>. One atomic event per node: at no point is neither the
+  // old nor the new m0 live. m0 and m1 stay two messages at the old m0/m1
+  // positions (cache split kept); only a new materialization gets here, and
+  // that is a HARD bust in core semantics anyway. Older duplicate baselines
+  // (sessions written before this fix, superseded m1 deltas) are retired to a
+  // short stand-in. The durable log keeps every version.
+  let supersededInPlace = false;
+  if (currentM0 !== undefined && canRewriteSurface(agent.session)) {
+    try {
+      const session = agent.session as unknown as import("@deepseek-ai/dsh-session").Session;
+      const firstM1 = liveM1.find((n) => n.seq > currentM0.seq) ?? liveM1[0];
+      const retire = live.filter((n) => n !== currentM0 && n !== firstM1);
+      retireBaselineNodes(session, retire, blocks.revision);
+      if (firstM1 !== undefined) replaceUserNode(session, firstM1.seq, m1Message);
+      replaceUserNode(session, currentM0.seq, m0Message);
+      if (firstM1 === undefined) delivered.push(m1Message);
+      supersededInPlace = true;
+      deps.log?.(
+        `[magic-context] knowledge baseline ${currentM0.messageId} superseded in place by ${blocks.watermark} for ${magicSessionId} (retired ${retire.length} older baseline node(s))`,
+      );
+    } catch (error) {
+      deps.log?.(
+        `[magic-context] in-place baseline supersession failed (${error instanceof Error ? error.message : String(error)}); delivering in the batch`,
+      );
+      supersededInPlace = false;
+    }
+  }
+  if (!supersededInPlace) delivered.push(m0Message, m1Message);
   // Synthetic todowrite replay (Magic todo-view parity): this pass IS a
   // cache-bust (HARD materialization) — resurface the last todo snapshot so
   // the model regains its task list after the fold, exactly like OpenCode/Pi
@@ -442,7 +635,7 @@ export async function maybeInjectKnowledge(
   } catch {
     // Todo replay must never break injection (fail-open).
   }
-  state.injectedGenerations.set(magicSessionId, generation);
+  state.injectedGenerations.set(magicSessionId, agent.session.surface.replaceGeneration);
   // 首轮 pre-step 前置用：本次 LLM 调用即可见（Pi transform unshift 语义）。
   state.lastInjectedMessages = delivered;
   deps.log?.(
