@@ -126,11 +126,20 @@ evo_isolation_args() {
   [[ -d "$SCR/bin" ]] && a+=(--ro-bind "$SCR/bin" "$SCR/bin")
   local rg
   for rg in "${RG_BINS[@]}"; do a+=(--ro-bind "$SCR/iso/rg-fence" "$rg"); done
-  a+=(--setenv HOME "$SCR/home" --setenv OPENCODE_API_KEY "proxy-injects-the-key" --chdir "$WS")
+  # environment: an ALLOWLIST, not a blocklist (round 37). The DSH process starts from an
+  # empty environment (--clearenv) and gets back only what the host needs; the controller's
+  # variables (BENCH_OUT, BENCH_*, EVO_*, GITHUB_* / RUNNER_* / ACTIONS_* run metadata, the
+  # upstream key, anything exported later) never reach DSH or any tool the agent runs
+  # (smoke 42362017411: the agent's `env` showed BENCH_OUT and the run metadata).
+  # Residual boundary (accepted 2026-11-07 18:30 CST): DSH_* / XDG_* VALUES name host paths
+  # (DSH_HOME, XDG_DATA_HOME...); the directories themselves stay hidden from the agent.
+  a+=(--clearenv)
   local v
-  for v in BENCH_UPSTREAM_KEY BENCH_NONCE BENCH_ABLATE EVO_COST_CAP EVO_DEADLINE EVO_RUN_TIMEOUT EVO_ON_TIMEOUT EVO_MODEL_PATCH EVO_NET_BLOCK GITHUB_WORKSPACE GITHUB_ENV GITHUB_OUTPUT GITHUB_STEP_SUMMARY GITHUB_PATH GITHUB_STATE GITHUB_EVENT_PATH RUNNER_TEMP RUNNER_TOOL_CACHE RUNNER_WORKSPACE BENCH_OUT_ROOT MOCK_TOKENIZER_ROOT ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL; do
-    a+=(--unsetenv "$v")
-  done
+  while IFS= read -r v; do
+    [[ "$v" =~ ^(PATH|LANG|LANGUAGE|LC_[A-Z]+|TERM|USER|LOGNAME|SHELL|TZ|NO_COLOR|DSH_[A-Z0-9_]+|XDG_[A-Z_]+|OPENCODE_SESSION|OPENCODE_DB|MAGIC_CONTEXT_[A-Z0-9_]+|MC_[A-Z0-9_]+|MOCK_LLM_PORT|MOCK_LLM_KEY|DOCKER_HOST|NODE_OPTIONS|HTTPS?_PROXY|NO_PROXY|https?_proxy|no_proxy)$ ]] || continue
+    a+=(--setenv "$v" "${!v}")
+  done < <(compgen -e)
+  a+=(--setenv HOME "$SCR/home" --setenv OPENCODE_API_KEY "proxy-injects-the-key" --chdir "$WS")
   printf '%s\0' "${a[@]}"
 }
 
