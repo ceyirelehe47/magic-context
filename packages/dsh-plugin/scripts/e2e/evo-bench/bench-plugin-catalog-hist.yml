@@ -1,0 +1,7 @@
+# Round 37 evo bench, plugin groups on evo-model-200k-catalog-hist.yml only: the Magic Context
+# historian uses the shipped opencode-go catalog provider (no static session header), see
+# that file. Everything else is the shipped Magic Context default.
+- id: magic-agent
+  config:
+    historian:
+      model: opencode-go/deepseek-v4.1-flash

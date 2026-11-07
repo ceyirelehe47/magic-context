@@ -1,0 +1,29 @@
+# Round 37 evo bench, CONTEXT-MANAGEMENT route (select with model_patch=evo-model-200k-catalog-hist.yml):
+# the 200k stress MAIN route of evo-model-200k-stress.yml (so Magic Context's historian / drops
+# actually run within a few turns: MC execute 65 % = 130 000), but the historian rides the SHIPPED
+# opencode-go catalog provider (no static x-opencode-session header): the gateway rejects a
+# request without a session id (HTTP 400 MissingSessionID, I1, 42274076026), so this route is the
+# one that shows whether the historian call itself carries the DSH session id (fix f5bf2f84a).
+# Historian requests go through the proxy's /r/hist path; the historian model is set by
+# bench-plugin-catalog-hist.yml (plugin groups only, added by run.sh). Bench-only; product defaults untouched.
+- id: llm-pi-ai
+  config:
+    providers:
+      bench:
+        displayName: OpenCode Go via bench proxy (200k, evo main)
+        apiKeyEnv: OPENCODE_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:18731/r/main/zen/go/v1
+        headers:
+          x-opencode-session: !!js process.env.OPENCODE_SESSION
+        models:
+          - id: deepseek-v4.1-flash
+            contextWindow: 200000
+            maxTokens: 32768
+      opencode-go:
+        apiKeyEnv: OPENCODE_API_KEY
+        baseURL: http://127.0.0.1:18731/r/hist/inference/go/v1
+- id: agent-default-model
+  config:
+    provider: bench
+    model: deepseek-v4.1-flash

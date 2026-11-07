@@ -41,7 +41,9 @@ ON_TIMEOUT="${EVO_ON_TIMEOUT:-stop}"
 # reproduces the smoke-2 stress setting (200k, maxTokens 32768, historian on the 200k
 # bench-hist route via cache-bench/bench-plugin.yml, historian awaited 60 s at turn end).
 MODEL_PATCH="${EVO_MODEL_PATCH:-evo-model.yml}"
-STRESS=0; [[ "$MODEL_PATCH" == evo-model-200k-stress.yml ]] && STRESS=1
+# Round 37: evo-model-200k-catalog-hist.yml is the same stress main route with the historian on the
+# shipped opencode-go catalog provider (plugin groups get bench-plugin-catalog-hist.yml instead of bench-plugin.yml).
+STRESS=0; [[ "$MODEL_PATCH" == evo-model-200k-* ]] && STRESS=1
 PATCHES=(--patch "$HERE/$MODEL_PATCH")
 case "$GROUP" in
   baseline) PROFILE=base; unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
@@ -50,7 +52,8 @@ case "$GROUP" in
   native) PROFILE=test; unset MAGIC_CONTEXT_DSH_NATIVE_ROLES ;;
   *) echo "group must be baseline|fold|native" >&2; exit 2 ;;
 esac
-[[ "$STRESS" == 1 && "$GROUP" != baseline ]] && PATCHES+=(--patch "$CB/bench-plugin.yml")
+[[ "$MODEL_PATCH" == evo-model-200k-stress.yml && "$GROUP" != baseline ]] && PATCHES+=(--patch "$CB/bench-plugin.yml")
+[[ "$MODEL_PATCH" == evo-model-200k-catalog-hist.yml && "$GROUP" != baseline ]] && PATCHES+=(--patch "$HERE/bench-plugin-catalog-hist.yml")
 PATCHES+=(--patch "$HERE/bench-evo.yml")
 [[ -n "${EVO_BENCH_PATCH:-}" ]] && PATCHES+=(--patch "$EVO_BENCH_PATCH")
 export DSH_PERMISSION_MODE="${EVO_SANDBOX:-danger-full-access}"
