@@ -34,7 +34,7 @@ WS="$SCR/ws"; mkdir -p "$WS"
 export DSH_PERMISSION_MODE="${EVO_SANDBOX:-danger-full-access}"
 export OPENCODE_SESSION="mc-evo-probe-$GROUP-$NONCE"
 export MOCK_LLM_PORT="${MOCK_LLM_PORT:-18578}" MOCK_LLM_KEY="probe-not-a-key"
-export MOCK_TOKENIZER_ROOT="${MOCK_TOKENIZER_ROOT:-$REPO:$DSH_HOME/profiles/test}"
+export MOCK_TOKENIZER_ROOT="${MOCK_TOKENIZER_ROOT:-$REPO/packages/dsh-plugin:$REPO:$DSH_HOME/profiles/test}"
 
 # --- canaries (planted) + repo needles (taken)
 declare -A CAN
@@ -83,6 +83,7 @@ tool("grep", {"pattern": "Round 36 line I evo bench", "path": repo})
 # positive controls
 tool("read", {"file_path": f"{ws}/VISIBLE.txt"})
 bash("cat VISIBLE.txt; command -v evo-pytest >/dev/null && (timeout 120 evo-pytest --version 2>&1 | tail -n 2) ; echo PROBE-WS-DONE", "probe: workspace + test wrapper")
+bash("timeout 30 docker ps -q >/dev/null 2>&1 && echo PROBE-DOCKER-OK || echo PROBE-DOCKER-FAIL; echo probe-write > probe-written.txt && cat probe-written.txt", "probe: docker socket + workspace write")
 if group != "baseline":
     tool("ctx_search", {"query": "EVOVISIBLE probe"})
 steps.append({"text": "probe turn 1 done"})
@@ -115,6 +116,7 @@ f="$(ls "$DSH_HOME"/sessions/*/"$SID"/session.v4.jsonl.zstd 2>/dev/null | head -
 # remove the planted canaries (never left behind for the real run)
 while read -r p; do rm -f "$p"; done < "$POUT/planted.txt"; rm -rf "$POUT/ctrl"
 
+PROBE_HAVE_DOCKER=0; timeout 20 docker ps -q >/dev/null 2>&1 && PROBE_HAVE_DOCKER=1; export PROBE_HAVE_DOCKER
 for k in "${!CAN[@]}"; do printf '%s\t%s\n' "$k" "${CAN[$k]}"; done > "$POUT/canaries.tsv"
 python3 - "$POUT" "$GROUP" "$RC1" "$RC2" "$SID" "$VIS" "$T1" <<'PY'
 import json, sys, os
@@ -183,9 +185,14 @@ for r in results.values():
     if "PROBE-WS-DONE" in r["text"]:
         evo_pytest = "pytest " in r["text"]
 positive["evo_pytest_ok"] = evo_pytest
+have_docker = os.environ.get("PROBE_HAVE_DOCKER") == "1"
+docker_ok = any("PROBE-DOCKER-OK" in r["text"] for r in results.values())
+positive["docker_ok"] = docker_ok if have_docker else None
+positive["workspace_write_ok"] = any("probe-write" in r["text"] and "PROBE-DOCKER" in r["text"] for r in results.values())
 leaked = sorted(k for k, v in leaks.items() if v)
-ok_pos = positive["workspace_visible"] and positive["turn1_rc"] == 0 and positive["turn2_rc"] == 0 and positive["session_resumed"] and (ctx_ok is not False)
-verdict = {"group": group, "requests": len(rows), "leaked": leaked, "leaks": leaks, "leak_paths": leak_paths, "positive": positive, "tools": by_tool,
+ok_pos = (positive["workspace_visible"] and positive["turn1_rc"] == 0 and positive["turn2_rc"] == 0 and positive["session_resumed"]
+          and (ctx_ok is not False) and positive["workspace_write_ok"] and (positive["docker_ok"] is not False))
+verdict = {"group": group, "isolate": os.environ.get("EVO_ISOLATE", "1"), "requests": len(rows), "leaked": leaked, "leaks": leaks, "leak_paths": leak_paths, "positive": positive, "tools": by_tool,
            "isolated": not leaked, "pass": (not leaked) and ok_pos}
 json.dump(verdict, open(os.path.join(pout, "probe.json"), "w"), indent=1)
 print(json.dumps({k: verdict[k] for k in ("group", "leaked", "pass")}), json.dumps(positive))

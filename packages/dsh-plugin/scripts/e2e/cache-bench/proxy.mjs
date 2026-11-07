@@ -191,6 +191,9 @@ http.createServer((req, res) => {
       fs.writeFileSync(path.join(outDir, "bodies", `${id}.json`), raw);
     }
     const headers = { ...req.headers, host: UP.host, "accept-encoding": "identity", "content-length": String(raw.length) };
+    // Round 37 (evo isolation): the agent's DSH process holds only a dummy key; the
+    // proxy (outside the agent's namespace) sets the real one. Never logged.
+    if (process.env.BENCH_UPSTREAM_KEY) headers.authorization = `Bearer ${process.env.BENCH_UPSTREAM_KEY}`;
     const lib = UP.protocol === "http:" ? http : https;
     let clientAborted = false, upEnded = false, logged = false, onUpClose = null, sawDone = false;
     // the CLIENT went away before the response ended (DSH killed): abort upstream

@@ -54,6 +54,11 @@ on:
         description: "Model route file in scripts/e2e/evo-bench, ALL groups: evo-model.yml (shipped opencode-go catalog route, 1M, default maxTokens / historian) or evo-model-200k-stress.yml (smoke-2 stress setting)"
         type: string
         default: "evo-model.yml"
+      isolate:
+        description: "Round 37: run the agent behind real access boundaries (evo-bench/launch.sh: bwrap namespace without the task dir / bench output / controller scratch / checkout; DSH runtime, session store and Magic DB hidden from bash, ripgrep and the in-process file tools; workspace-write + approval never; key held by the proxy). Every job runs the access probe (probe.sh, mock model, no paid call) first and stops on a leak. 0 = pre-round-37 plain launch (contaminated, probe recorded only)"
+        type: choice
+        options: ["1", "0"]
+        default: "1"
       validate:
         description: "Also score the gold patch and the empty patch (harness check, no model calls)"
         type: boolean
@@ -186,9 +191,34 @@ jobs:
             fi
           fi
 
+      - name: Isolation prerequisites (bubblewrap, unprivileged user namespaces)
+        if: inputs.isolate == '1'
+        run: |
+          sudo apt-get install -y -q bubblewrap >/dev/null 2>&1 || { sudo apt-get update -q >/dev/null && sudo apt-get install -y -q bubblewrap >/dev/null; }
+          # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor (bwrap needs them)
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+          bwrap --version
+          bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid true && echo "bwrap ok"
+
+      - name: Access probe (mock model, real DSH tools; stops the job on a leak when isolated)
+        working-directory: packages/dsh-plugin
+        env:
+          EVO_ISOLATE: ${{ inputs.isolate }}
+          BENCH_OUT_ROOT: ${{ runner.temp }}/bench
+        run: |
+          mkdir -p "$BENCH_OUT_ROOT"
+          set +e
+          bash scripts/e2e/evo-bench/probe.sh "${{ matrix.group }}" "$BENCH_OUT/probe" "$RUNNER_TEMP/evo-task"
+          rc=$?
+          set -e
+          { echo "### access probe ${{ matrix.group }} (isolate=$EVO_ISOLATE): rc=$rc"; jq -c '{leaked, positive}' "$BENCH_OUT/probe/probe.json" 2>/dev/null; } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" != 0 ] && [ "$EVO_ISOLATE" = 1 ]; then echo "::error::access probe failed (leak or failed positive control) — no paid run"; exit 1; fi
+          [ "$rc" = 0 ] || echo "::warning::isolate=0: the probe shows the agent reaching protected locations; this run is contaminated"
+
       - name: Bench run
         working-directory: packages/dsh-plugin
         env:
+          EVO_ISOLATE: ${{ inputs.isolate }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           EVO_COST_CAP: ${{ inputs.cost_cap }}
           EVO_RUN_TIMEOUT: ${{ inputs.turn_timeout }}

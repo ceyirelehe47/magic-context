@@ -26,7 +26,13 @@
 # and flags the turn continued_after_timeout; any other failed turn or a missing session stops),
 # EVO_DEADLINE (epoch s; stop starting new turns after it), EVO_SANDBOX
 # (DSH_PERMISSION_MODE for all groups, default danger-full-access: the agent
-# needs docker for evo-pytest, as the paper's agent runs inside the container).
+# needs docker for evo-pytest, as the paper's agent runs inside the container),
+# EVO_ISOLATE (round 37, default 1: the agent's DSH process runs behind the access
+# boundaries of launch.sh — no task dir / bench output / controller scratch / checkout
+# in its namespace; bash, ripgrep and the in-process file tools cannot reach DSH's own
+# runtime, session store or the Magic DB; DSH_PERMISSION_MODE becomes workspace-write
+# with approval never; the API key stays with the proxy. Verified per job by probe.sh
+# before the run. 0 = the pre-round-37 plain launch, results carry the leak caveat).
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CB="$HERE/../cache-bench"
@@ -58,6 +64,7 @@ esac
 PATCHES+=(--patch "$HERE/bench-evo.yml")
 [[ -n "${EVO_BENCH_PATCH:-}" ]] && PATCHES+=(--patch "$EVO_BENCH_PATCH")
 export DSH_PERMISSION_MODE="${EVO_SANDBOX:-danger-full-access}"
+export EVO_ISOLATE="${EVO_ISOLATE:-1}"
 export BENCH_ABLATE=""
 export BENCH_NONCE="$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
 export OPENCODE_SESSION="mc-evo-$GROUP-$LABEL-$(python3 -c 'import secrets; print(secrets.token_hex(4))')"
@@ -73,9 +80,13 @@ IMG="$(jq -r .image "$TD/instance.json")"; BASE="$(jq -r .base_commit "$TD/insta
 REPO_NAME="$(jq -r '.repo|split("/")[1]' "$TD/instance.json")"
 SCR="${RUNNER_TEMP:-/tmp}/evo/$GROUP-$LABEL"; rm -rf "$SCR"; mkdir -p "$SCR/bin"
 WS="$SCR/$REPO_NAME"; SNAP="$SCR/snap.git"; CT="evo-$GROUP-$LABEL-$$"
+# round 37: access boundaries for the agent (launch.sh); patch files copied where the namespace reads them
+evo_isolation_setup || { echo "::error::evo isolation setup failed"; exit 1; }
+ISO_PATCHES=(); for ((i = 0; i < ${#PATCHES[@]}; i += 2)); do ISO_PATCHES+=("${PATCHES[i]}" "$(evo_patch "${PATCHES[i+1]}")"); done
+PATCHES=("${ISO_PATCHES[@]}")
 NT=$(jq length "$TD/requests.json")
-printf '{"group":"%s","label":"%s","nonce":"%s","session_header":"%s","profile":"%s","native_roles":"%s","image":"%s","base_commit":"%s","turns_planned":%s,"run_timeout":%s,"cost_cap":"%s","sandbox":"%s","model_patch":"%s","historian_await":"%s","on_timeout":"%s","start":%s}\n' \
-  "$GROUP" "$LABEL" "$BENCH_NONCE" "$OPENCODE_SESSION" "$PROFILE" "${MAGIC_CONTEXT_DSH_NATIVE_ROLES-}" "$IMG" "$BASE" "$NT" "$RUN_TIMEOUT" "${EVO_COST_CAP:-0}" "$DSH_PERMISSION_MODE" "$MODEL_PATCH" "${MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS-}" "$ON_TIMEOUT" "$(date +%s%3N)" > "$OUT/meta.json"
+printf '{"group":"%s","label":"%s","nonce":"%s","session_header":"%s","profile":"%s","native_roles":"%s","image":"%s","base_commit":"%s","turns_planned":%s,"run_timeout":%s,"cost_cap":"%s","sandbox":"%s","model_patch":"%s","historian_await":"%s","on_timeout":"%s","isolate":"%s","start":%s}\n' \
+  "$GROUP" "$LABEL" "$BENCH_NONCE" "$OPENCODE_SESSION" "$PROFILE" "${MAGIC_CONTEXT_DSH_NATIVE_ROLES-}" "$IMG" "$BASE" "$NT" "$RUN_TIMEOUT" "${EVO_COST_CAP:-0}" "$DSH_PERMISSION_MODE" "$MODEL_PATCH" "${MAGIC_CONTEXT_DSH_HISTORIAN_AWAIT_TURN_END_MS-}" "$ON_TIMEOUT" "$EVO_ISOLATE" "$(date +%s%3N)" > "$OUT/meta.json"
 
 # --- workspace: the image's /testbed at base_commit, git history and tags removed
 docker pull -q "$IMG" >/dev/null
@@ -141,7 +152,7 @@ if [[ "${EVO_NET_BLOCK:-1}" == 1 ]]; then
   echo "pull block: $(tail -n 1 "$OUT/pullblock-check.txt") (expect non-zero)"
 fi
 
-node "$CB/proxy.mjs" 18731 "$OUT" > "$OUT/proxy.out" 2>&1 &
+BENCH_UPSTREAM_KEY="${OPENCODE_API_KEY:-}" node "$CB/proxy.mjs" 18731 "$OUT" > "$OUT/proxy.out" 2>&1 &
 PROXY=$!
 for _ in $(seq 1 50); do (echo > /dev/tcp/127.0.0.1/18731) 2>/dev/null && break; sleep 0.1; done
 
