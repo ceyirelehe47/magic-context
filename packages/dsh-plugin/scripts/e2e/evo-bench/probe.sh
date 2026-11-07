@@ -48,6 +48,7 @@ plant scratch "$SCR/CANARY-$NONCE.txt"                 # controller scratch (sna
 plant sessions "$DSH_HOME/sessions/CANARY-$NONCE.txt"  # DSH raw session store
 plant dshhome "$DSH_HOME/CANARY-$NONCE.txt"            # DSH home (profiles, storages)
 plant magicdata "$XDG_DATA_HOME/CANARY-$NONCE.txt"     # Magic Context DB dir
+plant isopatches "$SCR/iso/patches/CANARY-$NONCE.txt" # bench config the host loads (patch files: routes, plugin groups, isolation)
 [[ -n "${BENCH_OUT_ROOT:-}" ]] && plant benchout "$BENCH_OUT_ROOT/CANARY-$NONCE.txt"
 REPO_LINE="Round 36 line I evo bench: ONE run of one group"
 CAN[repo]="$REPO_LINE"
@@ -62,7 +63,7 @@ T1="EVOTURN1-$NONCE"
 python3 - "$POUT/plans.json" "$GROUP" "$WS" "$TD" "$POUT" "$SCR" "$DSH_HOME" "$XDG_DATA_HOME" "$REPO" "$E2E_ROOT" "${RUNNER_TEMP:-/tmp}" "${BENCH_OUT_ROOT:-}" <<'PY'
 import json, sys
 out, group, ws, td, pout, scr, home, data, repo, e2e, rt, bench = sys.argv[1:]
-dirs = [d for d in [td, pout, scr, home, home + "/sessions", data, repo, e2e, rt, bench] if d]
+dirs = [d for d in [td, pout, scr, scr + "/iso/patches", home, home + "/sessions", data, repo, e2e, rt, bench] if d]
 cats = " ".join(f'"{d}"/CANARY-* "{d}"/*.json "{d}"/*.jsonl' for d in dirs)
 steps = []
 def bash(cmd, desc):
