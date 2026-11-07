@@ -144,20 +144,40 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     signal: AbortSignal,
   ): Promise<CompactionResult | null> {
     if (trigger !== "pressure") return super.compactIfNeeded(agent, trigger, signal);
-    if (process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN !== "1") return this.pressureCompaction(agent, trigger, signal);
-    // e2e diagnostics (headless prints console.error, not ctx.logger): one
-    // line per pressure check with the pressure, the effective threshold and
-    // the outcome — the evidence that native compaction stays behind MC.
-    const probe = await this.describePressure(agent);
     // Round 21 (P7): per-call diagnostics, not engine-instance fields — the
     // engine is shared by every session, so concurrent checks overwrote each
     // other's threshold.
+    // Round 37 phase 2: every check records a classified outcome next to BOTH
+    // the plugin's prediction (probe before the check) and the backstop's own
+    // measurement (compaction-basic's meter / threshold before and after its
+    // check, see measuredCompaction) — `lastPressureCheck(agent)`; the e2e
+    // debug line (headless prints console.error, not ctx.logger) carries the
+    // same. L4 42348192506 logged pct 84-88 > thresholdPct 83.6 with
+    // outcome=none: compaction-basic's tool-result pruner had brought the
+    // session under its threshold, which the line could not say.
+    const probe = await this.describePressure(agent);
     const note: PressureNote = {};
-    const say = (outcome: string) => {
+    const finish = (outcome: string) => {
+      const record: PressureCheckRecord = {
+        at: Date.now(),
+        outcome,
+        predicted: {
+          ...(probe.pct !== undefined ? { pct: probe.pct } : {}),
+          ...(note.thresholdPct !== undefined ? { thresholdPct: note.thresholdPct } : {}),
+        },
+        measured: { ...(note.measured ?? {}) },
+      };
+      this.lastCheck.set(agent.session as unknown as object, record);
+      if (process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN !== "1") return;
       try {
+        const m = record.measured;
         // eslint-disable-next-line no-console
         console.error(
-          `[magic-context] native pressure check: child=${isDshChildSession(agent)} pct=${probe.pct ?? "?"} thresholdPct=${note.thresholdPct ?? "?"} window=${probe.window ?? "?"} outcome=${outcome}`,
+          // predicted (plugin probe) first, then the outcome, then the backstop's own
+          // measurement (tokens before -> after / its threshold): appended after
+          // outcome= so ci-check.py's line pattern keeps matching
+          `[magic-context] native pressure check: child=${isDshChildSession(agent)} pct=${probe.pct ?? "?"} thresholdPct=${note.thresholdPct ?? "?"} window=${probe.window ?? "?"} ` +
+            `outcome=${outcome.replace(/\s+/g, "_")} backstop=${m.tokensBefore ?? "?"}->${m.tokensAfter ?? "?"}/${m.thresholdTokens ?? "?"}`,
         );
       } catch {
         // diagnostics only
@@ -165,11 +185,96 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     };
     try {
       const result = await this.pressureCompaction(agent, trigger, signal, probe, note);
-      say(result === null ? (note.outcome ?? "none") : "compacted");
+      finish(result === null ? (note.outcome ?? "skipped:unclassified") : "compacted");
       return result;
     } catch (error) {
-      say(`error:${(error instanceof Error ? error.message : String(error)).slice(0, 160)}`);
+      finish(`failed:${(error instanceof Error ? error.message : String(error)).slice(0, 160)}`);
       throw error;
+    }
+  }
+
+  /** Round 37 phase 2: the last pressure check per session (diagnostics, /ctx-status, tests). */
+  private readonly lastCheck = new WeakMap<object, PressureCheckRecord>();
+
+  /** What the last pressure check of this agent's session did, on which values. */
+  lastPressureCheck(agent: Agent): PressureCheckRecord | undefined {
+    return this.lastCheck.get(agent.session as unknown as object);
+  }
+
+  /**
+   * Round 37 phase 2: the backstop's OWN measurement around one
+   * compaction-basic check — the same TokenMeter on the same surface right
+   * before it (compaction-basic's first measurement) and right after (after its
+   * tool-result pruner / compaction), and its threshold priced like
+   * compaction-basic (routed request header, window, reserved completion
+   * tokens, the effective policy). Read-only; never changes what the check does.
+   * A null result is classified from it unless a guard already named the reason.
+   */
+  private async measuredCompaction(
+    config: ResolvedConfig,
+    agent: Agent,
+    run: () => Promise<CompactionResult | null>,
+    note?: PressureNote,
+  ): Promise<CompactionResult | null> {
+    if (note === undefined) return run();
+    const before = await this.backstopMeasure(config, agent);
+    note.measured = before.measured;
+    const after = () => {
+      const tokens = this.meterTokens(agent);
+      if (note.measured !== undefined && tokens !== undefined) note.measured = { ...note.measured, tokensAfter: tokens };
+    };
+    try {
+      const result = await run();
+      after();
+      if (result === null && note.outcome === undefined) {
+        const m = note.measured ?? {};
+        note.outcome = !before.routed
+          ? "skipped:no-routed-request"
+          : m.thresholdTokens === undefined || m.tokensBefore === undefined
+            ? "skipped:unmeasured"
+            : m.tokensBefore < m.thresholdTokens
+              ? "skipped:below-threshold"
+              : m.tokensAfter !== undefined && m.tokensAfter < m.thresholdTokens
+                ? "skipped:pruned-below-threshold"
+                : "skipped:no-compactable-range";
+      }
+      return result;
+    } catch (error) {
+      after();
+      throw error;
+    }
+  }
+
+  private meterTokens(agent: Agent): number | undefined {
+    try {
+      return (this.ctx as unknown as { tokenMeter?: { measure(s: unknown): { totalTokens: number } } }).tokenMeter?.measure(agent.session).totalTokens;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async backstopMeasure(config: ResolvedConfig, agent: Agent): Promise<{ routed: boolean; measured: PressureMeasured }> {
+    const tokensBefore = this.meterTokens(agent);
+    const header = (agent.session as unknown as {
+      requestHeader?: () => { config?: { provider?: string; model?: string; maxTokens?: number } } | undefined;
+    }).requestHeader?.()?.config;
+    const base: PressureMeasured = tokensBefore !== undefined ? { tokensBefore } : {};
+    if (!header?.provider || !header.model) return { routed: false, measured: base };
+    try {
+      const info = await (this.ctx as unknown as {
+        llm?: { resolveModelInfo?(p: string, m: string): Promise<{ context?: { contextWindow?: number }; defaultMaxTokens?: number }> };
+      }).llm?.resolveModelInfo?.(header.provider, header.model);
+      const window = info?.context?.contextWindow;
+      const reservedTokens = header.maxTokens ?? info?.defaultMaxTokens ?? 0;
+      if (window === undefined) return { routed: true, measured: { ...base, reservedTokens } };
+      const override = config.modelPolicies.find((p) => p.provider === header.provider && p.model === header.model);
+      const thresholdTokens = nativePressureThresholdTokens(window, reservedTokens, {
+        thresholdRatio: override?.thresholdRatio ?? config.thresholdRatio,
+        headroomTokens: override?.headroomTokens ?? config.headroomTokens,
+      });
+      return { routed: true, measured: { ...base, window, reservedTokens, ...(thresholdTokens !== null ? { thresholdTokens } : {}) } };
+    } catch {
+      return { routed: true, measured: base };
     }
   }
 
@@ -206,7 +311,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     // compaction/start (see compactRegion / backstopWouldNotShrink).
     this.guardedChecks.add(session);
     try {
-      const result = await this.withPressureConfig(once, () => super.compactIfNeeded(agent, trigger, signal));
+      const result = await this.measuredCompaction(once, agent, () => this.withPressureConfig(once, () => super.compactIfNeeded(agent, trigger, signal)), note);
       if (result !== null) readHostBackstopGuard(this.ctx)?.clearSkip(agent);
       return result;
     } catch (error) {
@@ -420,7 +525,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
       const percentage = readHostNativePressurePercentage(this.ctx, agent);
       if (percentage === null) {
         this.notePressureThreshold(base, agent, probe, note);
-        return super.compactIfNeeded(agent, trigger, signal);
+        return this.measuredCompaction(base, agent, () => super.compactIfNeeded(agent, trigger, signal), note);
       }
       const main = magicMainPressureConfig(base, this.explicitPressure, percentage);
       this.notePressureThreshold(main, agent, probe, note);
@@ -476,7 +581,7 @@ export class MagicCompactionEngine extends BasicCompactionEngine {
     }
     this.notePressureThreshold(base, agent, probe, note);
     try {
-      return await super.compactIfNeeded(agent, trigger, signal);
+      return await this.measuredCompaction(base, agent, () => super.compactIfNeeded(agent, trigger, signal), note);
     } catch (error) {
       if (this.explicitPressure.headroomTokens || !isDefaultHeadroomConfigError(error, this.explicitPressure.retain)) {
         throw error;
@@ -583,8 +688,33 @@ function readHostNativePressurePercentage(ctx: Context, agent: Agent): number | 
 
 /** Per-call pressure diagnostics (round 21, P7). */
 interface PressureNote {
+  /** Plugin prediction of the threshold (percent of the window). */
   thresholdPct?: number;
   outcome?: string;
+  /** Round 37 phase 2: the backstop's own measurement (measuredCompaction). */
+  measured?: PressureMeasured;
+}
+
+/** Round 37 phase 2: compaction-basic's view of one pressure check. */
+export interface PressureMeasured {
+  /** TokenMeter total right before compaction-basic's check (its first measurement). */
+  tokensBefore?: number;
+  /** TokenMeter total right after it (after its tool-result pruner / compaction). */
+  tokensAfter?: number;
+  /** compaction-basic's threshold: floor(min(window × ratio, window − reserved − headroom)). */
+  thresholdTokens?: number;
+  reservedTokens?: number;
+  window?: number;
+}
+
+/** Round 37 phase 2: one pressure check — what happened, predicted vs measured. */
+export interface PressureCheckRecord {
+  readonly at: number;
+  /** compacted | skipped:<reason> | deferred:<reason> | failed:<error> */
+  readonly outcome: string;
+  /** The plugin's probe before the check (percent of the routed window). */
+  readonly predicted: { pct?: number; thresholdPct?: number };
+  readonly measured: PressureMeasured;
 }
 
 /**

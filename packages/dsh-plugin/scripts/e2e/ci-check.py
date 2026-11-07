@@ -78,6 +78,12 @@ ALLOWED_CHILD_TOOLS = {"read", "grep", "glob", "fs_search"}
 MASKED = ("bash", "write", "edit", "ctx_search", "ctx_reduce")
 TAG_PREFIX = re.compile(r"^\s*§(\d+)§")
 CHECK = re.compile(r"native pressure check: child=(true|false) pct=([0-9.]+|\?) thresholdPct=([0-9.]+|\?) window=(\S+) outcome=(\S+)")
+# Round 37 phase 2: what "outcome=none" (pressure check returned null, no guard named a
+# reason) is now reported as — the backstop's own measurement classifies it.
+NULL_CHECK_OUTCOMES = frozenset({
+    "skipped:below-threshold", "skipped:pruned-below-threshold", "skipped:no-compactable-range",
+    "skipped:no-routed-request", "skipped:unmeasured", "skipped:unclassified",
+})
 NATIVE = re.compile(r"native compaction region: child=(true|false) tokens=(\S+) window=(\S+) pct=([0-9.]+|\?)")
 NO_BUDGET = "leaving no pressure budget"
 TRIGGER = re.compile(r"historian trigger: pct=(\d+) threshold=(\d+) budget=(\d+) window=(\d+) fires=(true|false)")
@@ -664,7 +670,9 @@ def check_r22_lock(c, out: Path, runs):
     after = [x for x in checks if x[0] > last_def] if last_def >= 0 else []
     db_a = load_json(out / "db-lock-a.json") or {}
     comps = db_a.get("compartments") if isinstance(db_a.get("compartments"), list) else []
-    retried = [x for x in after if x[3] in ("none", "compacted")]
+    # round 37 phase 2: a check that did not compact is classified (skipped:<reason>)
+    # instead of "none"; the same null outcomes as before, renamed (not loosened)
+    retried = [x for x in after if x[3] in ("none", "compacted") or x[3] in NULL_CHECK_OUTCOMES]
     c.add("R11", last_def >= 0 and bool(retried) and len(comps) >= 1,
           "a later pressure check retried after the deferral (compacted, or below the backstop once the historian covered it)",
           {"checksAfterLastDeferral": [(p, t, o) for _, p, t, o in after][:6], "compartments": len(comps)})
