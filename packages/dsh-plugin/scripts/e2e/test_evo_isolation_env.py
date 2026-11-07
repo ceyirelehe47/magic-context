@@ -66,12 +66,14 @@ def isolation_env(tmp):
     p = subprocess.run(["bash", "-c", script], env=env, capture_output=True, timeout=60)
     if p.returncode != 0:
         raise AssertionError(p.stderr.decode(errors="replace"))
-    args = open(os.path.join(tmp, "args.bin"), "rb").read().decode(errors="replace").split("\0")
+    with open(os.path.join(tmp, "args.bin"), "rb") as f:
+        args = f.read().decode(errors="replace").split("\0")
     if args and args[-1] == "":
         args.pop()
     # the environment the DSH process gets, applied the way bwrap does: the inherited
     # environment of the launching shell, then --clearenv / --setenv / --unsetenv in order
-    shell_env = open(os.path.join(tmp, "env.bin"), "rb").read().decode(errors="replace").split("\0")
+    with open(os.path.join(tmp, "env.bin"), "rb") as f:
+        shell_env = f.read().decode(errors="replace").split("\0")
     effective = dict(kv.split("=", 1) for kv in shell_env if "=" in kv)
     sets = {}
     i = 0
