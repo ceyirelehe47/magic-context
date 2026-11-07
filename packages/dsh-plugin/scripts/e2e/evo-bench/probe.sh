@@ -29,6 +29,8 @@ case "$GROUP" in
   *) echo "group must be baseline|fold|native" >&2; exit 2 ;;
 esac
 NONCE="$(python3 -c 'import secrets; print(secrets.token_hex(6))')"
+# own DSH_HOME / XDG dirs (sessions, storages, Magic DB): nothing shared with the paid run
+evo_probe_storage "$NONCE" || { echo "::error::probe storage setup failed"; exit 1; }
 SCR="${RUNNER_TEMP:-/tmp}/evo/probe-$GROUP-$NONCE"; rm -rf "$SCR"; mkdir -p "$SCR/bin"
 WS="$SCR/ws"; mkdir -p "$WS"
 export DSH_PERMISSION_MODE="${EVO_SANDBOX:-danger-full-access}"
@@ -115,6 +117,7 @@ f="$(ls "$DSH_HOME"/sessions/*/"$SID"/session.v4.jsonl.zstd 2>/dev/null | head -
 [[ -n "$SID" && -n "$f" ]] && zstd -qdc "$f" > "$POUT/session.jsonl" 2>/dev/null
 # remove the planted canaries (never left behind for the real run)
 while read -r p; do rm -f "$p"; done < "$POUT/planted.txt"; rm -rf "$POUT/ctrl"
+evo_probe_storage_cleanup
 
 PROBE_HAVE_DOCKER=0; timeout 20 docker ps -q >/dev/null 2>&1 && PROBE_HAVE_DOCKER=1; export PROBE_HAVE_DOCKER
 for k in "${!CAN[@]}"; do printf '%s\t%s\n' "$k" "${CAN[$k]}"; done > "$POUT/canaries.tsv"

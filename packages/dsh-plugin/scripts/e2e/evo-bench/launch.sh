@@ -124,6 +124,27 @@ evo_isolation_args() {
   printf '%s\0' "${a[@]}"
 }
 
+# Probe storage (round 37 phase 2): the access probe must not share DSH_HOME (session
+# store, storages) or the Magic Context data dir with the paid run of the same job.
+# Fresh dirs under E2E_ROOT (hidden from the agent like the paid store); profiles and
+# the plugin config are copied, sessions / storages / DB are not.
+evo_probe_storage() {
+  local nonce="$1" root
+  [[ -n "$nonce" ]] || { echo "evo_probe_storage: nonce required" >&2; return 1; }
+  root="$E2E_ROOT/probe-store/$nonce"
+  rm -rf "$root"; mkdir -p "$root/home" "$root/xdg/config" "$root/xdg/data" "$root/xdg/state" "$root/xdg/cache"
+  [[ -d "$DSH_HOME/profiles" ]] && cp -a "$DSH_HOME/profiles" "$root/home/profiles" || return 1
+  [[ -d "$XDG_CONFIG_HOME" ]] && cp -a "$XDG_CONFIG_HOME/." "$root/xdg/config/"
+  EVO_PROBE_STORE="$root"
+  export DSH_HOME="$root/home" XDG_CONFIG_HOME="$root/xdg/config" XDG_DATA_HOME="$root/xdg/data" XDG_STATE_HOME="$root/xdg/state" XDG_CACHE_HOME="$root/xdg/cache"
+}
+evo_probe_storage_cleanup() {
+  [[ -n "${EVO_PROBE_STORE:-}" && "$EVO_PROBE_STORE" == "$E2E_ROOT"/probe-store/* ]] || return 0
+  rm -rf "$EVO_PROBE_STORE"
+  rmdir "$E2E_ROOT/probe-store" 2>/dev/null
+  return 0
+}
+
 evo_dsh_turn() {
   local log="$1" t="$2"; shift 2
   if evo_isolated; then
