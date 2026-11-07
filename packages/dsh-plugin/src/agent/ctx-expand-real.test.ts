@@ -124,8 +124,8 @@ function addReply(s: Session, i: number) {
 /** The real DSH tool registry with the plugin's ctx_* tools registered as in production. */
 async function realToolRuntime(db: unknown) {
   const ctx = new Context();
-  ctx.plugin({ name: "system-prompt-stub", apply: (c: Context) => void c.provide("systemPrompt", { tools: () => () => {}, section: () => () => {}, getSectionOrder: () => 0 }) } as never);
-  ctx.plugin(ToolRuntime as never);
+  (ctx as unknown as { plugin(p: unknown): unknown }).plugin({ name: "system-prompt-stub", apply: (c: Context) => void c.provide("systemPrompt", { tools: () => () => {}, section: () => () => {}, getSectionOrder: () => 0 }) } as never);
+  (ctx as unknown as { plugin(p: unknown): unknown }).plugin(ToolRuntime as never);
   for (let i = 0; i < 50 && ctx.get("tools") === undefined; i += 1) await new Promise((r) => setTimeout(r, 10));
   const runtime = ctx.get("tools") as ToolRuntime;
   if (runtime === undefined) throw new Error("ToolRuntime did not start");

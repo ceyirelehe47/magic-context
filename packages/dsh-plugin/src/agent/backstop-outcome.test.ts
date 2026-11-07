@@ -145,7 +145,7 @@ async function rig(opts: { policy?: typeof POLICY; llm?: DshSummarizeCall; prune
       error = e instanceof Error ? e.message : String(e);
     }
     const appended: string[] = [];
-    for (let s = before; s < session.seq; s += 1) appended.push((session as unknown as { eventAt(s: number): { type: string } }).eventAt(s).type);
+    for (let s = Number(before); s < Number(session.seq); s += 1) appended.push((session as unknown as { eventAt(s: number): { type: string } }).eventAt(s).type);
     const last = (engine as unknown as { lastPressureCheck?: (a: Agent) => Check | undefined }).lastPressureCheck?.(agent);
     return { result, error, compaction: appended.filter((t) => t.startsWith("compaction/")), check: last, line: lines.filter((l) => l.includes("native pressure check")).at(-1) };
   };
