@@ -83,6 +83,16 @@ RG
 - id: approval
   config:
     policy: never
+# workspace-write + never is not one of the shipped presets: name it, or the permission
+# presets entry refuses to activate ("match no preset; configure defaultPreset")
+- id: permission
+  config:
+    presets:
+      read-only: { sandbox: read-only, approval: ask }
+      workspace-write: { sandbox: workspace-write, approval: ask }
+      danger-full-access: { sandbox: danger-full-access, approval: never }
+      evo-isolated: { sandbox: workspace-write, approval: never }
+    defaultPreset: evo-isolated
 - insert:
     - id: evo-fs-fence
       name: evo-fs-fence

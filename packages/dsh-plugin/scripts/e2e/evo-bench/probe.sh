@@ -193,8 +193,19 @@ docker_ok = any("PROBE-DOCKER-OK" in r["text"] for r in results.values())
 positive["docker_ok"] = docker_ok if have_docker else None
 positive["workspace_write_ok"] = any("probe-write" in r["text"] and "PROBE-DOCKER" in r["text"] for r in results.values())
 leaked = sorted(k for k, v in leaks.items() if v)
+# every host entry activated (an isolation patch that breaks a host plugin, e.g. the permission presets, is a failure)
+inactive = []
+for t in ("turn-01.log", "turn-02.log"):
+    fp = os.path.join(pout, t)
+    if os.path.exists(fp):
+        lines = open(fp, errors="replace").read().splitlines()
+        for i, l in enumerate(lines):
+            if "did not activate" in l:
+                inactive.append(l.strip()[:200] + (" | " + lines[i + 1].strip()[:200] if i + 1 < len(lines) else ""))
+positive["host_entries_ok"] = not inactive
+positive["inactive_entries"] = inactive
 ok_pos = (positive["workspace_visible"] and positive["turn1_rc"] == 0 and positive["turn2_rc"] == 0 and positive["session_resumed"]
-          and (ctx_ok is not False) and positive["workspace_write_ok"] and (positive["docker_ok"] is not False))
+          and (ctx_ok is not False) and positive["workspace_write_ok"] and (positive["docker_ok"] is not False) and positive["host_entries_ok"])
 verdict = {"group": group, "isolate": os.environ.get("EVO_ISOLATE", "1"), "requests": len(rows), "leaked": leaked, "leaks": leaks, "leak_paths": leak_paths, "positive": positive, "tools": by_tool,
            "isolated": not leaked, "pass": (not leaked) and ok_pos}
 json.dump(verdict, open(os.path.join(pout, "probe.json"), "w"), indent=1)
