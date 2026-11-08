@@ -227,8 +227,8 @@ historian 174+177, 313+317 and 427+430 each completed before the same next main 
 - **New finding (not fixed, no product change this round):** after a native compaction the checkpoint stays
   on the surface **next to** the m0 in **182 of 419** main requests (178–240 until a native drop replaced it
   at 241; 318–429; 431–467). In all 182 the checkpoint's compartment range is a subset of the m0's, so the
-  same summaries are sent twice: 15–40 KB per request, median 29.9 KB. From 390 to 429 the checkpoint
-  (1–537) is older than the m0 (up to 1–661). That is the same "old and new full baseline" shape as I4, through
+  same summaries are sent twice: 15–40 KB per request, median 29.9 KB. From 389 to 429 the checkpoint
+  (1–537) is older than the m0 (1–589 up to 1–713). That is the same "old and new full baseline" shape as I4, through
   the checkpoint instead of a second m0. The offline K1–K7 cases do not cover a compaction checkpoint.
 - Request structure: pairing violations **0**; reasoning lost **0** (`i4scan` reports 1, which is a key
   collision on `list_agents {}`: the copy in body 45 is the call from response 44, which had no reasoning).
