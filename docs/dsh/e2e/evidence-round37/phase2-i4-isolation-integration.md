@@ -165,8 +165,9 @@ skipped classes in real runs; isolation by access probe (local RED → fix, then
 env and iso/patches gaps found and closed); the same-window wording of the round-37 progress paragraph.
 
 Not verified / limits:
-- I4 in a real historian publication (two 429 stops, 0 publications).
-- Backstop execute / deferred / failed in a real run.
+- I4 in a real historian publication (two 429 stops, 0 publications) — **closed by the 2026-11-08 rerun, §6**
+  (with a new checkpoint + m0 overlap finding).
+- Backstop execute / deferred / failed in a real run — **all three seen in the 2026-11-08 rerun, §6**.
 - Sample: **2 pairs, 1 item, turn 1 only**; pair B confounded upstream. No quality claim, no item solved;
   this is not a long-session quality acceptance (green CI, faster calls or finished turns do not replace it).
 - e2e / soak not run.
@@ -181,3 +182,72 @@ storage · `0df97f353` fix · `22606ea31` runner bwrap / preset · `e82c566e2` R
 `bd9835061` cold resume · `ea7a861f9` RED backstop · `5b19f5212` backstop outcome · `f7d74d31d` RED env ·
 `b498ada3a` env allowlist · `ab88e100b` test types · `3c71286c8` test hygiene · `05bf8205d` RED iso/patches ·
 `b36e0d104` iso/patches hidden.
+
+## 6. I4 real-publication rerun (2026-11-08, run 42459290880)
+
+One dispatch, approved by the user and not retried: `dsh-evo-bench.yml` @ `83c5388cd`, native only, runs 1,
+**max_items 10**, cost cap $3, `evo-model-200k-catalog-hist.yml` (200k window, historian on), isolate 1,
+validate off, on-timeout stop, turn timeout 1200 s, slot evo-19. Model, thinking, effort and maxTokens
+unchanged. Scan extracts: [`phase2-tables/i4-rerun-42459290880.md`](phase2-tables/i4-rerun-42459290880.md);
+raw bodies, requests and turn logs are in the run artifact `dsh-e2e-evobench-native-run1-42459290880`.
+
+**Run.** Stop class `completed` (`done`): 10 / 10 / 10 turns, 0 turn timeouts, **0 HTTP 429**
+(467 / 467 requests HTTP 200), wall time for turns 3318 s. F2P **0/8**, P2P **310/317** (pass rate 95.4 %),
+26 files touched. Turn 9 ended `max-tokens`: main request 426 (prompt 179 522) went out with
+`max_completion_tokens: 1` and finished `length`; turn 10 ran normally.
+
+| kind | requests | input tok | cache hit | miss | output (reasoning ⊂ output) | USD |
+|---|---|---|---|---|---|---|
+| main | 419 | 47 662 228 | 45 139 456 | 2 522 772 | 234 306 (163 928) | 1.3088 |
+| subagent | 28 (+2 without usage) | 464 741 | 302 976 | 161 765 | 199 678 (180 959) | 0.2900 |
+| historian | 17 | 280 425 | 231 552 | 48 873 | 70 983 (47 408) | 0.1012 |
+| title | 1 | 382 | 0 | 382 | 12 | 0.0001 |
+| **total** | 467 | 48 407 776 | 45 673 984 | 2 733 792 | 504 979 (392 295) | **1.7002** |
+
+Main requests without usage 0; the 2 without usage are subagent streams (requests 37, 151, HTTP 200,
+no usage chunk), so their tokens are missing from the totals. Access probe before the paid run:
+0 / 11 leak classes, positive controls pass.
+
+**Publications.** 17 historian requests, **all HTTP 200** (`finish=stop`). They reached the main surface as
+**14 m0 rewrites** (main requests 93, 114, 138, 152, 179, 241, 271, 298, 319, 389, 396, 411, 429, 432);
+historian 174+177, 313+317 and 427+430 each completed before the same next main request.
+
+**I4 — verified in a real run, with one new finding.**
+- Active `<session-history>` (m0) per main request: **1 in 416, 0 in 3, never 2** (L4 baseline at
+  `c6208045c`: up to 3). `<session-history-since>` (m1) ≤ 1 in every request.
+- Around each publication (before / at / after; e.g. 113 → 114 → 115: body 513 → 529 → 529 KB, newest m0
+  1–16 → 1–115) the old m0 is replaced in place, not appended. The m0 text changes **only** at the 14
+  publications, never with unchanged coverage. Prompt-cache drops that are not publications (175, 305, 413)
+  start at an earlier tool message (native drops), not at m0.
+- Coverage: the newest m0 never has a gap and its upper bound never decreases (final m0: 18 ranges, 1–761).
+- The 3 requests without m0 (178, 318, 431) are the first main request after each native backstop
+  compaction. There the DSH `compact-checkpoint` carries the compartments (1–262 / 1–537 / 1–761, at least
+  the previous request's coverage, 147 / 428 / 713), and the next request has the m0 again. No history was
+  lost, but "exactly one m0" does not hold for these 3 requests.
+- **New finding (not fixed, no product change this round):** after a native compaction the checkpoint stays
+  on the surface **next to** the m0 in **182 of 419** main requests (178–240 until a native drop replaced it
+  at 241; 318–429; 431–467). In all 182 the checkpoint's compartment range is a subset of the m0's, so the
+  same summaries are sent twice: 15–40 KB per request, median 29.9 KB. From 390 to 429 the checkpoint
+  (1–537) is older than the m0 (up to 1–661). That is the same "old and new full baseline" shape as I4, through
+  the checkpoint instead of a second m0. The offline K1–K7 cases do not cover a compaction checkpoint.
+- Request structure: pairing violations **0**; reasoning lost **0** (`i4scan` reports 1, which is a key
+  collision on `list_agents {}`: the copy in body 45 is the call from response 44, which had no reasoning).
+
+**Native backstop: execute, defer and fail seen for real.** 449 `native pressure check` lines:
+`skipped:below-threshold` 383, `skipped:pruned-below-threshold` 44, `skipped:no-routed-request` 14,
+`deferred:historian-busy` 4, **`compacted` 3**, **`failed` 1** (summarize: mini-historian lease busy after
+45 s). Predicted pct and measured tokens (threshold 83.6 % = 167 232):
+
+| line | outcome | predicted pct | measured before → after |
+|---|---|---|---|
+| turn-05:41 | compacted | 93.0 | 186 056 → 56 317 |
+| turn-07:44 | compacted | 93.3 | 186 649 → 51 471 |
+| turn-09:306 | failed (lease busy 45 s) | 90.0 | 180 068 → 167 579 (still above) |
+| turn-09:317 | compacted | 91.2 | 182 468 → 48 977 |
+| 4 × deferred (turn-04:41, 05:16, 07:16, 09:295) | deferred:historian-busy | 83.6–89.8 | not measured (`?`) |
+
+The three compactions match the main-prompt drops 176 → 178, 316 → 318 and 429 → 431.
+
+**Limits.** This is one run (n = 1), one SWE-EVO transition, and the first 10 items; there is no fold
+counterpart. 0/8 F2P is not a quality claim, so this is not the long-session quality acceptance. These
+results ran with isolation and are not comparable with pre-isolation runs.
