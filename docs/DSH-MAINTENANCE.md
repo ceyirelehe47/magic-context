@@ -2783,6 +2783,43 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     K1–K7 (5 / 6 RED on `c6208045c`), CI 42358893700. Real-run check (200k catalog-hist route): see
     `evidence-round37/phase2-i4-isolation-integration.md` §I4-real.
 
+34. **Round 37 phase 2 (2026-11-09) — native compaction checkpoint stays live next to the m0 that covers it.
+    FIXED (`e67beb9a0`, RED `f7f3fb4c3`; user-approved 2026-11-09 19:37 CST).** Real run 42459290880
+    (200k catalog-hist, native): in 182 / 419 main requests the DSH `compact-checkpoint` and the m0
+    `<session-history>` were both live, the checkpoint's range a subset of the m0's (15–40 KB extra per request,
+    median 29.9 KB; 389–429 checkpoint 1–537 next to m0 1–589 … 1–713). Cause: after a compaction the m0 node is
+    shadowed, the next pre-step re-delivers the m0 at the tail, and nothing retires the checkpoint — the
+    publication drop queue never reaches it (the summarize mini-historian publishes before compaction-basic
+    writes the checkpoint; later chunks start after its range; the one retirement seen, at 241, happened only
+    because that checkpoint carried an unsummarized tail that a later chunk covered).
+    **Fix (adapter only, native sessions only):** the context plane (`checkpointsSupersededByBaseline`) selects
+    live surface checkpoint stand-ins (`readDshHistory`: `compact-checkpoint` source + shadowed seqs, or a
+    Magic op copy of one — structural, never text) whose history range ends at or before the last stored
+    compartment, when a live or just-delivered m0 renders the latest publication
+    (`knowledgeBaselineRendersLatestPublication`). `deriveMutationPlan` queues a core pending drop on exactly
+    those message tags and applies only that batch in the same pass (`retireSupersededCheckpoints`; other
+    queued drops keep their ride). The coordinator writes the usual `mc-op` `[dropped §N§]` copy, so the
+    history view still expands the checkpoint (ordinals unchanged) and the durable log keeps it. A checkpoint
+    that still carries an unsummarized tail stays live until a publication covers it. Unchanged: backstop
+    policy (when / what it compacts), m0 / m1 injection and cache split, legacy fold sessions (they keep the
+    pre-fix behaviour; open decision). Offline `checkpoint-baseline-overlap.test.ts` O1–O7 (O1–O6 RED on
+    `e5d8222cd`, CI 42612450331 725 / 6 fail; fixed CI 42613187077 732 / 0). Real check run 42613997607 (§7.4 of evidence-round37
+    `phase2-i4-isolation-integration.md`) did not reach the path (turn 1 timeout, no compaction, no publication):
+    verified offline only; a real compaction-then-publication run is still open.
+35. **Round 37 phase 2 (2026-11-09) — `max_completion_tokens: 1` (run 42459290880 #426). OPEN, RED only
+    (`06c802d28`, `it.failing`), not fixed by instruction.** The `1` is pi-ai 1.4.0 `clampMaxTokensToContext`
+    (DSH dependency via `@deepseek-ai/dsh-llm-pi-ai` 0.2.1-rc.5): `min(maxTokens, max(1, window − estimate − 4096))`.
+    Its `estimateContextTokens` uses the last assistant usage only while no earlier message is newer than that
+    response; otherwise it counts the whole request at 3.5 chars/token (≥ 195 903 for a 179 522-token prompt
+    at #426). Before #426 the log holds tool/result replaces of nodes before the last assistant message, newer
+    than it (seq 6224–6240). They are a ping-pong on the same nodes over the whole run: DSH
+    `compaction-tool-result-pruner` shortens a > 8192-char result (head 4096 + marker + tail 1024; 603
+    shrinking replaces) and the Magic native tool rewrite writes the tagged ORIGINAL back on the next pre-step
+    (943 growing replaces; e.g. the node behind seq 6240 alternates 10 096 / 5 159 chars every step). Plugin half
+    pinned by `pruner-restore-churn.test.ts` P1. Side effects besides the clamp: the pruner's savings are undone
+    and old tool nodes are rewritten every step (prefix churn). 55 / 419 main requests went out below the route
+    maxTokens 32768 for the same reason; only #426 reached 1.
+
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
 | module | why it is DSH-only |

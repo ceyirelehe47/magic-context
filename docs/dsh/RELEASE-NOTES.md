@@ -76,6 +76,18 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   the boundary with an access probe before every paid run; pre-isolation results keep their caveat and are
   not directly comparable. Commits `edb79efbf`…`b36e0d104`. Detail:
   `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md`.
+- **Round 37 phase 2 follow-up — native compaction summary no longer sent twice (adapter only, core
+  unchanged; user-approved 2026-11-09 19:37 CST):** after DSH's native backstop compaction, the compaction
+  summary used to stay in every later request next to Magic's `<session-history>` baseline that already
+  contains the same summaries (a real 200k run: 182 of 419 requests, about 30 KB each). In new (native-roles)
+  sessions the compaction summary is now retired in the same step once the live baseline covers its whole
+  range; a summary that still carries history not yet summarized by Magic stays until it is covered. Older
+  fold sessions keep the previous behaviour. Covered by offline tests; the one real check run did not reach a
+  compaction, so a real-run confirmation is still pending. Also found, not fixed: Magic writes tool results that DSH's
+  tool-result pruner shortened back to full length, which can make the DSH model adapter send a tiny
+  output limit (one request in that run got `max_completion_tokens: 1`). Commits `f7f3fb4c3` (RED),
+  `e67beb9a0` (fix), `06c802d28` (RED for the open issue). Detail:
+  `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md` §7.
 - **Round 36 line H — `ctx_reduce` reminder in native-roles sessions (adapter only, core unchanged;
   user-approved 2026-11-06 20:43 CST):** with the switch on, the reminder that asks the model to drop
   spent tool outputs never fired, because the measurement only counted the tool-call arguments, not the

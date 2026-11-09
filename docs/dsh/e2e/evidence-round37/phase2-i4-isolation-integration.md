@@ -224,7 +224,7 @@ historian 174+177, 313+317 and 427+430 each completed before the same next main 
   compaction. There the DSH `compact-checkpoint` carries the compartments (1–262 / 1–537 / 1–761, at least
   the previous request's coverage, 147 / 428 / 713), and the next request has the m0 again. No history was
   lost, but "exactly one m0" does not hold for these 3 requests.
-- **New finding (not fixed, no product change this round):** after a native compaction the checkpoint stays
+- **New finding (fixed 2026-11-09 in `e67beb9a0`, see §7):** after a native compaction the checkpoint stays
   on the surface **next to** the m0 in **182 of 419** main requests (178–240 until a native drop replaced it
   at 241; 318–429; 431–467). In all 182 the checkpoint's compartment range is a subset of the m0's, so the
   same summaries are sent twice: 15–40 KB per request, median 29.9 KB. From 389 to 429 the checkpoint
@@ -251,3 +251,115 @@ The three compactions match the main-prompt drops 176 → 178, 316 → 318 and 4
 **Limits.** This is one run (n = 1), one SWE-EVO transition, and the first 10 items; there is no fold
 counterpart. 0/8 F2P is not a quality claim, so this is not the long-session quality acceptance. These
 results ran with isolation and are not comparable with pre-isolation runs.
+
+## 7. Checkpoint + m0 overlap fix and the `max_completion_tokens: 1` investigation (2026-11-09)
+
+User approval 2026-11-09 19:37 CST ("修吧"): fix the native compaction checkpoint / m0 overlap found in §6,
+investigate (not fix) `max_completion_tokens: 1`, and one small real check afterwards.
+
+### 7.1 Failing regression first — `f7f3fb4c3`
+
+`packages/dsh-plugin/src/agent/checkpoint-baseline-overlap.test.ts` drives the production pre-step chain in
+DSH order — knowledge gate (outermost) → context plane → native pressure backstop (production
+`MagicCompactionEngine` over the real compaction-basic transaction, real DSH TokenMeter, real Magic summarize
+hook with a stubbed historian LLM) → terminal — on a real DSH `Session` and a file DB, with one
+`step/start` + `request/header` per provider request (the 42459290880 log has one header per main request).
+Every provider request (`session.deriveMessages()` after each pre-step) is audited: at most one live full
+history summary (m0 or checkpoint), the newest one renders every published compartment, the set of visible
+compartments never shrinks (first request after a compaction included), every turn visible raw or through a
+visible compartment, pairing / reasoning / replay intact.
+
+| case | what | on `e5d8222cd` |
+|---|---|---|
+| O1 | backstop compaction, then two historian publications | FAIL — 2 live summaries from the first request after the m0 came back |
+| O2 | publication, then compaction, then publication | FAIL — same |
+| O3 | publish / compact / publish / compact / publish | FAIL — same, both checkpoints |
+| O4 | repeated pre-steps + cold restart: no write, no re-injection | FAIL (overlap only) |
+| O5 | a user message quoting the checkpoint preamble and `<session-history>` is never retired | FAIL (overlap only) |
+| O6 | a checkpoint that still carries an unsummarized tail stays live until a publication covers it | FAIL at the end (still 2 after the covering publication) |
+| O7 | legacy fold session keeps its pre-fix behaviour (guard) | pass |
+
+The rig reproduces the real shape: the checkpoint at the head, the m0 re-delivered at the tail by the next
+pre-step. No visibility, pairing or reasoning violation appeared in any case — only the duplicate summary.
+CI 42612450331 @ `f7f3fb4c3`: 725 pass / **6 fail = O1–O6**.
+
+### 7.2 Fix — `e67beb9a0` (adapter only; core, pi-plugin, upstream DSH untouched)
+
+Why nothing retired the checkpoint: after a compaction the m0 node is shadowed, the next pre-step
+re-delivers the m0 at the tail, and the checkpoint is just tagged history to Magic. The publication drop
+queue never reaches it — the summarize mini-historian publishes the region *before* compaction-basic writes
+the checkpoint (no tag yet), and later chunks start after its range. The one checkpoint retired in §6 (at
+241) went only because it carried an unsummarized tail that a later chunk covered.
+
+- `context-plane.ts` `checkpointsSupersededByBaseline()` (native-roles sessions only): live surface nodes that
+  are checkpoint stand-ins in the history view (`readDshHistory`: `compact-checkpoint` source + shadowed seqs,
+  or a Magic op copy expanding to one — structural, never text), whose history range ends at or before the
+  last stored compartment, **and** a live or just-delivered m0 renders the latest publication
+  (`knowledge-gate.ts` `knowledgeBaselineRendersLatestPublication`, by source + watermark revision).
+- `transcript.ts` `deriveMutationPlan` → `retireSupersededCheckpoints()`: right after tagging, a core pending
+  drop is queued on exactly those message tags (`queuePendingDropForUnchangedTag`) and only that batch is
+  applied (`applyPendingOperations` with that subset); other queued drops keep waiting for their ride. The
+  coordinator writes the usual `mc-op` `[dropped §N§]` copy: the history view still expands it into everything
+  the checkpoint shadowed (compartment ordinals unchanged), the durable log keeps the checkpoint, and a later
+  compaction re-summarizes through it as before.
+- Not changed: when / what the backstop compacts; m0 / m1 injection, in-place supersession and cache split;
+  resume / repeated pre-steps (O4: 0 events); legacy fold sessions (O7); persistence of old versions.
+- Cache: the retirement lands in the pass that re-delivers or re-materializes the m0, which already rewrites
+  the prefix (the checkpoint itself gets its `§N§` tag in that pass anyway).
+
+Verification: O1–O7 green; all 68 `src/agent/*.test.ts` files green one by one (K1–K7 included,
+S9 stays `it.failing`); tsc src 0, test files 0. CI 42613187077 @ `e67beb9a0`: **732 / 0**, adapter 15 / 0,
+contracts 110 / 0 ×3, test-file typecheck 0.
+
+### 7.3 `max_completion_tokens: 1` at 42459290880 #426 — where it comes from
+
+| step | finding | evidence |
+|---|---|---|
+| 1 | The value is set by **pi-ai 1.4.0** `clampMaxTokensToContext` (DSH dependency via `@deepseek-ai/dsh-llm-pi-ai` 0.2.1-rc.5): `min(maxTokens, max(1, contextWindow − estimateContextTokens − 4096))`. Route maxTokens 32 768, window 200 000 (`evo-model-200k-catalog-hist.yml`). | source (`dist/api/simple-options.js`); arithmetic matches all 55 main requests sent below 32 768 — strong |
+| 2 | `estimateContextTokens` uses the last assistant's usage only while no earlier message is newer than that response; otherwise it counts the whole request at 3.5 chars/token. #426 needed an estimate ≥ 195 903 for a 179 522-token prompt (×1.09). | source (`dist/utils/estimate.js`) — strong |
+| 3 | Between the headers of #424 and #426 (log seq 6216 → 6243) the only surface writes are `compaction/prune` + `tool/result` replaces of nodes **before** the last assistant message, all newer than it (6224–6240). | session log — strong |
+| 4 | Those replaces are a **ping-pong**: DSH `compaction-tool-result-pruner` cuts a > 8192-char result (head 4096 + `[... tool result middle pruned ...]` + tail 1024; 603 shrinking replaces in the run) and the **Magic native tool rewrite** writes the tagged original back on the next pre-step (943 growing replaces; the node behind 6240 alternates 10 096 / 5 159 chars every step since seq 4805). | session log + pruner source — strong; the plugin half reproduced offline (P1 below) |
+
+Classification: the clamp itself is pi-ai (DSH dependency, not changed); the trigger that made it bite is a
+**plugin defect** — Magic undoing DSH's tool-result pruning (also undoes the pruner's savings and rewrites old
+tool nodes every step). Not the bench (the route sets only window / maxTokens) and not DSH core.
+RED only, by instruction: `pruner-restore-churn.test.ts` P1 (`06c802d28`) — after the DSH pruner shortened a
+tagged result, the next plain pre-step writes it back to full length (as `it`: one restore, 11 183 chars).
+Committed as `it.failing` so CI stays green; fixing it flips it. CI 42613963531 @ `06c802d28`: 733 / 0.
+
+### 7.4 Real run 42613997607 — the fixed path was **not reached**
+
+One dispatch only (2026-11-09 20:04 CST, no retry): `dsh-evo-bench.yml` @ `06c802d28` (contains `e67beb9a0`),
+groups native, runs 1, max_items 10, cost_cap 3, `evo-model-200k-catalog-hist.yml`, isolate 1, validate false,
+on_timeout stop, turn_timeout 1200, slot evo-20. Same task / image / route as 42459290880 (§6). Job
+129149272272 green; extracts `phase2-tables/ckpt-fix-42613997607.md`.
+
+| item | 42613997607 (fix) | 42459290880 (§6, before fix) |
+|---|---|---|
+| turns completed / started / planned | **0 / 1 / 10** — turn 1 hit the 1200 s timeout (rc 124), stop `turn-timeout-turn-1` (on_timeout stop) | 10 / 10 / 10, stop done / completed |
+| requests (HTTP) | 98 (97 main + 1 title), all 200; 0 × 429; finish tool_calls 97 / stop 1 | 467, all 200 |
+| main requests without usage | 0 | 0 |
+| historian requests / publications | **0 / 0** (trigger `fires=true` once, at pct 64 before main #77; no historian request followed — cause not established; it coincided with the model's own `ctx_reduce` drop at step 71, after which pct fell to 54) | 17 / 14 |
+| native compactions (backstop) | **0** — 96 × skipped:below-threshold, 1 × skipped:no-routed-request; peak prompt 128 240, max pct 64.1 vs threshold 83.6 % | 3 |
+| live full summaries per main request (m0 + checkpoint) | 0 with compartments: the one m0 in each of the 97 requests is the empty baseline (no compartment); checkpoints 0; never 2 | 1 × 237, **2 × 182**; m0-less 3 |
+| coverage monotonic | trivially (nothing covered) | yes |
+| body bytes (main) | median 376 386, total 32.76 MB (97 req) | same window (first 97): median 337 624, total 30.50 MB; whole run median 459 309, total 190.6 MB |
+| prompt tokens (main) | median 95 743, total 8 324 327 | first 97: median 94 258, total 8 384 810; whole run median 113 460 |
+| pairing violations / reasoning lost | 0 / 0 | 0 / 0 |
+| `max_completion_tokens` < 32 768 | **0** (all 97 main at 32 768) — limitation 35 not triggered: the clamp only bites above ~163k estimated tokens and the prompt peaked at 128k | 55, min 1 (#426) |
+| cost | **$0.2290**: main 97 $0.2287, title 1 $0.0003, historian 0, subagent 0 | $1.7002 (main $1.3088 / subagent $0.2900 / historian $0.1012 / title $0.0001) |
+| tokens | input 8 324 707 (hit 96.5 %), output 78 438 (reasoning 60 059) | — |
+| F2P / P2P | 0 / 8, 309 / 317 (final patch 5 files) | 0 / 8, 310 / 317 |
+| isolation probe | 0 / 11 leak classes, positives pass (docker, workspace write, ctx tool, resume; `evo_pytest_ok` false as in every earlier smoke) | 0 / 11 |
+
+The size rows compare the same request window only; this run's bodies are 7–12 % larger at equal index because
+the agent took a different path (no publication in the window; 42459290880 published at #93), not because of the
+fix — no checkpoint existed, so `retireSupersededCheckpoints` had nothing to select. One cache collapse without a
+prompt drop (#66, hit 0.999 → 0) and one reduction boundary (#77 → #78, 128 240 → 106 822, the model's
+`ctx_reduce`) are not related to the fix.
+
+**Verdict:** the run shows the fix does no harm on a session without checkpoints (no extra drop, no pairing /
+reasoning violation, I4 ≤ 1 m0), but the overlap scenario (native compaction followed by a publication) did not
+occur, so the fix is **verified offline only** (O1–O6, CI 42613187077). A real check needs a run that reaches
+both a backstop compaction and a later publication; not dispatched (one run authorised). Limitation 35 likewise
+not exercised.
