@@ -70,6 +70,7 @@ import {
   getPendingOps,
   getTagsBySession,
 } from "@magic-context/core/features/magic-context/storage";
+import { queuePendingDropForUnchangedTag } from "@magic-context/core/features/magic-context/storage-ops";
 import { createTagger } from "@magic-context/core/features/magic-context/tagger";
 import { adoptPiFallbackToolOwnerTag } from "@magic-context/core/features/magic-context/storage-tags";
 import { tagTranscript } from "@magic-context/core/shared/tag-transcript";
@@ -212,6 +213,15 @@ export interface PlanContext {
    * drops still replay every pass).
    */
   readonly dropRide?: DshDropRideInput;
+  /**
+   * Round 37 phase 2 (checkpoint ↔ m0 overlap): live surface nodes (seqs) that
+   * are native compaction checkpoints — or Magic op copies re-rendering one —
+   * whose whole history range the live Magic knowledge baseline already
+   * renders (`checkpointsSupersededByBaseline`, context plane). Their tags get
+   * a drop queued and applied in this pass (only those drops — other queued
+   * drops keep waiting for their ride). Absent / empty = nothing to retire.
+   */
+  readonly supersededCheckpointSeqs?: ReadonlySet<number>;
   readonly log?: (message: string) => void;
 }
 
@@ -2300,6 +2310,89 @@ function planNativeNodeOps(
   return ops;
 }
 
+/** True when every surface node a view message comes from is in `seqs` (native parts, else the fold span). */
+function messageFromSurfaceNodes(message: RawMessage, seqs: ReadonlySet<number>): boolean {
+  const nodes = new Set<number>();
+  for (const part of message.parts) {
+    const node = partSourceNode(part);
+    if (node !== undefined) nodes.add(node.surfaceSeq);
+  }
+  if (nodes.size === 0) {
+    const span = messageNodeSpan(message);
+    for (const seq of span?.seqs ?? []) nodes.add(seq);
+  }
+  if (nodes.size === 0) return false;
+  for (const seq of nodes) if (!seqs.has(seq)) return false;
+  return true;
+}
+
+/**
+ * Round 37 phase 2 (checkpoint ↔ m0 overlap, real run 42459290880: the DSH
+ * compact-checkpoint stayed next to the m0 that renders its whole range in
+ * 182 / 419 main requests, 15–40 KB each). A native compaction checkpoint is
+ * ordinary history to Magic — the plane tags it like any user message — so
+ * the existing retirement path for covered history is a DROP of its tag: the
+ * coordinator writes the usual `mc-op:` copy (`[dropped §N§]`), the history
+ * view still expands it back into everything the checkpoint shadowed
+ * (compartment ordinals unchanged), the durable log keeps the checkpoint.
+ *
+ * The publication drop queue never reached these checkpoints: the summarize
+ * mini-historian publishes the region BEFORE compaction-basic writes the
+ * checkpoint (no tag yet), and later chunks start after its range. Here the
+ * drop is queued for exactly the superseded checkpoints' tags and applied in
+ * this pass as its own batch (other queued drops keep waiting for their ride:
+ * this pass already rewrites the prefix — the baseline that supersedes the
+ * checkpoint is a new materialization or a re-delivery after the compaction
+ * replaced the old one). Identity: the caller's checkpoint seqs come from
+ * the compaction checkpoint source (`compact-checkpoint` + shadowed seqs) or
+ * a Magic op copy of one — never from text — and only message tags of view
+ * messages built wholly from those nodes are touched (a user message that
+ * quotes a checkpoint is a different node). Fail-open: any error leaves the
+ * checkpoint live (summary stays visible).
+ */
+function retireSupersededCheckpoints(
+  db: Database,
+  sessionId: string,
+  checkpointSeqs: ReadonlySet<number>,
+  targets: ReadonlyMap<number, TagTarget>,
+  rawByRecording: ReadonlyMap<RecordingMessage, RawMessage>,
+  protection: DshProtectionOptions | undefined,
+  log: ((message: string) => void) | undefined,
+): void {
+  try {
+    // View messages built wholly from the checkpoint nodes, by message id.
+    const checkpointIds = new Set<string>();
+    for (const raw of rawByRecording.values()) {
+      if (messageFromSurfaceNodes(raw, checkpointSeqs)) checkpointIds.add(String(raw.id));
+    }
+    if (checkpointIds.size === 0) return;
+    // A tag target's message is core's MessageLike ({ info: { id }, parts }).
+    const tagNumbers = new Set<number>();
+    for (const [tagId, target] of targets) {
+      const id = (target.message as { info?: { id?: unknown } } | undefined)?.info?.id;
+      if (typeof id === "string" && checkpointIds.has(id)) tagNumbers.add(tagId);
+    }
+    if (tagNumbers.size === 0) return;
+    const tags = getTagsBySession(db, sessionId).filter(
+      (tag) => tagNumbers.has(tag.tagNumber) && tag.type !== "tool" && tag.status === "active",
+    );
+    if (tags.length === 0) return;
+    let queued = 0;
+    for (const tag of tags) if (queuePendingDropForUnchangedTag(db, sessionId, tag)) queued += 1;
+    const ops = getPendingOps(db, sessionId).filter((op) => op.operation === "drop" && tags.some((t) => t.tagNumber === op.tagId));
+    if (ops.length === 0) return;
+    const window = tokenProtectionWindow(db, sessionId, protection ?? {});
+    applyPendingOperations(sessionId, db, targets as Map<number, TagTarget>, window.protectedTagNumbers, getTagsBySession(db, sessionId), ops);
+    log?.(
+      `[magic-context] native compaction checkpoint superseded by the live knowledge baseline: dropped tag(s) ${tags.map((t) => `§${t.tagNumber}§`).join(", ")} (queued ${queued})`,
+    );
+  } catch (error) {
+    log?.(
+      `[magic-context] checkpoint retirement skipped (fail-open): ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 /**
  * Derive a MutationPlan from the view + shared DB state (design §3).
  *
@@ -2336,6 +2429,12 @@ export function deriveMutationPlan(view: DshTranscriptView, ctx: PlanContext): M
     const recordingTargets = new Map<number, TagTarget>();
     for (const [tagId, target] of tagged.targets) {
       recordingTargets.set(tagId, new RecordingTagTarget(tagId, target));
+    }
+
+    // Round 37 phase 2: retire the checkpoints the live baseline supersedes
+    // (before the preloaded reads, so the ride decision below sees the result).
+    if (ctx.supersededCheckpointSeqs !== undefined && ctx.supersededCheckpointSeqs.size > 0) {
+      retireSupersededCheckpoints(db, sessionId, ctx.supersededCheckpointSeqs, recordingTargets, rawByRecording, ctx.protection, ctx.log);
     }
 
     // Preloaded reads: avoid re-reading tags/pending ops inside the shared

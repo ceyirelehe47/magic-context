@@ -415,6 +415,42 @@ export function knowledgeBaselineBehindPublication(
   }
 }
 
+/**
+ * Round 37 phase 2 (checkpoint ↔ m0 overlap): true when a Magic knowledge
+ * baseline (m0) is live on the surface or in this pre-step's batch AND it
+ * renders the latest historian publication (its materialization is not older
+ * than `latestPublishAt`). Then it renders every stored compartment — the
+ * compartments are contiguous from ordinal 1 — so history up to the last
+ * compartment's end is visible through it. False without a publication, without
+ * a Magic baseline (knowledge off / never injected) and on read errors
+ * (fail-safe: nothing is retired on its account).
+ */
+export function knowledgeBaselineRendersLatestPublication(
+  session: KnowledgeSessionView,
+  latestPublishAt: number,
+  pendingBatch: readonly unknown[] = [],
+): boolean {
+  if (!(latestPublishAt > 0)) return false;
+  try {
+    const revisions = liveKnowledgeBaselines(session)
+      .filter((n) => n.part === "m0")
+      .map((n) => Number(n.revision))
+      .filter((n) => Number.isFinite(n));
+    for (const message of pendingBatch) {
+      const source = (message as { source?: unknown } | null)?.source;
+      if (!isMagicSource(source)) continue;
+      const id = source.messageId;
+      if (typeof id !== "string" || !id.startsWith(KNOWLEDGE_WATERMARK_PREFIX) || id.endsWith(":m1")) continue;
+      const revision = Number(source.revision ?? id.slice(KNOWLEDGE_WATERMARK_PREFIX.length).split(":")[0]);
+      if (Number.isFinite(revision)) revisions.push(revision);
+    }
+    if (revisions.length === 0) return false;
+    return Math.max(...revisions) >= latestPublishAt;
+  } catch {
+    return false;
+  }
+}
+
 /** Replace each node with the retired stand-in (single-node user replace + prune, later nodes first). */
 function retireBaselineNodes(
   session: import("@deepseek-ai/dsh-session").Session,

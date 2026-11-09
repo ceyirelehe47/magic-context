@@ -34,6 +34,7 @@ import {
   deriveMutationPlan,
   endsInPendingFold,
   pendingFoldTextCount,
+  readDshHistory,
   readDshTranscript,
   textTagContentIdsBySource,
   type PlanContext,
@@ -58,7 +59,8 @@ import type { ProtectedTokensTierOverrides } from "@magic-context/core/config/pr
 import { resolveDshProtectionFloor, type DshProtectionOptions } from "./protection";
 import { e2eCrashPoint } from "./e2e-hooks";
 import { isFreshMagicSession, nativeRolesRequested, resolveSessionTagScheme } from "./tag-scheme";
-import { knowledgeBaselineBehindPublication } from "./knowledge-gate";
+import { knowledgeBaselineBehindPublication, knowledgeBaselineRendersLatestPublication } from "./knowledge-gate";
+import { getLastCompartmentEndMessage } from "@magic-context/core/features/magic-context/compartment-storage";
 import {
   dshSummaryCanCome,
   isCacheIdleExpired,
@@ -814,6 +816,52 @@ export function dropRideInputFor(
   }
 }
 
+/**
+ * Round 37 phase 2 (checkpoint ↔ m0 overlap, real run 42459290880): the live
+ * surface nodes that are native compaction checkpoints (or Magic op copies of
+ * one) whose WHOLE history range the live Magic knowledge baseline renders —
+ * the baseline (live, or delivered in this pre-step's batch) renders the latest
+ * publication and the stored compartments reach the checkpoint's last history
+ * ordinal. Those checkpoints are redundant full summaries (the baseline carries
+ * the same compartments) and are retired by the plan (`supersededCheckpointSeqs`).
+ * A checkpoint that still stands for history the compartments do not reach (an
+ * unsummarized tail it carries) is NOT included: it stays until a publication
+ * covers it. Checkpoint identity is structural (`readDshHistory` stand-ins:
+ * compaction-checkpoint source + shadowed seqs, or a Magic op copy expanding to
+ * one), never text. Knowledge off / compactionOff (compartments never render) /
+ * any read error → empty (nothing retired).
+ */
+export function checkpointsSupersededByBaseline(
+  deps: ContextPlaneDeps,
+  agent: Agent,
+  db: Database,
+  sessionId: string,
+  pendingBatch: readonly unknown[] = [],
+): Set<number> {
+  const out = new Set<number>();
+  try {
+    const knowledge = deps.knowledge;
+    if (knowledge === undefined || knowledge.compactionOff === true || (knowledge.isEnabled?.() ?? true) === false) return out;
+    const latestPublishAt = latestHistorianPublishAt(db, sessionId);
+    if (!knowledgeBaselineRendersLatestPublication(agent.session as never, latestPublishAt, pendingBatch)) return out;
+    const coveredEnd = getLastCompartmentEndMessage(db, sessionId);
+    if (!(coveredEnd > 0)) return out;
+    const history = readDshHistory({
+      // the same history view the historian / summarize hook number compartments against
+      session: { events: sessionEvents(agent.session), surface: agent.session.surface, header: { cwd: agent.session.header?.cwd } } as never,
+      canonicalSessionId: sessionId,
+    });
+    const live = new Set<number>(agent.session.surface.nodes.map((n) => Number(n)));
+    for (const [seq, range] of history.standInOrdinals) {
+      if (live.has(seq) && range.first >= 1 && range.last <= coveredEnd) out.add(seq);
+    }
+  } catch (error) {
+    reportPlaneFailureOnce(deps.log, "checkpoint supersession input", error);
+    out.clear();
+  }
+  return out;
+}
+
 /** Protection-window inputs for one pass (config + live DSH context window). */
 export function protectionOptionsFor(deps: ContextPlaneDeps, agent: Agent): DshProtectionOptions {
   let contextWindow: number | undefined;
@@ -918,6 +966,11 @@ export async function runContextPlaneStep(
         heuristicCleanup: deps.heuristicCleanup,
         pressureTruncation: deps.config?.pressureTruncation === false ? undefined : pressureInput,
         dropRide: dropRideInputFor(deps, agent, db, canonicalSessionId, pressureInput, payload.messages as readonly unknown[]),
+        // Round 37 phase 2: native sessions only — legacy fold sessions keep
+        // their pre-fix behaviour (checkpoint retired by publication drops only).
+        supersededCheckpointSeqs: nativeRoles
+          ? checkpointsSupersededByBaseline(deps, agent, db, canonicalSessionId, payload.messages as readonly unknown[])
+          : undefined,
         log: deps.log,
       } satisfies PlanContext);
       // Round 27 C4 (e2e only, inert in production): the Y4 window — tool
