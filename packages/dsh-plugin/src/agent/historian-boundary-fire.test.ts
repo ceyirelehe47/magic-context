@@ -236,6 +236,10 @@ describe("round 37 phase 2 segment 9: historian fire resolves a real protected-t
       const noop = r.logs.filter((l) => /historian noop/.test(l));
       expect(noop.length).toBeGreaterThan(0);
       expect(noop.at(-1)).toMatch(/nothing to compact|no eligible|eligibleEnd/);
+      // the reason names the resolved boundary (not the legacy default) and nothing fell back
+      expect(noop.at(-1)).toMatch(/boundary=/);
+      expect(noop.at(-1)).not.toContain("legacy-default");
+      expect(r.logs.filter((l) => l.includes("boundary unresolved"))).toEqual([]);
     });
   });
 

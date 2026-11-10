@@ -45,7 +45,7 @@ import {
 import { createTestDb } from "../test-utils";
 import { createBackstopGuard } from "./backstop-guard";
 import { createContextPlaneState, runContextPlaneStep, type ContextPlaneDeps } from "./context-plane";
-import { createMagicSummarizeHook, type DshSummarizeCall } from "./historian";
+import { createMagicSummarizeHook, renderUnsummarizedTail, UNSUMMARIZED_TAIL_MAX_CHARS, type DshSummarizeCall } from "./historian";
 import { historyContentProvider, transcriptRawMessageProvider } from "./historian-wiring";
 import { createKnowledgeGateState, runKnowledgeGateStep, type KnowledgeGateDeps } from "./knowledge-gate";
 import { initializeDshAdapterTables, stageDshCompactionMarker } from "./outbox";
@@ -459,6 +459,9 @@ async function rig(fn: (r: Rig) => Promise<void>, opts: { retainTokens?: number;
     };
     await fn(r);
   } finally {
+    // Let the summarize hook's deferred drop queue settle before the DB closes
+    // (a test that ends right at the compaction request leaves it in flight).
+    await new Promise((res) => setTimeout(res, 50));
     db.close();
     rmSync(dir, { recursive: true, force: true });
   }
@@ -612,6 +615,22 @@ describe("round 37 phase 2 segment 9: shadowed-but-unsummarized messages stay vi
       expect(invisibleMessages(r, req)).toEqual([]);
       expect(checkpointText(r, req)).toMatch(/<unsummarized_tail from="\d+" to="\d+">/);
     }, { coverReading: true });
+  });
+
+  it("G4 a tool-only tail over the cap stays a block under the cap and counts what it does not list", () => {
+    const parts = (i: number) =>
+      i % 2 === 0
+        ? [{ type: "reasoning", text: "r" }, { type: "tool", tool: "bash", callID: `c${i}`, state: { input: { command: `sed -n '${i},+40p' x.py ${"y".repeat(300)}` } } }]
+        : [{ type: "tool", tool: "bash", callID: `c${i - 1}`, state: { output: "o".repeat(5000) } }];
+    const provider = { readMessages: () => Array.from({ length: 200 }, (_, k) => ({ ordinal: k + 1, id: `m${k + 1}`, role: k % 2 === 0 ? "assistant" : "user", parts: parts(k) })) } as never;
+    const out = renderUnsummarizedTail(provider, 1, 200);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.length).toBeLessThanOrEqual(UNSUMMARIZED_TAIL_MAX_CHARS);
+    expect(out).toMatch(/\(\d+ of 200 messages in 1-200 not listed here for size; ctx_expand 1-200 returns every one\)/);
+    expect(out).toContain("[200] tool result: bash (5000 chars, output omitted)"); // newest kept
+    const small = renderUnsummarizedTail(provider, 199, 200);
+    expect(small.split("\n").at(-2)).toBe("[200] tool result: bash (5000 chars, output omitted)");
+    expect(small).toContain("[199] tool call: bash {\"command\":\"sed -n '198,+40p' x.py");
   });
 
   it("G2 the same session continues: every request stays visible, and the checkpoint (with its tail) still retires once a publication covers it", async () => {

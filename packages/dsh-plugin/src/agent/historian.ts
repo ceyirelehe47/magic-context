@@ -232,6 +232,14 @@ export interface HistorianDeps {
   readonly boundarySnapshot?: ProtectedTailBoundarySnapshot;
   /** Optional live boundary resolver used to recover a stale trigger snapshot. */
   readonly refreshBoundarySnapshot?: () => ProtectedTailBoundarySnapshot;
+  /**
+   * Round 37 phase 2 seg 9 (limitation 37): resolve the protected-tail
+   * boundary INSIDE the pass (after the lease, under the pass's raw-message
+   * provider), so it sees the compartments the pass will extend. Used when no
+   * `boundarySnapshot` is given; production (`createDshHistorianFire`) passes
+   * core `resolveProtectedTailBoundary` (Pi parity). Absent → legacy default.
+   */
+  readonly resolveBoundarySnapshot?: () => ProtectedTailBoundarySnapshot;
   /** Current resolved context limit used to reject stale snapshots after model switches. */
   readonly currentContextLimit?: number;
   /** Compartment-lease holder id (default: `dsh-historian:<sessionId>`). */
@@ -389,6 +397,8 @@ interface HistPassArgs {
   readonly boundarySnapshot?: ProtectedTailBoundarySnapshot;
   readonly refreshBoundarySnapshot?: () => ProtectedTailBoundarySnapshot;
   readonly currentContextLimit?: number;
+  /** Context limit the snapshot is validated against (default `currentContextLimit`). */
+  readonly boundaryContextLimit?: number;
   readonly leaseHolderId: string;
   readonly log: (message: string) => void;
   readonly signal?: AbortSignal;
@@ -445,6 +455,7 @@ async function runHistorianPassCore(args: HistPassArgs): Promise<HistPassResult>
       : null;
 
   let eligibleEndOrdinal: number;
+  let boundaryNote = "caller-bounded range";
   if (rangeOverride !== null && args.boundarySnapshot === undefined) {
     eligibleEndOrdinal = rangeOverride;
   } else {
@@ -455,7 +466,7 @@ async function runHistorianPassCore(args: HistPassArgs): Promise<HistPassResult>
       const validation = validateBoundarySnapshot({
         db,
         snapshot: boundary,
-        currentContextLimit: args.currentContextLimit ?? boundary.contextLimit,
+        currentContextLimit: args.boundaryContextLimit ?? args.currentContextLimit ?? boundary.contextLimit,
       });
       if (!validation.ok && validation.reason === "stale_snapshot" && args.refreshBoundarySnapshot) {
         try {
@@ -471,7 +482,7 @@ async function runHistorianPassCore(args: HistPassArgs): Promise<HistPassResult>
       const finalValidation = validateBoundarySnapshot({
         db,
         snapshot: boundary,
-        currentContextLimit: args.currentContextLimit ?? boundary.contextLimit,
+        currentContextLimit: args.boundaryContextLimit ?? args.currentContextLimit ?? boundary.contextLimit,
       });
       if (!finalValidation.ok) {
         boundaryOk = false;
@@ -486,9 +497,10 @@ async function runHistorianPassCore(args: HistPassArgs): Promise<HistPassResult>
       boundary.protectedTailStart,
       rangeOverride ?? Number.MAX_SAFE_INTEGER,
     );
+    boundaryNote = `boundary=${args.boundarySnapshot === undefined ? "legacy-default(5 user turns)" : (boundary.boundaryReason ?? boundary.mode)} protectedTailStart=${boundary.protectedTailStart} messages=${boundary.rawMessageCountAtTrigger}`;
   }
   if (eligibleEndOrdinal <= offset) {
-    return { ok: false, status: "noop", reason: `nothing to compact (eligibleEnd=${eligibleEndOrdinal} <= offset=${offset})` };
+    return { ok: false, status: "noop", reason: `nothing to compact (eligibleEnd=${eligibleEndOrdinal} <= offset=${offset}; ${boundaryNote})` };
   }
 
   // Pi parity: the chunk budget follows the historian model's context window
@@ -789,6 +801,18 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
   try {
     await withRawMessageProvider(sessionId, deps.provider, async () => {
       updateSessionMeta(db, sessionId, { compartmentInProgress: true });
+      // Round 37 phase 2 seg 9 (limitation 37): a real protected-tail boundary,
+      // resolved under the lease (fail-open to the legacy default, logged).
+      let boundarySnapshot = deps.boundarySnapshot;
+      if (boundarySnapshot === undefined && deps.resolveBoundarySnapshot !== undefined) {
+        try {
+          boundarySnapshot = deps.resolveBoundarySnapshot();
+        } catch (error) {
+          const line = `[magic-context] historian: protected-tail boundary unresolved for ${sessionId} (${describeError(error).brief}); legacy 5-user-turn default`;
+          log(line);
+          debugConsole(line);
+        }
+      }
       const result = await runHistorianPassCore({
         db,
         sessionId,
@@ -797,9 +821,10 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
         directory: deps.directory,
         chunkTokens: deps.chunkTokens,
         model: deps.model,
-        boundarySnapshot: deps.boundarySnapshot,
-        refreshBoundarySnapshot: deps.refreshBoundarySnapshot,
+        boundarySnapshot,
+        refreshBoundarySnapshot: deps.refreshBoundarySnapshot ?? (boundarySnapshot !== undefined ? deps.resolveBoundarySnapshot : undefined),
         currentContextLimit: deps.currentContextLimit,
+        ...(boundarySnapshot !== undefined && deps.boundarySnapshot === undefined ? { boundaryContextLimit: boundarySnapshot.contextLimit } : {}),
         leaseHolderId: holderId,
         log,
         signal: deps.signal,
@@ -810,6 +835,14 @@ export async function runDshHistorian(deps: HistorianDeps): Promise<boolean> {
         telemetry.failureReason = result.reason ?? null;
         telemetry.chunkStartOrdinal = result.chunk?.startIndex ?? null;
         telemetry.chunkEndOrdinal = result.chunk?.endIndex ?? null;
+        if (result.status === "noop") {
+          // Round 37 phase 2 seg 9 (limitation 37): a fired pass that ends
+          // without a request says why (it was silent before). stderr only
+          // when the reason changes (fires repeat every step).
+          const line = `[magic-context] historian noop: ${result.reason ?? "unknown"}`;
+          log(line);
+          noopConsoleOnce(sessionId, line);
+        }
         if (result.status === "failed") {
           const reason = result.reason ?? "unknown";
           log(`[magic-context] historian failure: ${reason}`);
@@ -1257,7 +1290,13 @@ export function createMagicSummarizeHook(deps: MagicSummarizeDeps): SummarizeHoo
         const regionChars = regionTextChars(messages);
         const budget = regionChars > 0 ? Math.floor(regionChars * 0.8) - text.length : UNSUMMARIZED_TAIL_MAX_CHARS;
         const tail = budget >= 300 ? renderUnsummarizedTail(deps.provider, Math.max(firstOrdinal, coveredEnd + 1), lastOrdinal, Math.min(UNSUMMARIZED_TAIL_MAX_CHARS, budget)) : "";
-        if (tail.length === 0) debugConsole(`[magic-context] summarize: unsummarized tail ${coveredEnd + 1}-${lastOrdinal} not carried (budget ${budget} chars of region ${regionChars})`);
+        if (tail.length === 0) {
+          // Limitation 36 residual: only a region whose own text cannot hold
+          // compartments + tail lands here now (every message has a line).
+          const line = `[magic-context] summarize: unsummarized tail ${coveredEnd + 1}-${lastOrdinal} not carried (budget ${budget} chars of region ${regionChars})`;
+          log(line);
+          debugConsole(line);
+        }
         if (tail.length > 0) {
           text = text.length > 0 ? `${text}\n\n${tail}` : tail;
           debugConsole(`[magic-context] summarize: region ${firstOrdinal}-${lastOrdinal} covered through ${coveredEnd}; unsummarized tail ${Math.max(firstOrdinal, coveredEnd + 1)}-${lastOrdinal} carried in the summary (${tail.length} chars)`);
@@ -1314,12 +1353,74 @@ function clip(text: string, max: number): string {
   return `${text.slice(0, end)}…`;
 }
 
+/** Tool-call argument clip inside an unsummarized-tail line (chars). */
+const TAIL_TOOL_ARGS_MAX_CHARS = 240;
+
+/**
+ * Round 37 phase 2 seg 9 (limitation 36): what a message's tool parts say,
+ * for a tail line — the call (tool + clipped arguments) and the result size
+ * (the output itself stays omitted; ctx_expand has it). History-view parts are
+ * `{ type: "tool", tool, callID, state: { input | output | error } }`; the DSH
+ * wire shapes (`tool-call` / `tool-result`) are read too.
+ */
+function describeToolParts(parts: readonly unknown[]): { calls: string[]; results: string[] } {
+  const calls: string[] = [];
+  const results: string[] = [];
+  const sizeOf = (value: unknown): number => {
+    if (typeof value === "string") return value.length;
+    if (Array.isArray(value)) return value.reduce((n: number, v) => n + sizeOf((v as { text?: unknown })?.text ?? v), 0);
+    try {
+      return JSON.stringify(value ?? "").length;
+    } catch {
+      return 0;
+    }
+  };
+  const args = (value: unknown): string => {
+    if (value === undefined || value === null) return "";
+    let text: string;
+    try {
+      text = typeof value === "string" ? value : JSON.stringify(value);
+    } catch {
+      text = "";
+    }
+    return text.length > 0 ? ` ${clip(text.replace(/\s+/g, " "), TAIL_TOOL_ARGS_MAX_CHARS)}` : "";
+  };
+  for (const raw of parts) {
+    if (raw === null || typeof raw !== "object") continue;
+    const part = raw as Record<string, unknown>;
+    const type = part.type;
+    if (type === "tool") {
+      const name = typeof part.tool === "string" ? part.tool : "tool";
+      const state = (part.state ?? {}) as Record<string, unknown>;
+      if ("input" in state) calls.push(`${name}${args(state.input)}`);
+      if ("output" in state) results.push(`${name} (${sizeOf(state.output)} chars, output omitted)`);
+      else if ("error" in state) results.push(`${name} (error, ${sizeOf(state.error)} chars, omitted)`);
+    } else if (type === "tool-call") {
+      const name = typeof part.name === "string" ? part.name : "tool";
+      calls.push(`${name}${args(part.arguments ?? part.input)}`);
+    } else if (type === "tool-result" || type === "tool_result") {
+      const name = typeof part.name === "string" ? part.name : typeof part.toolName === "string" ? part.toolName : "tool";
+      results.push(`${name} (${sizeOf(part.content ?? part.output)} chars, output omitted)`);
+    }
+  }
+  return { calls, results };
+}
+
 /**
  * Round 26 (P1-2): the messages [from, to] the summary does not cover, as a
  * bounded text block. User text is kept first (constraints live there),
  * assistant text is clipped, tool output is left out (ctx_expand has it).
  * Over the cap, the OLDEST assistant lines go first, then the oldest user
  * lines are clipped further; the ordinal range for ctx_expand is always given.
+ *
+ * Round 37 phase 2 seg 9 (limitation 36, run 42729564554 main 215): every
+ * message of the range gets a line — a tool-only step (reasoning + tool call,
+ * no text) is listed as its call, a tool result by tool name and size, a
+ * message with nothing describable as "(no text)". Before, such messages had
+ * no line, and a range made only of them rendered NO block at all: the
+ * checkpoint shadowed them while no summary stood for them. Lines dropped for
+ * the cap are counted in one note line. Plain user/assistant text renders as
+ * before.
  */
 export function renderUnsummarizedTail(
   provider: RawMessageProvider,
@@ -1337,28 +1438,45 @@ export function renderUnsummarizedTail(
   const lines: Array<{ ordinal: number; role: string; text: string }> = [];
   for (const message of raw) {
     if (message.ordinal < from || message.ordinal > to) continue;
-    if (message.role !== "user" && message.role !== "assistant") continue;
-    const content = getIndexableContent(message.role, Array.isArray(message.parts) ? message.parts : []);
-    if (content.length === 0) continue;
-    lines.push({
-      ordinal: message.ordinal,
-      role: message.role,
-      text: clip(content, message.role === "user" ? TAIL_USER_MAX_CHARS : TAIL_ASSISTANT_MAX_CHARS),
-    });
+    const parts = Array.isArray(message.parts) ? message.parts : [];
+    const content =
+      message.role === "user" || message.role === "assistant" ? getIndexableContent(message.role, parts) : "";
+    const tools = describeToolParts(parts);
+    if (content.length > 0) {
+      const callNote = message.role === "assistant" && tools.calls.length > 0 ? ` [tool call: ${tools.calls.join("; ")}]` : "";
+      lines.push({
+        ordinal: message.ordinal,
+        role: message.role,
+        text: clip(`${content}${callNote}`, message.role === "user" ? TAIL_USER_MAX_CHARS : TAIL_ASSISTANT_MAX_CHARS),
+      });
+      continue;
+    }
+    // No text the index keeps: say what the message was (limitation 36).
+    if (tools.calls.length > 0) {
+      lines.push({ ordinal: message.ordinal, role: "tool call", text: clip(tools.calls.join("; "), TAIL_ASSISTANT_MAX_CHARS) });
+    } else if (tools.results.length > 0) {
+      lines.push({ ordinal: message.ordinal, role: "tool result", text: clip(tools.results.join("; "), TAIL_ASSISTANT_MAX_CHARS) });
+    } else {
+      lines.push({ ordinal: message.ordinal, role: message.role === "user" ? "user" : String(message.role), text: "(no text)" });
+    }
   }
+  if (lines.length === 0) return "";
   const header = `<unsummarized_tail from="${from}" to="${to}">\nMessages ${from}-${to} were compacted before the historian summarized them. Their text follows (tool output omitted); the full messages stay recoverable with ctx_expand ${from}-${to}. Instructions and constraints the user gave here still apply.`;
   const footer = "</unsummarized_tail>";
   // Round 27b (C6): the running size is kept incrementally (the previous
   // loops recomputed it per dropped line: O(n²), 11.5 s for a 40 000-message
   // tail). Same policy, same output.
-  let size = header.length + footer.length + lines.reduce((n, l) => n + l.text.length + 12, 0);
-  // Over the cap: drop the oldest assistant lines first, then clip user lines.
+  // Exact block length: `[ordinal] role: text` + its newline per line.
+  const lineCost = (l: { ordinal: number; role: string; text: string }) => l.text.length + l.role.length + 6 + String(l.ordinal).length;
+  let size = header.length + 1 + footer.length + lines.reduce((n, l) => n + lineCost(l), 0);
+  // Over the cap: drop the oldest non-user lines first (assistant text, tool
+  // calls / results), then clip user lines.
   let kept: Array<{ ordinal: number; role: string; text: string }> = lines;
   if (size > maxChars) {
     kept = [];
     for (const line of lines) {
-      if (size > maxChars && line.role === "assistant") {
-        size -= line.text.length + 12;
+      if (size > maxChars && line.role !== "user") {
+        size -= lineCost(line);
         continue;
       }
       kept.push(line);
@@ -1369,14 +1487,23 @@ export function renderUnsummarizedTail(
     size -= kept[i]!.text.length - clipped.length;
     kept[i] = { ...kept[i]!, text: clipped };
   }
+  const omittedNote = (n: number) =>
+    `(${n} of ${lines.length} messages in ${from}-${to} not listed here for size; ctx_expand ${from}-${to} returns every one)`;
+  const noteCost = (n: number) => (n > 0 ? omittedNote(n).length + 1 : 0);
   let first = 0;
-  while (size > maxChars && kept.length - first > 1) {
-    size -= kept[first]!.text.length + 12;
+  while (size + noteCost(lines.length - (kept.length - first)) > maxChars && kept.length - first > 1) {
+    size -= lineCost(kept[first]!);
     first += 1;
   }
   if (first > 0) kept = kept.slice(first);
-  if (kept.length === 0 || size > maxChars) return "";
-  return [header, ...kept.map((l) => `[${l.ordinal}] ${l.role}: ${l.text}`), footer].join("\n");
+  const omitted = lines.length - kept.length;
+  if (kept.length === 0 || size + noteCost(omitted) > maxChars) return "";
+  return [
+    header,
+    ...(omitted > 0 ? [omittedNote(omitted)] : []),
+    ...kept.map((l) => `[${l.ordinal}] ${l.role}: ${l.text}`),
+    footer,
+  ].join("\n");
 }
 
 /**
@@ -1416,6 +1543,15 @@ export function maybeCorruptHistorianOutputForE2e(
 }
 
 /** stderr diagnostics under MAGIC_CONTEXT_DEBUG_HISTORIAN=1 (headless prints these; ctx.logger is not shown). */
+/** Last noop line printed to stderr per session (dedupe: a fire repeats every step). */
+const lastNoopConsoleLine = new Map<string, string>();
+function noopConsoleOnce(sessionId: string, line: string): void {
+  if (lastNoopConsoleLine.get(sessionId) === line) return;
+  if (lastNoopConsoleLine.size >= 256) lastNoopConsoleLine.clear();
+  lastNoopConsoleLine.set(sessionId, line);
+  debugConsole(line);
+}
+
 function debugConsole(line: string): void {
   if (process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN !== "1") return;
   try {

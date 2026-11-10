@@ -160,6 +160,15 @@ export interface ContextPlaneDeps {
        * (`GenerateOptions.sessionId`, compaction-basic parity; round 36 I1).
        */
       readonly routeSessionId?: string;
+      /**
+       * Round 37 phase 2 seg 9 (limitation 37): the trigger's own inputs, so
+       * the pass resolves a real protected-tail boundary (core
+       * `resolveProtectedTailBoundary`, Pi parity) instead of the legacy
+       * 5-user-turn default.
+       */
+      readonly usage?: { readonly percentage: number; readonly inputTokens: number };
+      readonly executeThresholdPercentage?: number;
+      readonly contextLimit?: number;
     }) => void;
     /** In-flight pass tracker (turn-end await + unload drain). */
     readonly drain?: HistorianDrain;
@@ -437,6 +446,9 @@ function maybeFireHistorian(
         provider: historyContentProvider(agent as unknown as Agent, sessionId),
         contextWindow,
         ...(dshSessionIdOf(agent) !== undefined ? { routeSessionId: dshSessionIdOf(agent) } : {}),
+        usage: { percentage, inputTokens: Math.max(0, Math.round(sample.projectedTokens ?? 0)) },
+        executeThresholdPercentage,
+        contextLimit,
       });
     }
   } catch (error) {
