@@ -2804,8 +2804,12 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     policy (when / what it compacts), m0 / m1 injection and cache split, legacy fold sessions (they keep the
     pre-fix behaviour; open decision). Offline `checkpoint-baseline-overlap.test.ts` O1–O7 (O1–O6 RED on
     `e5d8222cd`, CI 42612450331 725 / 6 fail; fixed CI 42613187077 732 / 0). Real check run 42613997607 (§7.4 of evidence-round37
-    `phase2-i4-isolation-integration.md`) did not reach the path (turn 1 timeout, no compaction, no publication):
-    verified offline only; a real compaction-then-publication run is still open.
+    `phase2-i4-isolation-integration.md`) did not reach the path (turn 1 timeout, no compaction, no publication).
+    Real rerun 42729564554 (§7.5, turn timeout 2400 s, 2026-11-10) reached it: compaction at main 215, checkpoint
+    retired at 310 by the first publication covering its range; overlap 95 / 306 main requests (88 = designed wait
+    for a checkpoint whose shadowed range ran ~4 messages past compartment 323, 7 = run ended after compaction 2)
+    vs 182 / 419 before; 0 pairing / reasoning / coverage regressions. Open: the historian fires but sends no
+    request inside long turns (silent noop, eligible end = 5th-last user message; see §7.5), not fixed.
 35. **Round 37 phase 2 (2026-11-09) — `max_completion_tokens: 1` (run 42459290880 #426). OPEN, RED only
     (`06c802d28`, `it.failing`), not fixed by instruction.** The `1` is pi-ai 1.4.0 `clampMaxTokensToContext`
     (DSH dependency via `@deepseek-ai/dsh-llm-pi-ai` 0.2.1-rc.5): `min(maxTokens, max(1, window − estimate − 4096))`.

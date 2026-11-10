@@ -363,3 +363,65 @@ reasoning violation, I4 ≤ 1 m0), but the overlap scenario (native compaction f
 occur, so the fix is **verified offline only** (O1–O6, CI 42613187077). A real check needs a run that reaches
 both a backstop compaction and a later publication; not dispatched (one run authorised). Limitation 35 likewise
 not exercised.
+
+### 7.5 Real rerun 42729564554 (turn timeout 2400 s) — the fixed path **was reached**
+
+One dispatch only (user approval 2026-11-10 08:32 CST, no retry): `dsh-evo-bench.yml` @ `d5158e995` (contains
+`e67beb9a0`), groups native, runs 1, max_items 10, cost_cap 3, `evo-model-200k-catalog-hist.yml`, isolate 1, validate
+false, on_timeout stop, **turn_timeout 2400** (the workflow input has no upper bound; the only cap is the job's
+`timeout-minutes: 355`), slot evo-21. Everything else as 42613997607; model, thinking, effort and maxTokens unchanged.
+Job 129543892204 green; extracts `phase2-tables/ckpt-fix-42729564554.md`. The longer timeout was not needed in the end:
+the longest turn took 712 s (TTFT median 1.3 s, against 41.8 s in the slow-upstream smokes).
+
+| item | 42729564554 (fix) | 42459290880 (§6, before fix) |
+|---|---|---|
+| turns completed / started / planned | 10 / 10 / 10, stop done / completed; 0 timeouts | 10 / 10 / 10 |
+| requests (HTTP) | 346, all 200; 0 × 429 | 467, all 200 |
+| main requests without usage | 0 (one subagent request, #169, without usage: client-aborted stream) | 0 |
+| native compactions (backstop) | **2** — main 215 (turn 6, pct 86.8, 173 647 → 48 886) and 339 (turn 10, pct 85.8, 171 558 → 48 040) | 3 |
+| historian requests / publications | 12 (all 200) / 12 m0 changes (113, 184, 186, 191, 194, 196, 204, 216, **310**, 311, 332, 340) | 17 / 14 |
+| compaction → later publication | **yes**: compaction 215 → publications 216 (322–323, mini-historian chunk) and **310** (1–427, covers the checkpoint range) | yes (179, 319, 389, 396, 411 …) |
+| checkpoint retired after the m0 covers it | **yes, at 310** — the checkpoint message becomes `[dropped §244§] [dropped §245§] [dropped §246§]` (49 chars; the three tagged parts of that one message) in the same request whose m0 gains 324–427; messages after it unchanged; never live again | no: 318–429 stayed live through 4 publications (only native drop at 241 retired one) |
+| live full summaries (m0 + checkpoint) per main request | 0: **0** · 1: **211** · 2: **95** (216–308 = 88, 340–346 = 7) | 1: 237 · 2: 182 |
+| duplicate checkpoint bytes in the "2" requests | 1.62 MB (16.2 KB × 88, 28.3 KB × 7) | 5.07 MB (median 29.9 KB) |
+| m0 per main request | 1 × 304, 0 × 2 (215, 339 = first request after each compaction; the checkpoint carries the coverage); never 2; m1 ≤ 1 | 1 × 416, 0 × 3 |
+| coverage | max never decreases, no gap in the newest m0; first request after compaction 1 covers 1–323 (previous m0 1–321), after compaction 2 covers 1–543 plus `<unsummarized_tail 544–560>` (previous m0 1–447) | same |
+| body bytes (main, same window = first 306) | median 433 934, mean 415 329, p90 664 479 | median 477 768, mean 448 804, p90 632 284 |
+| prompt tokens (main) | median 107 610, mean 101 529, p90 159 288; peak 168 857 | median 113 460 (419 req) |
+| pairing violations / reasoning lost | 0 / 0 | 0 / 0 |
+| `max_completion_tokens` < 32 768 (main) | 46, **min 13 241** (no tiny value; limitation 35 not hit this time) | 55, min 1 |
+| cost | **$1.2620**: main 306 $1.0494, subagent 26 (+1 no usage) $0.1490, historian 12 $0.0634, title 1 $0.0003 | $1.7002 |
+| F2P / P2P | 0 / 8, 310 / 317 | 0 / 8, 310 / 317 |
+| isolation probe | 0 / 11 leak classes, positives pass (`evo_pytest_ok` false as before) | 0 / 11 |
+
+**Why 216–308 still carried two summaries (88 requests).** The retirement rule needs the checkpoint's history range to
+end at or before the last stored compartment. Checkpoint 1 renders compartments 1–323 only, but compaction 1 also
+shadowed the next four messages: the m0 compartment 324–344 published at 310 says "In [324-331] I read `files.py`
+imports and edited the download path …", and the raw history kept after the checkpoint at 215 starts with that edit
+call (the `sed`/`read` of `files.py` before it is gone from the request). So the range ended at about 327 > 323 and the
+checkpoint waited, as designed (O6), for the first publication past it — 310, where it was retired. Ordinal 327 is
+inferred from the compartment text and the message order of request 213 (offset 42 between body index and ordinal,
+checked on compartment 322–323 = the two subagent messages), not read from the DB. The checkpoint shows no
+`<unsummarized_tail>` for those four messages (two tool round trips without user text), so for 89 main requests (215–308) they were
+neither in a summary nor raw; they stayed recoverable through the history view. Checkpoint 2 does carry its tail
+(544–560, the requirement 9 message); no historian request followed it before the run ended (346), so the second
+checkpoint was never retired — expected, not a failure.
+
+**Historian trigger without a request (seen again).** `fires=true` appears on 92 trigger lines but only 12 historian
+requests were sent; e.g. turn 5 fires from about main 141 to 177 with no request. Every non-backstop historian request
+starts 3–16 s after a new meaningful user message (requirement or subagent inbox message: 110, 178, 183, 185, 190, 193,
+199, 301, 322; 214 / 338 are the summarize mini-historian right before each compaction, 309 a second chunk), and no
+`lease busy` / `backing off` / `historian failure` line exists. Likely cause (source + timing, no log line states it):
+the DSH fire path passes no boundary snapshot, so `runHistorianPassCore` uses `createDefaultBoundarySnapshotForTests`
+(boundaryReason `test-legacy`), whose eligible end is the 5th-last meaningful user message
+(`PROTECTED_TAIL_USER_TURNS = 5`). Inside a long autonomous turn that end does not move, the pass returns `noop`
+("nothing to compact"), and noop results are not logged. Not fixed (not authorised); recorded for the limitation list.
+
+**Verdict.** The fixed path ran for real: a native compaction followed by a publication that covers the checkpoint's
+range retired the checkpoint in that same request, with no pairing / reasoning violation, no coverage loss and no extra
+drop of other messages. Overlap fell from 182 / 419 to 95 / 306 main requests and from 5.07 to 1.62 MB of duplicate
+bytes. The remaining overlap is the designed wait for a checkpoint whose range runs past the last compartment (88
+requests here; length depends on when the next publication lands) plus the unretired tail of the run. Not covered: a
+second retirement in the same session, legacy fold sessions, a checkpoint retired by a publication that does not
+arrive until a later turn, cache effect of the retirement step (310 hit 8 192 / 142 370, but 310 is also a publication
+request, so the split is not separable). One run, one task.

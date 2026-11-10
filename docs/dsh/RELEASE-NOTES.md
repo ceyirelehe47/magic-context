@@ -82,8 +82,9 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   contains the same summaries (a real 200k run: 182 of 419 requests, about 30 KB each). In new (native-roles)
   sessions the compaction summary is now retired in the same step once the live baseline covers its whole
   range; a summary that still carries history not yet summarized by Magic stays until it is covered. Older
-  fold sessions keep the previous behaviour. Covered by offline tests; the one real check run did not reach a
-  compaction, so a real-run confirmation is still pending. Also found, not fixed: Magic writes tool results that DSH's
+  fold sessions keep the previous behaviour. Covered by offline tests and confirmed in a real 10-turn run
+  (42729564554): the compaction summary was retired at the first publication that covered it, and requests
+  carrying both fell from 182 of 419 to 95 of 306. Also found, not fixed: Magic writes tool results that DSH's
   tool-result pruner shortened back to full length, which can make the DSH model adapter send a tiny
   output limit (one request in that run got `max_completion_tokens: 1`). Commits `f7f3fb4c3` (RED),
   `e67beb9a0` (fix), `06c802d28` (RED for the open issue). Detail:
