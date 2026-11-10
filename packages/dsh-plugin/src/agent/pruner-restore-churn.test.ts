@@ -1,9 +1,9 @@
 /**
  * Round 37 phase 2 — investigation of `max_completion_tokens: 1` (run
  * 42459290880, main request #426, finish=length, turn 9 turn_end max-tokens).
- * RED only — documented as `it.failing` (the defect is NOT fixed here, by
- * instruction); when it is fixed this test starts passing and bun reports the
- * `it.failing` as a failure, which is the signal to flip it to `it`.
+ * P1 was RED as `it.failing` (06c802d28); fixed in round 37 seg 11 (native
+ * view keeps the DSH pruner's cut, transcript.ts prunedToolBase) and flipped to
+ * `it` with the same assertions.
  *
  * Chain (evidence in docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md §7):
  *   1. `1` is pi-ai 1.4.0 `clampMaxTokensToContext` (via @deepseek-ai/dsh-llm-pi-ai
@@ -81,7 +81,7 @@ function dshPrune(session: Session): number {
 }
 
 describe("round 37 phase 2: Magic native tool rewrite vs the DSH tool-result pruner (max_completion_tokens 1 chain)", () => {
-  it.failing("P1 a tool result the DSH pruner shortened is not rewritten back to its full text by the next pre-step", async () => {
+  it("P1 a tool result the DSH pruner shortened is not rewritten back to its full text by the next pre-step", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dsh-prune-churn-"));
     const db: Database = await createTestDb(join(dir, "c.db"));
     try {

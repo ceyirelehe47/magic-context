@@ -103,6 +103,15 @@ export interface DshTranscriptInput {
    * rewrites). Absent = the session's frozen scheme (`agent/tag-scheme.ts`).
    */
   readonly nativeRoles?: boolean;
+  /**
+   * Round 37 limitation 35 (native view only): which text a rewritten
+   * `tool/result` node shows core. `latest-prune` (default, the model-visible
+   * surface) = the newest DSH tool-result-pruner output in the node's rewrite
+   * chain (Magic re-renders on top of it, so it never writes the pruned middle
+   * back); `root` = the original result (the HISTORY view: historian,
+   * compartments, ctx_expand keep the full original text).
+   */
+  readonly toolRewriteBase?: "latest-prune" | "root";
 }
 
 /**
@@ -664,6 +673,76 @@ function expandToolRewrite(event: EventLike, eventBySeq: ReadonlyMap<number, Eve
   return current === event ? null : current;
 }
 
+/**
+ * DSH 0.2.1-rc.5 `@deepseek-ai/dsh-compaction-tool-result-pruner` PRUNE_MARKER
+ * (lib/index.js; the package is a DSH preset dependency, not ours, so the
+ * constant is pinned here and in pruner-restore-churn.test.ts).
+ */
+export const DSH_TOOL_RESULT_PRUNE_MARKER = "\n\n[... tool result middle pruned ...]\n\n";
+
+/**
+ * True when `rewrite` is exactly the DSH tool-result pruner's output for
+ * `source`: `head + PRUNE_MARKER + tail` where head is a prefix and tail a
+ * suffix of the source text and the two do not overlap (the pruner removes a
+ * non-empty middle). Identification is structural against the cited source
+ * event, never by the marker alone: a result that merely CONTAINS the marker
+ * text (a grep over this very file) is not a prune, and a Magic rewrite
+ * (`§N§ ` + source, a drop sentinel, a truncation) never has this shape
+ * because its head is not a prefix of its source.
+ */
+export function isDshPrunerRewrite(sourceText: string, rewriteText: string): boolean {
+  const marker = DSH_TOOL_RESULT_PRUNE_MARKER;
+  if (rewriteText.length >= sourceText.length) return false;
+  for (let at = rewriteText.indexOf(marker); at >= 0; at = rewriteText.indexOf(marker, at + 1)) {
+    const head = rewriteText.slice(0, at);
+    const tail = rewriteText.slice(at + marker.length);
+    if (head.length + tail.length < sourceText.length && sourceText.startsWith(head) && sourceText.endsWith(tail)) return true;
+  }
+  return false;
+}
+
+/**
+ * Limitation 35: the base text core should see for a rewritten native tool
+ * node — the newest pruner output in its rewrite chain with Magic's own tag
+ * prefix stripped (core re-tags it with the same `§N§`, so an unchanged tag
+ * renders exactly the pruned node and no replace is planned). `null` when no
+ * prune is in the chain (core keeps seeing the original, as before).
+ */
+function prunedToolBase(event: EventLike, eventBySeq: ReadonlyMap<number, EventLike>): string | null {
+  let current = event;
+  for (let depth = 0; depth < MAX_OP_COPY_DEPTH; depth += 1) {
+    const shadowed = (current as { sourceEventSeqs?: unknown }).sourceEventSeqs;
+    if (!Array.isArray(shadowed) || shadowed.length !== 1 || typeof shadowed[0] !== "number") return null;
+    const source = eventBySeq.get(shadowed[0]);
+    if (source === undefined || source.type !== "tool/result") return null;
+    const text = toolNodeText(current);
+    if (isDshPrunerRewrite(toolNodeText(source), text)) return stripTagPrefix(text);
+    current = source;
+  }
+  return null;
+}
+
+/** `root` with its text blocks replaced by one block holding `text` (non-text blocks kept, like replaceToolResultContent). */
+function withToolText(root: EventLike, text: string): EventLike {
+  const data = dataOf(root);
+  const message = data !== null && isRecord(data.message) ? data.message : null;
+  if (data === null || message === null) return root;
+  const original = Array.isArray(message.content) ? (message.content as unknown[]) : [];
+  const content: unknown[] = [];
+  let placed = false;
+  for (const block of original) {
+    if (!(isRecord(block) && block.type === "text")) {
+      content.push(block);
+      continue;
+    }
+    if (placed) continue;
+    content.push({ ...block, text });
+    placed = true;
+  }
+  if (!placed) content.unshift({ type: "text", text });
+  return { ...root, data: { ...data, message: { ...message, content } } } as EventLike;
+}
+
 /** The text a tool/result node shows (text fragments joined like {@link toolResultParts}). */
 function toolNodeText(event: EventLike): string {
   const message = deriveEventMessage(event as unknown as SessionEvent) as unknown as Record<string, unknown> | null;
@@ -687,6 +766,7 @@ function walkDshLog(
   events: readonly unknown[],
   surfaceNodes: readonly number[] | null,
   native = false,
+  toolRewriteBase: "latest-prune" | "root" = "latest-prune",
 ): DshWalkResult {
   const eventBySeq = new Map<number, EventLike>();
   const boundaryAfter = new Set<number>();
@@ -731,7 +811,11 @@ function walkDshLog(
         const root = expandToolRewrite(event, eventBySeq);
         if (root !== null) {
           nativeNodeTexts.set(surfaceSeq, toolNodeText(event));
-          ordered.push({ event: root, nodeIndex, surfaceSeq, boundaryBefore: false });
+          // Limitation 35: keep the DSH pruner's cut (do not hand core the
+          // original back, which re-rendered the full text every pass and
+          // ping-ponged with the pruner). The history view keeps the root.
+          const pruned = toolRewriteBase === "latest-prune" ? prunedToolBase(event, eventBySeq) : null;
+          ordered.push({ event: pruned === null ? root : withToolText(root, pruned), nodeIndex, surfaceSeq, boundaryBefore: false });
           continue;
         }
       }
@@ -1134,7 +1218,7 @@ export function readDshTranscript(input: DshTranscriptInput): DshTranscriptView 
     ? [...input.session.surface.nodes]
     : [];
   const native = input.nativeRoles ?? isNativeRolesSession(input.canonicalSessionId);
-  const walk = walkDshLog(events, nodes, native);
+  const walk = walkDshLog(events, nodes, native, input.toolRewriteBase ?? "latest-prune");
 
   for (let i = 0; i < walk.messages.length; i += 1) {
     const message = walk.messages[i];
@@ -1353,6 +1437,7 @@ export function readDshHistory(input: DshTranscriptInput): DshHistoryView {
       surface: { nodes, replaceGeneration: input.session.surface?.replaceGeneration ?? 0 },
       header: input.session.header,
     } as unknown as DshTranscriptInput["session"],
+    toolRewriteBase: "root",
   });
   const standInOrdinals = new Map<number, { first: number; last: number }>();
   for (const standIn of standIns) {

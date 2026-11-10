@@ -1543,12 +1543,26 @@ export function maybeCorruptHistorianOutputForE2e(
 }
 
 /** stderr diagnostics under MAGIC_CONTEXT_DEBUG_HISTORIAN=1 (headless prints these; ctx.logger is not shown). */
-/** Last noop line printed to stderr per session (dedupe: a fire repeats every step). */
+/**
+ * Dedupe key of a historian noop line: the line without its volatile fields.
+ * `messages=N` (raw message count at the trigger) grows by one or two every
+ * step while the reason itself (eligibleEnd / offset / boundary /
+ * protectedTailStart) is unchanged, so keying on the full line printed every
+ * fire (evo-22 42805322951: 18 identical noops, 18 stderr lines). Round 37
+ * seg 11.
+ */
+export function historianNoopDedupeKey(line: string): string {
+  return line.replace(/\s*\bmessages=\d+/g, "");
+}
+
+/** Last noop key printed to stderr per session (dedupe: a fire repeats every step). */
 const lastNoopConsoleLine = new Map<string, string>();
-function noopConsoleOnce(sessionId: string, line: string): void {
-  if (lastNoopConsoleLine.get(sessionId) === line) return;
+/** Print a noop line to stderr (debug env only) unless the same reason was the last one printed for this session. */
+export function noopConsoleOnce(sessionId: string, line: string): void {
+  const key = historianNoopDedupeKey(line);
+  if (lastNoopConsoleLine.get(sessionId) === key) return;
   if (lastNoopConsoleLine.size >= 256) lastNoopConsoleLine.clear();
-  lastNoopConsoleLine.set(sessionId, line);
+  lastNoopConsoleLine.set(sessionId, key);
   debugConsole(line);
 }
 
