@@ -2811,20 +2811,29 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     vs 182 / 419 before; 0 pairing / reasoning / coverage regressions. The ~4 messages past 323 are exactly
     324–327 (turn-06.log:118) and were shadowed with no tail line — limitation 36; the silent historian noop seen
     in the same run is limitation 37 (both fixed in segment 9, offline only).
-35. **Round 37 phase 2 (2026-11-09) — `max_completion_tokens: 1` (run 42459290880 #426). OPEN, RED only
-    (`06c802d28`, `it.failing`), not fixed by instruction.** The `1` is pi-ai 1.4.0 `clampMaxTokensToContext`
-    (DSH dependency via `@deepseek-ai/dsh-llm-pi-ai` 0.2.1-rc.5): `min(maxTokens, max(1, window − estimate − 4096))`.
-    Its `estimateContextTokens` uses the last assistant usage only while no earlier message is newer than that
-    response; otherwise it counts the whole request at 3.5 chars/token (≥ 195 903 for a 179 522-token prompt
-    at #426). Before #426 the log holds tool/result replaces of nodes before the last assistant message, newer
-    than it (seq 6224–6240). They are a ping-pong on the same nodes over the whole run: DSH
-    `compaction-tool-result-pruner` shortens a > 8192-char result (head 4096 + marker + tail 1024; 603
-    shrinking replaces) and the Magic native tool rewrite writes the tagged ORIGINAL back on the next pre-step
-    (943 growing replaces; e.g. the node behind seq 6240 alternates 10 096 / 5 159 chars every step). Plugin half
-    pinned by `pruner-restore-churn.test.ts` P1. Side effects besides the clamp: the pruner's savings are undone
-    and old tool nodes are rewritten every step (prefix churn). 55 / 419 main requests went out below the route
-    maxTokens 32768 for the same reason; only #426 reached 1. Run 42805322951 (§7.7): 59 / 487 below 32768, min 4 041 (main
-    374, estimate ≈ 191 863 vs prompt 171 289), none near 1; still OPEN.
+35. **Round 37 phase 2 (2026-11-09) — `max_completion_tokens: 1` (run 42459290880 #426). Plugin trigger FIXED offline
+    (`51d0e90bb`, RED `a1f1f55e4` + `06c802d28`, 2026-11-10 seg 11); estimator residual OPEN (DSH / pi-ai, not ours);
+    no real run yet.** The `1` is pi-ai 1.4.0 `clampMaxTokensToContext` (via `@deepseek-ai/dsh-llm-pi-ai` 0.2.1-rc.5):
+    `min(maxTokens, max(1, window − estimate − 4096))`. **Corrected cause (seg 11):** rc.5 replays every assistant with
+    `emptyPiUsage()` and timestamp 0, so pi never anchors on usage — the estimate is always `Σ ceil(chars / 3.5)` + tool
+    schemas (recomputed from the bodies: matches every clamped main request of 42459290880 / 42805322951 within
+    0.1–0.3 %; ~1.07× the real prompt near the window). The earlier "replaces invalidate the anchor" reading is
+    withdrawn. The trigger was a plugin defect: DSH `compaction-tool-result-pruner` (runs only when DSH's compaction
+    check sees high pressure) cut > 8192-char results and the Magic native tool rewrite wrote the tagged ORIGINAL back
+    on the next pre-step (603 / 943 replaces; #424 pruned → clamp 12 988, #426 restored, +14.5k real tokens → 1; 358 /
+    449 bodies carried a restored result). **Fix (adapter, `transcript.ts`):** the native surface view takes the
+    newest pruner output in a node's rewrite chain as core's base (identified structurally: head + marker + tail of
+    the cited source), so Magic re-tags the pruned text and plans no op; the history view (historian, `ctx_expand`)
+    keeps the original; fold sessions unchanged. Tests `pruner-restore-churn.test.ts` P1 (flipped from `it.failing`,
+    same assertions), P2 (200k window, pruned surface 169k: request-point estimate within 1 %, clamp > 16 384; RED
+    restored +42 594 → 1), P3, P4; `seg11-dedupe-prune-id.test.ts` I1–I3; CI RED 42819590979 (743 / 1, P2 only) → CI FIX 42820480391 (750 / 0, adapter
+    15 / 0, contracts 110 / 0). **Residual boundary:** the clamp still
+    follows the chars/3.5 overshoot — static what-if on the same bodies: 29 / 55 and 37 / 59 requests stay below 32 768,
+    lowest 8 343 / 9 742 (not 1). Closing it needs DSH to replay assistant usage / pi to anchor otherwise (pi 1.5.1's
+    15 % margin still falls back to 4096 near a full window), or a Magic decision to keep estimate + 4096 + maxTokens
+    under the window (not done). Real-run effect (fewer tokens near the window, fewer restores / prefix breaks,
+    possibly fewer native compactions) **待真实验证**. Evidence: `evidence-round37/phase2-i4-isolation-integration.md`
+    §7.3 (withdrawn step 2) / §7.8, `phase2-tables/lim35-estimate-42459290880-42805322951.md`.
 36. **Round 37 phase 2 seg 9 (2026-11-10) — messages a native compaction shadows but no compartment covers could be
     invisible (acceptance 5). FIXED offline (`f73973a2a`, RED `3e9271ab1`); no real run yet.** Run 42729564554, main
     215 (first request after compaction 1): region 1–327, the summarize mini-historian covered 322–323 and left
@@ -2854,7 +2863,8 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     core `resolveProtectedTailBoundary(resolveBoundaryContext(…))` under the lease (token-sized tail, tool-arc
     fences, live-prompt floor below the force band, emergency tail scale at the force band — Pi parity; fail-open to
     the legacy default with a log line); a noop pass logs `[magic-context] historian noop: <reason; boundary,
-    protectedTailStart>` (stderr once per changed reason with `MAGIC_CONTEXT_DEBUG_HISTORIAN=1`). **Expect** more
+    protectedTailStart>` (stderr once per changed reason with `MAGIC_CONTEXT_DEBUG_HISTORIAN=1`; until seg 11 the reason
+    carried `messages=N` and printed every fire — `51d0e90bb` dedupes on the reason without it, N1–N3). **Expect** more
     publications inside long turns (up to the newest user message instead of five back): more m0 rewrites / cache
     breaks, earlier drops and checkpoint retirement — not measured. e2e scenarios written around the 5-user-turn
     protection (e.g. `ci-x.sh` ST5 warm-up) not re-run. Tests `historian-boundary-fire.test.ts` H1–H3.

@@ -316,7 +316,7 @@ contracts 110 / 0 ×3, test-file typecheck 0.
 | step | finding | evidence |
 |---|---|---|
 | 1 | The value is set by **pi-ai 1.4.0** `clampMaxTokensToContext` (DSH dependency via `@deepseek-ai/dsh-llm-pi-ai` 0.2.1-rc.5): `min(maxTokens, max(1, contextWindow − estimateContextTokens − 4096))`. Route maxTokens 32 768, window 200 000 (`evo-model-200k-catalog-hist.yml`). | source (`dist/api/simple-options.js`); arithmetic matches all 55 main requests sent below 32 768 — strong |
-| 2 | `estimateContextTokens` uses the last assistant's usage only while no earlier message is newer than that response; otherwise it counts the whole request at 3.5 chars/token. #426 needed an estimate ≥ 195 903 for a 179 522-token prompt (×1.09). | source (`dist/utils/estimate.js`) — strong |
+| 2 | **Withdrawn in §7.8** (rc.5 replays assistants without usage, so there is never an anchor; the estimate is always the chars/3.5 count). Original reading: `estimateContextTokens` uses the last assistant's usage only while no earlier message is newer than that response; otherwise it counts the whole request at 3.5 chars/token. #426 needed an estimate ≥ 195 903 for a 179 522-token prompt (×1.09). | source (`dist/utils/estimate.js`) — strong |
 | 3 | Between the headers of #424 and #426 (log seq 6216 → 6243) the only surface writes are `compaction/prune` + `tool/result` replaces of nodes **before** the last assistant message, all newer than it (6224–6240). | session log — strong |
 | 4 | Those replaces are a **ping-pong**: DSH `compaction-tool-result-pruner` cuts a > 8192-char result (head 4096 + `[... tool result middle pruned ...]` + tail 1024; 603 shrinking replaces in the run) and the **Magic native tool rewrite** writes the tagged original back on the next pre-step (943 growing replaces; the node behind 6240 alternates 10 096 / 5 159 chars every step since seq 4805). | session log + pruner source — strong; the plugin half reproduced offline (P1 below) |
 
@@ -592,4 +592,80 @@ cost (+$0.71) and request count (+181 main) are mostly trajectory variance; per 
 $0.00330 vs $0.00343. The historian's share is attributable to the fix (twice the requests, 3.2× the cost) — an
 inference from the mechanism, not a controlled comparison. Not covered: a compaction with an uncovered range
 (limitation-36 renderer), legacy fold sessions, the budget < 300 residual, e2e / soak scenarios written around the
-5-user-turn protection (`ci-x.sh` ST5 warm-up), the limitation-35 clamp to 1 (it.failing kept; min here 4 041).
+5-user-turn protection (`ci-x.sh` ST5 warm-up), the limitation-35 clamp to 1 (it.failing kept; min here 4 041;
+root cause corrected and the plugin half fixed in §7.8).
+
+### 7.8 Segment 11 (2026-11-10) — limitation 35: root cause corrected, prune/restore ping-pong fixed (offline)
+
+User instruction 2026-11-10 20:37 CST ("得修"); adapter only (core, pi-plugin, upstream DSH, `node_modules`
+untouched); no bench / e2e / soak dispatched. Labels: **R** = reproduced (artifacts or offline test), **S** = static
+inference from source, **V** = needs a real run.
+
+**Root cause, corrected.** §7.3 step 2 is withdrawn. `@deepseek-ai/dsh-llm-pi-ai` 0.2.1-rc.5 converts every
+replayed assistant with `usage: emptyPiUsage()` and `timestamp: 0`, so pi-ai's `getLastAssistantUsageInfo` never
+finds a usage anchor: the estimate is **always** `Σ ceil(chars / 3.5)` over all messages plus the tool schemas, in
+every request, with or without replaces (S). Recomputing that from the request bodies reproduces the estimate implied
+by `max_completion_tokens` for every clamped main request of both runs within 0.1–0.3 %, and all 865 unclamped ones
+are consistent with it (R; `phase2-tables/lim35-estimate-42459290880-42805322951.md`, scripts
+`i3-scripts/estscan.py`, `prunesim.py`). On these runs the estimate is 1.07× the real prompt (median; up to 1.17×).
+What turned that overshoot into `1` at #426 is the ping-pong: #424 went out with 8 results pruned (prompt 165 020,
+clamp 12 988), #426 with the same 8 restored by Magic (prompt 179 522, +14.5k real tokens, estimate 200 015 → 1) (R).
+The pruner only runs when DSH's compaction check sees pressure ≥ its threshold, i.e. exactly near the window, and
+Magic undid it: 358 / 449 and 492 / 530 main bodies carried an unpruned > 8192-char result, only 47 / 18 a pruned one.
+
+| layer | owner | status |
+|---|---|---|
+| pruned results restored by the Magic native tool rewrite (trigger; also undoes the pruner's savings and rewrites old tool nodes = prefix churn) | adapter | **fixed** `51d0e90bb` (R offline, V real) |
+| no usage anchor in rc.5 replay → chars/3.5 estimate, ~7 % (up to 17 %) above the real prompt near the window | DSH `dsh-llm-pi-ai` + pi-ai | not changed (out of scope); residual below |
+
+**Options compared.**
+
+| | (a) Magic respects the pruner's cut (chosen) | (b) make the prefix prune "stable / cacheable" to keep the usage anchor | (c1) disable / bypass the DSH pruner in native sessions | (c2) Magic pressure model mirrors pi's chars/3.5 estimate |
+|---|---|---|---|---|
+| fixes the restore / churn | yes | no (there is no anchor to keep in rc.5) | yes, by removing the pruner | no |
+| cache prefix | one write per pruned node (the pruner's), then stable | — | stable | earlier compactions / truncations = more breaks |
+| ctx_expand / history | history view keeps the original (P3) | — | unchanged | unchanged |
+| pairing / reasoning | content-only tool/result replace as before; assistants untouched | — | — | — |
+| fold sessions | unchanged (native branch only) | — | profile-wide change | — |
+| scope | `transcript.ts` view only | needs DSH change | changes DSH composition (preset) and loses the native relief | behaviour change of thresholds, touches backstop / G / H baselines |
+
+(a) is the smallest correct one: the defect is Magic re-deriving a node from its root and writing over a rewrite
+that was not Magic's. (b) rests on the withdrawn anchor theory. (c1) would hide the symptom by removing a DSH
+mechanism the user did not ask to remove. (c2) targets the residual, is not a minimal fix and needs its own decision.
+
+**Fix `51d0e90bb` (adapter).** In the native (plan-N) surface view a rewritten `tool/result` node used to be read
+back as its root (original) result, so core re-rendered `§N§ original` and `planNativeNodeOps` wrote it over the
+pruner's output. Now `prunedToolBase` walks the node's single-source rewrite chain and, when a step is exactly the
+pruner's output for its source (`isDshPrunerRewrite`: `head + PRUNE_MARKER + tail` with head a prefix and tail a
+suffix of the cited source, non-overlapping — never the marker alone), core sees that text (tag prefix stripped); core
+re-tags it with the same `§N§`, the render equals the live node and no op is planned. Later Magic decisions (drop
+sentinel, a new tag) still apply on top of it. A Magic pressure truncation that the pruner cut again stays cut (its
+replay row no longer matches the base sha and is skipped; the pruned text is below the truncation floor). The history
+view (`readDshHistory`: historian, compartments, `ctx_expand`, drop queue numbering) passes `toolRewriteBase: "root"`
+and keeps the full original. Fold sessions do not take the native branch and are unchanged. Also in this commit: the
+stderr `historian noop` line dedupes on the reason without `messages=N` (`historianNoopDedupeKey`) — evo-22 printed
+all 18 identical noops.
+
+**Tests.** RED `a1f1f55e4` (`pruner-restore-churn.test.ts` P2: six 30 000-char results pruned in a session whose
+pruned surface estimates 169k tokens; the next pre-step restored them, estimate +42 594 → clamp 1; P3 history keeps
+the original, P4 a result that merely contains the marker text is tagged once — guards, pass before and after). CI
+RED **42819590979** @ `a1f1f55e4`: dsh-plugin 743 pass / 1 fail = P2 only, adapter 15 / 0, contracts 110 / 0 (rc.5,
+alpha.3, rc.1). FIX `51d0e90bb`: P1 `it.failing` → `it` (assertions unchanged), P2 passes (request-point estimate
+within 1 % of the pruned surface, clamp > 16 384 at every step), new `seg11-dedupe-prune-id.test.ts` N1–N3 (dedupe)
+and I1–I3 (identification: tagged / untagged prunes; tag prefix, sentinel, re-tag are not; marker literal and a cut of
+another text are not). Local per-file run 746 / 0 (115 files without `scripts/e2e/cache-bench/proxy.test.ts`), test
+tsc 0. CI FIX **42820480391** @ `51d0e90bb` SUCCESS: dsh-plugin 750 / 0 (116 files), adapter 15 / 0, contracts
+110 / 0 (rc.5, alpha.3, rc.1), test-file typecheck 0. S9 `it.failing`, O1–O7, G, H, I4 and backstop tests
+unchanged and green.
+
+**Residual (not fixed).** With the restore gone, the clamp is set by the rc.5 estimate overshoot alone: a static
+what-if on the same bodies (every > 8192-char result pruned) leaves 29 / 55 and 37 / 59 clamped requests below
+32 768, lowest 8 343 / 9 742 — far from 1 but still below the route's 32 768 when the real prompt is above ≈ 155k
+(S; trajectories after the fix will differ: fewer tokens near the window can also mean fewer native compactions,
+V). Closing it needs either DSH to replay assistant usage (or pi's estimator to anchor otherwise; pi 1.5.1's 15 %
+margin still falls back to 4096 when the window is nearly full) or a Magic decision to keep `estimate + 4096 +
+maxTokens` under the window (option c2) — not done, needs a decision. Not covered offline: the real ordering of
+DSH's compaction check vs the Magic pre-step in one step (the tests run prune → pre-step and assert both points),
+multi-text-block tool results (identification runs on the joined text; a mismatch falls back to the old behaviour),
+the pressure-truncation interplay (S), and DSH 0.2.2 (the pruner's `PRUNE_MARKER` is identical in alpha.3 / rc.1
+package sources — S; whether 0.2.2's pi-ai adapter keeps assistant usage was not checked).

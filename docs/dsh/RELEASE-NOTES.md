@@ -86,7 +86,7 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   (42729564554): the compaction summary was retired at the first publication that covered it, and requests
   carrying both fell from 182 of 419 to 95 of 306. Also found, not fixed: Magic writes tool results that DSH's
   tool-result pruner shortened back to full length, which can make the DSH model adapter send a tiny
-  output limit (one request in that run got `max_completion_tokens: 1`). Commits `f7f3fb4c3` (RED),
+  output limit (one request in that run got `max_completion_tokens: 1`; fixed in segment 11, below). Commits `f7f3fb4c3` (RED),
   `e67beb9a0` (fix), `06c802d28` (RED for the open issue). Detail:
   `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md` §7.
 - **Round 37 phase 2 segment 9 — nothing hidden after a compaction, and the historian keeps up inside long
@@ -104,6 +104,19 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   hidden and the compaction summary left the request at once. The new listing of tool steps was not needed in
   that run (verified offline only). Commits `3e9271ab1` (RED), `f73973a2a`. Detail:
   `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md` §7.6–§7.7.
+- **Round 37 segment 11 — Magic no longer undoes DSH's tool-result pruning (adapter only, core unchanged;
+  user instruction 2026-11-10 20:37 CST):** near a full context window DSH shortens very long tool outputs
+  (keeps the start and the end); in new (native-roles) sessions Magic used to write the full output back on the
+  next step, so the request grew again, the pruning was wasted and old parts of the prompt were rewritten every
+  step. With the DSH model adapter's size estimate, that is what made one request in a real run go out with an
+  output limit of 1 token. Magic now keeps DSH's shortened version (it still numbers it and can still drop it);
+  the full output stays available to Magic's summaries and through `ctx_expand`. Older fold sessions are
+  unchanged. Not fixed here: the DSH model adapter estimates the prompt about 7 % too large near a full window
+  (it never uses the real token counts of earlier responses), so long sessions can still get an output limit
+  below the configured one (in the same runs, re-estimated: lowest about 8–10k instead of 1). Also: the
+  debug-only "historian noop" line now prints once per reason instead of on every step. Verified offline only
+  (a real run is still to do). Commits `a1f1f55e4` (RED), `51d0e90bb`. Detail:
+  `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md` §7.8.
 - **Round 36 line H — `ctx_reduce` reminder in native-roles sessions (adapter only, core unchanged;
   user-approved 2026-11-06 20:43 CST):** with the switch on, the reminder that asks the model to drop
   spent tool outputs never fired, because the measurement only counted the tool-call arguments, not the
