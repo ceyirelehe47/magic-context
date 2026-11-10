@@ -52,13 +52,9 @@ import {
   readContextPressure,
   currentModel,
 } from "./historian-wiring";
-import {
-  isDshHistorianBusy,
-  runDshHistorian,
-  signalDshDeferredHistoryRefresh,
-  signalDshDeferredMaterialization,
-} from "./historian";
+import { isDshHistorianBusy } from "./historian";
 import { createHistorianDrain, UNLOAD_DRAIN_MS } from "./historian-drain";
+import { createDshHistorianFire } from "./historian-fire";
 import { createBackstopGuard } from "./backstop-guard";
 import { dshDreamSeams, registerDshDreamer } from "./dreamer";
 import { prunePressureTruncations } from "./pressure-truncation";
@@ -581,28 +577,13 @@ export function apply(ctx: Context, config: MagicAgentConfig = {}): void {
       // Explicit row thresholds (tests/presets) win; otherwise the core
       // resolver over jsonc + DSH overlay picks the per-model value.
       resolveExecuteThreshold,
-      fire: ({ db, sessionId, directory: fireDirectory, provider, contextWindow, routeSessionId }) => {
-        // Fire-and-forget: the pass publishes atomically and only signals
-        // deferred work; it must never block the pre-step chain.
-        const pass = runDshHistorian({
-          db,
-          sessionId,
-          directory: fireDirectory,
-          provider,
-          summarize: createLlmSummarizeCall(ctx, historianModel, routeSessionId),
-          model: currentModel(ctx),
-          currentContextLimit: contextWindow,
-          onPublished: () => {
-            signalDshDeferredHistoryRefresh(sessionId);
-            signalDshDeferredMaterialization(sessionId);
-          },
-          ...(e2eHold !== undefined ? { beforePublish: e2eHold } : {}),
-          log,
-        }).catch((error: unknown) => {
-          log(`[magic-context] historian pass failed (background): ${error instanceof Error ? error.message : String(error)}`);
-        });
-        historianDrain.track(sessionId, pass);
-      },
+      fire: createDshHistorianFire({
+        summarizeFor: (routeSessionId) => createLlmSummarizeCall(ctx, historianModel, routeSessionId),
+        model: () => currentModel(ctx),
+        ...(e2eHold !== undefined ? { beforePublish: e2eHold } : {}),
+        drain: historianDrain,
+        log,
+      }),
       drain: historianDrain,
     },
     log,
