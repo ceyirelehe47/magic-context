@@ -98,9 +98,12 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   through `ctx_expand`). (2) Inside a long task without new user messages the background historian often ran but
   did nothing, silently: it waited for five user messages of distance. It now uses the same size-based boundary
   as the Pi integration (it summarizes up to the message being answered) and logs why when a run has nothing to
-  do. Expect Magic summaries to update more often during long tasks. Both verified offline only (CI); not yet in
-  a real run. Commits `3e9271ab1` (RED), `f73973a2a`. Detail:
-  `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md` §7.6.
+  do. Expect Magic summaries to update more often during long tasks. Real 10-turn run 42805322951: the
+  historian now runs inside long tasks (24 requests vs 12) and Magic summaries update more often (22 vs 12; each
+  update is one prompt-cache break, historian cost $0.21 vs $0.06); after each of 3 compactions nothing was
+  hidden and the compaction summary left the request at once. The new listing of tool steps was not needed in
+  that run (verified offline only). Commits `3e9271ab1` (RED), `f73973a2a`. Detail:
+  `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md` §7.6–§7.7.
 - **Round 36 line H — `ctx_reduce` reminder in native-roles sessions (adapter only, core unchanged;
   user-approved 2026-11-06 20:43 CST):** with the switch on, the reminder that asks the model to drop
   spent tool outputs never fired, because the measurement only counted the tool-call arguments, not the

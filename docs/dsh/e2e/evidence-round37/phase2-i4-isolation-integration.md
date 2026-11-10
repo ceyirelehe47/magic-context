@@ -530,3 +530,66 @@ sessions (the boundary fix applies to them too, the tail fix applies to every su
 above. Suggested real check (needs separate approval, slot evo-22, cap $3): one `dsh-evo-bench` native run, 10 items,
 catalog-hist, isolate 1, turn_timeout 2400, @ `f73973a2a` — look for historian requests inside long turns, the noop
 lines, `unsummarized_tail` blocks after each compaction (none dropped), cache-hit change around publications.
+
+### 7.7 Real check evo-22 — run 42805322951 (segment 9 fixes in a real run)
+
+One dispatch only (user approval 2026-11-10 19:08 CST, no retry): `dsh-evo-bench.yml` @ `bf190fd08` (contains
+`f73973a2a`), groups native, runs 1, max_items 10, cost_cap 3, `evo-model-200k-catalog-hist.yml`, isolate 1, validate
+false, on_timeout stop, turn_timeout 2400, slot evo-22 — the inputs of 42729564554 apart from the slot. Job
+129792909501 green; extracts `phase2-tables/evo22-42805322951.md` (script `i3-scripts/evo22scan.py`). Label per row:
+**R** = reproduced in this run's artifacts, **S** = static inference, **N** = not covered by this run.
+
+| item | 42805322951 (seg 9) | 42729564554 (§7.5) | 42459290880 (§6) | |
+|---|---|---|---|---|
+| turns completed / started / planned; stop | 10 / 10 / 10, completed; 0 timeouts (longest turn 1 521 s, turn 5) | 10 / 10 / 10 (longest 712 s) | 10 / 10 / 10 | R |
+| requests; 429; main without usage | 555, all 200; 0; 0 (5 subagent requests client-aborted, 1 subagent `length`) | 346; 0; 0 | 467; 0; 0 | R |
+| historian requests / `fires=true` lines | **24 / 138** | 12 / 92 | 17 / 194 | R |
+| fires without a request and without a reason in the log ("other") | **2** (both on the compaction step, the summarize hook holds the lease) | **53** | **92** | R (classification of the 117 "in-flight" fires as lease-busy: S) |
+| `historian noop` lines | 18 (turn 5 ×17, turn 6 ×1), all `eligibleEnd=569 <= offset=569; boundary=size-walk protectedTailStart=569` | none (not logged before the fix) | none | R |
+| historian requests inside long turns | turn 5 (1 521 s): 12 requests at 29 … 1 268 s; turn 8: 4; turn 9: 4 | turn 5 (712 s): 110 @ 17 s, then none until 508 s | — | R |
+| publications (= m0 rewrites) | **22**: 108, 149, 177, 196, 202, 215, 225, 228, 236, 340, 350, 353, 355, 381, 462, 470, 476, 484, 493, 497, 503, 510 | 12 | 14 | R |
+| native compactions | 3: main 235 (turn 5, 89.1 %), 380 (turn 6, 88.3 %), 504 (turn 9, 90.2 %) | 2 | 3 | R |
+| order | pubs … 228 → **compaction 235 → 236 retire** → 340–355 → **compaction 380 → 381 retire** → 462–503 → **compaction 504 → 505 retire** → 510 | 215 → wait → 310 retire; 339 never retired | — | R |
+| live full summaries per main request (m0 + checkpoint) | **1 × 487** (never 0, never 2); m0 1 × 484, 0 × 3 (235, 380, 504: checkpoint only) | 1 × 211, 2 × 95 | 1 × 237, 2 × 182 | R |
+| checkpoint retirements | **3 in one session** (2nd and 3rd included), each in the request right after its compaction | 1 | 1 (by native drop) | R |
+| coverage | max never decreases, no gap in the newest m0 (`coverage_gaps_in_latest` {}); m1 ≤ 1 | same | same | R |
+| gap after compaction ("neither summary nor raw") | **none** at all three boundaries (content match: 235 and 380 contiguous, 504 overlaps by ≥ 6 messages that are both raw and summarized) | 324–327 for main 215–308 | — | R (ordinal-exact: N — content match, no DB) |
+| `<unsummarized_tail>` blocks | **0** in all bodies; no `not carried` log line: every compaction region was already fully covered by compartments | 1 (544–560) | — | the limitation-36 renderer is **N** in a real run |
+| cache hit, main (weighted) | 93.6 % | 92.9 % | 94.7 % | R |
+| cache hit at publication requests (mean; before → at → after, typical) | 23.0 % (≈ 98–99 % → 7–33 % → 97–99 %) | 11.4 % | 20.1 % | R |
+| main miss tokens at publication requests | 2 241 038 of 3 272 727 (68.5 %) | 1 425 808 of 2 210 258 (64.5 %) | 1 359 577 of 2 522 772 (53.9 %) | R |
+| body bytes (main) | median 434 879, total 208.27 MB (first 306: 127.98 MB) | median 433 934, 127.09 MB | median 459 309, 190.59 MB (first 306: 137.33) | R |
+| prompt tokens (main) | median 105 974, p90 152 592, peak 171 289 | median 107 610, peak 168 857 | median 113 460, peak 179 522 | R |
+| pairing violations / reasoning lost vs response | 0 / 0 | 0 / 0 | 0 / 0 | R |
+| `max_completion_tokens` < 32 768 (main) | 59, **min 4 041** (main 374, prompt 171 289: pi-ai estimate ≈ 191 863 = window − 4 041 − 4 096, i.e. the chars/3.5 fallback of limitation 35, S); no value < 1 000 | 46, min 13 241 | 55, min 1 | R (cause: S) |
+| backstop outcomes | below-threshold 497, pruned-below 15, no-routed 12, deferred:historian-busy 3, compacted 3 | — | — | R |
+| cost | **$1.9718**: main 487 $1.6062, subagent 38 $0.1592, historian 24 $0.2060, title $0.0003 | $1.2620 (historian $0.0634) | $1.7002 (historian $0.1012) | R |
+| F2P / P2P | 0 / 8, 310 / 317 | same | same | R |
+| isolation probe | pass, 0 / 11 leak classes, positives pass (`evo_pytest_ok` false as before) | 0 / 11 | 0 / 11 | R |
+
+**Limitation 37 (historian boundary) — verified in a real run.** The pass now runs inside long autonomous turns
+(turn 5: 12 historian requests spread over 1 268 s, against none between 17 s and 508 s in 42729564554), and every
+`fires=true` line is accounted for: a request starts, a pass is already running (117, the `lease busy` line goes to
+`ctx.logger` only — inferred from the request windows), a `historian noop` line names the reason (18), or the step is
+a compaction (2). The 18 noop lines are the expected live-prompt floor: compartments reach 568, the newest
+meaningful user message is 569 and everything after it belongs to the live turn below the force band. One side
+effect: the stderr noop line was meant to print once per changed reason, but the reason text carries
+`messages=N`, so it prints on every fire (18 lines here; harmless, noted). Expected consequences measured: 22
+publications against 12 (more m0 rewrites, each a cache break: publication requests average 23 % hit, 68.5 % of main
+miss tokens), historian cost $0.2060 against $0.0634, and the checkpoint retired in the very next request after
+each compaction because the background pass had already covered the region (the "designed wait" of §7.5 — 88
+requests with two summaries — did not occur).
+
+**Limitation 36 (tail coverage) — no gap, renderer not exercised.** All three compactions found the region already
+summarized (235: summarize took the lease after 2 s; 380: "range covered by the background pass"), so no
+compaction had an uncovered range and no `<unsummarized_tail>` was rendered. The boundaries were checked by content
+(the request before vs the first request after): no message is missing from both the summary and the raw view at
+any of them. The new tail lines for tool-only steps remain verified offline only (G1–G4).
+
+**What the comparison can and cannot say.** One run per configuration; the trajectories differ before the fix can
+matter (turn 1, where no historian fires: 804 s / 75 main requests here vs 418 s / 40 in 42729564554), so the total
+cost (+$0.71) and request count (+181 main) are mostly trajectory variance; per main request the cost is
+$0.00330 vs $0.00343. The historian's share is attributable to the fix (twice the requests, 3.2× the cost) — an
+inference from the mechanism, not a controlled comparison. Not covered: a compaction with an uncovered range
+(limitation-36 renderer), legacy fold sessions, the budget < 300 residual, e2e / soak scenarios written around the
+5-user-turn protection (`ci-x.sh` ST5 warm-up), the limitation-35 clamp to 1 (it.failing kept; min here 4 041).

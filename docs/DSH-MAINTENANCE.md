@@ -2823,7 +2823,8 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     (943 growing replaces; e.g. the node behind seq 6240 alternates 10 096 / 5 159 chars every step). Plugin half
     pinned by `pruner-restore-churn.test.ts` P1. Side effects besides the clamp: the pruner's savings are undone
     and old tool nodes are rewritten every step (prefix churn). 55 / 419 main requests went out below the route
-    maxTokens 32768 for the same reason; only #426 reached 1.
+    maxTokens 32768 for the same reason; only #426 reached 1. Run 42805322951 (§7.7): 59 / 487 below 32768, min 4 041 (main
+    374, estimate ≈ 191 863 vs prompt 171 289), none near 1; still OPEN.
 36. **Round 37 phase 2 seg 9 (2026-11-10) — messages a native compaction shadows but no compartment covers could be
     invisible (acceptance 5). FIXED offline (`f73973a2a`, RED `3e9271ab1`); no real run yet.** Run 42729564554, main
     215 (first request after compaction 1): region 1–327, the summarize mini-historian covered 322–323 and left
@@ -2838,7 +2839,10 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     (O6, G2). Tests `compaction-tail-coverage.test.ts` G1–G4 (production pre-step chain + real
     MagicCompactionEngine). **Residual:** a region whose own text cannot hold compartments + tail (budget < 300 chars,
     compaction-basic's "summary must be smaller" rule) still carries no tail (existing test pins it; now logged).
-    Evidence: `evidence-round37/phase2-i4-isolation-integration.md` §7.6.
+    Evidence: `evidence-round37/phase2-i4-isolation-integration.md` §7.6. **Real check 42805322951 (§7.7, 2026-11-10):**
+    3 compactions, no message missing from both summary and raw view at any boundary (content match), but every
+    region was already fully covered by compartments, so no tail was rendered — the new renderer is still verified
+    offline only.
 37. **Round 37 phase 2 seg 9 (2026-11-10) — historian `fires=true` without a request (silent noop). FIXED offline
     (`f73973a2a`, RED `3e9271ab1`); behaviour change, no real run yet.** Run 42729564554: 92 trigger lines with
     `fires=true`, 12 historian requests, no log line explaining the rest. Cause (source + offline reproduction H1):
@@ -2854,6 +2858,13 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     publications inside long turns (up to the newest user message instead of five back): more m0 rewrites / cache
     breaks, earlier drops and checkpoint retirement — not measured. e2e scenarios written around the 5-user-turn
     protection (e.g. `ci-x.sh` ST5 warm-up) not re-run. Tests `historian-boundary-fire.test.ts` H1–H3.
+    **Real check 42805322951 (§7.7, 2026-11-10): verified.** 24 historian requests / 138 `fires=true` (12 inside the
+    1 521 s turn 5); fires with neither a request nor a reason 2 (both on a compaction step) vs 53 in 42729564554;
+    18 `historian noop` lines (live-prompt floor, eligibleEnd = offset = newest user message). Measured cost of the
+    change: 22 publications vs 12, publication requests 23 % cache hit (68.5 % of main miss tokens), historian
+    $0.2060 vs $0.0634; checkpoints retired in the request after each compaction (never 2 live summaries). The
+    stderr noop line prints on every fire (its reason carries `messages=N`), not once per reason — cosmetic, open.
+    e2e ST5-type scenarios still not re-run.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 
