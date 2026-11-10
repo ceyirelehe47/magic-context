@@ -425,3 +425,108 @@ requests here; length depends on when the next publication lands) plus the unret
 second retirement in the same session, legacy fold sessions, a checkpoint retired by a publication that does not
 arrive until a later turn, cache effect of the retirement step (310 hit 8 192 / 142 370, but 310 is also a publication
 request, so the split is not separable). One run, one task.
+
+### 7.6 Segment 9 (2026-11-10) — coverage gap after compaction (limitation 36) and the silent historian noop (limitation 37)
+
+User instruction 2026-11-10 10:35 CST ("有问题就修"). Adapter only (`packages/dsh-plugin`); core, pi-plugin, upstream DSH,
+workflows untouched. **No bench / e2e / soak was dispatched**; everything below is offline (unit rig + the artifacts of
+42729564554). S9 (`738e3312a`) and limitation 35 (`06c802d28`) stay `it.failing`, untouched.
+
+| commit | what | CI |
+|---|---|---|
+| `3e9271ab1` | RED: `compaction-tail-coverage.test.ts` G1 / G1b / G2 fail, G3 passes; `historian-boundary-fire.test.ts` H1 / H2 fail, H3 passes; no-op extraction of the inline historian fire of `agent/index.ts` into `agent/historian-fire.ts` (`createDshHistorianFire`) so the test drives the production wiring | 42746008776 failure as intended: dsh-plugin 735 pass / **5 fail = G1, G1b, G2, H1, H2**; adapter 15 / 0; contracts 110 / 0 ×2; test tsc 0 |
+| `f73973a2a` | fix both (below); adds G4; 50 ms settle before the rig closes its DB (a test ending at the compaction request left the deferred drop queue running into the next test) | 42746978609 success: dsh-plugin **741 / 0** (733 + 8 new), adapter 15 / 0, contracts 110 / 0 ×2, test tsc 0, ci-check 46 / 0, wf-lint 0 |
+
+**Gap range — exact, read from the run's own log (the "about 327" of §7.5 was an inference).** `turn-06.log:118`:
+`[magic-context] summarize: unsummarized tail 324-327 not carried (budget 300377 chars of region 395183)`. So the
+compaction region ended at ordinal **327**, the summarize mini-historian covered **322–323** (its raw output:
+`<messages_processed>322-323</messages_processed><unprocessed_from>324</unprocessed_from>`), and **324–327** were
+shadowed with no text. They are (body 213, ordinal = index − 42, offset checked on 322–323):
+
+| ordinal | message |
+|---|---|
+| 324 | assistant, reasoning + `bash` `sed -n '1,30p' conan/tools/files/files.py` ("Read files.py imports"), no text |
+| 325 | its result (1 064 chars) |
+| 326 | assistant, reasoning + `read` `conan/tools/files/files.py` offset 218 limit 70, no text |
+| 327 | its result (4 058 chars) |
+
+328 (the `edit` of files.py) is the first raw message after the checkpoint in request 215. The budget was **not** the
+cause (300 377 chars available). Affected: main requests 215–308 (until publication 310 covered 324–427).
+
+**Limitation 36 — cause and fix.** `renderUnsummarizedTail` kept user / assistant TEXT only
+(`getIndexableContent`); a tool-only step (reasoning + tool call) and a tool result have none, so they got no line, and a
+range made only of them rendered `""` — the hook then carried no block and only printed the debug line above. Fix
+(`agent/historian.ts`): every message of the uncovered range gets a line — text as before (an assistant line also names
+its tool call), a tool-only step `[n] tool call: <tool> <clipped arguments, 240 chars>`, a result `[n] tool result:
+<tool> (<N> chars, output omitted)`, anything else `(no text)`. Over the 8 000-char cap the non-user lines go first, then
+user lines are clipped and the oldest dropped, and one note line says `(k of m messages in a-b not listed here for size;
+ctx_expand a-b returns every one)`. Plain text tails render byte-identically (round 27b golden unchanged). Request 215
+would now carry (shape, constructed from body 213):
+
+```
+<unsummarized_tail from="324" to="327">
+Messages 324-327 were compacted before the historian summarized them. …
+[324] tool call: bash {"command":"cd ~/work/_temp/evo/native-run1/conan && sed -n '1,30p' conan/tools/files/files.py","description":"Read files.py imports"}
+[325] tool result: bash (1064 chars, output omitted)
+[326] tool call: read {"file_path":"~/work/_temp/evo/native-run1/conan/conan/tools/files/files.py","limit":70,"offset":218}
+[327] tool result: read (4058 chars, output omitted)
+</unsummarized_tail>
+```
+
+Tests (production pre-step chain: knowledge gate → context plane → native backstop = production
+`MagicCompactionEngine` over the real compaction-basic transaction, real TokenMeter, real summarize hook; historian stub
+that covers through the last message with user-facing text, as the real one did; real DSH Session, file DB — the O1–O7
+rig plus tool-only steps in one long turn). Every request is audited: each rig message visible raw, through a visible
+compartment, or as a line of a live `<unsummarized_tail>`.
+- G1: compaction at the 6th tool step of turn 9 → tail 36–41 had one line (`[36] assistant: reading 9`) and 37–41 (tool
+  result + two tool-only round trips) were invisible; now all six have lines, names `read_file` + `files-9-1.py`.
+- G1b: the real shape — nothing in the uncovered range has text → before: **no block at all**; now the block is carried.
+- G2: same session continued; the checkpoint with its tail waits (O6 rule) and retires at the first covering
+  publication; every request audited clean; O1–O7 checks (`auditRequests`, `newestCoverageGaps`) clean.
+- G3 (guard, green before and after): a fully covered region renders no tail. G4: a 200-message tool-only tail stays
+  ≤ 8 000 chars, keeps the newest lines and counts the rest.
+- Unchanged and green: `checkpoint-baseline-overlap.test.ts` O1–O7 (retirement `e67beb9a0`, fold O7),
+  `compact-unprocessed-tail.test.ts`, `unsummarized-tail-edge.test.ts`.
+- **Residual (not changed):** a region whose own text cannot hold compartments + tail (budget < 300 chars:
+  compaction-basic rejects a summary that is not smaller than the region) still carries no tail; that case is pinned by
+  an existing test ("compaction stays valid") and now also logged through `ctx.logger`. Not seen in real runs so far.
+
+**Limitation 37 — the silent historian noop: cause confirmed, fixed.**
+- Source: the context plane's fire (`agent/index.ts`, now `createDshHistorianFire`) called `runDshHistorian` without a
+  `boundarySnapshot`; `runHistorianPassCore` then used core `createDefaultBoundarySnapshotForTests` →
+  `getLegacyProtectedTailStartOrdinal`: eligible end = protected-tail start = the 5th-last meaningful user message.
+  `runDshHistorian` logged failures only; a `noop` result went to `historian_runs` and nowhere else. Pi resolves the
+  boundary with core `resolveProtectedTailBoundary(resolveBoundaryContext(…))` at trigger time
+  (`pi-plugin/src/context-handler.ts`, `resolvePiBoundarySnapshot`). The cause sits in the adapter's choice of the core
+  test default, not in core, so the fix stays in the adapter.
+- Offline reproduction on the production wiring (H1, RED on `3e9271ab1`): six requirement turns, then one long turn
+  with 8 tool steps at 70 % of a 40 k window → compartments stop at ordinal 8 (just before `requirement 3`, the 5th-last
+  user message) and every later fire summarizes nothing; H2: no log line says so.
+- Run data (static correlation only): a replay of `session.jsonl` (`phase2-tables/noop-replay-42729564554.txt`; one line per main pre-step with `fires=true`: 5th-last meaningful user message in the replayed view, rendered coverage end, historian request after it) shows the
+  historian requests following steps where a new meaningful user message entered (the 5th-last moves); the replay's
+  ordinals do not match Magic's ordinal space, so this is an order check, not a proof.
+- Fix: `createDshHistorianFire` gets the trigger's usage (percentage + projected tokens), execute threshold and context
+  limit (new optional fields on `ContextPlaneDeps.historian.fire`), and `runDshHistorian` resolves
+  `resolveDshProtectedTailBoundary` **inside the pass, after the lease, under the pass's raw-message provider**: core
+  `resolveProtectedTailBoundary(resolveBoundaryContext({ mode: "trigger", usage, usageSource: "live",
+  providerShapeVersion: "opencode-v1", cacheNamespace: "dsh:<sid>" }))`, re-resolved with the emergency tail scale
+  (0.5, 0.25 at ≥ 95 %) when no head is runnable at or above the force band (Pi parity). The snapshot is validated
+  against its own context limit; a resolver error falls back to the legacy default with a log line. A noop pass logs
+  `[magic-context] historian noop: nothing to compact (eligibleEnd=25 <= offset=25; boundary=size-walk
+  protectedTailStart=25 messages=41)` through `ctx.logger` every time and to stderr (`MAGIC_CONTEXT_DEBUG_HISTORIAN=1`)
+  once per changed reason per session (a fire repeats every step).
+- H1 (fixed): the pass summarizes through `done 6` (ordinal 24) and stops before the live prompt `requirement 7` (25)
+  — core's live-prompt floor below the force band; H2: the noop line names the resolved boundary (not the legacy
+  default); H3 (guard): below the trigger nothing fires and nothing is logged.
+- **Behaviour change to expect:** inside long autonomous turns below the force band the historian now summarizes up to
+  (not including) the newest meaningful user message instead of stopping five user messages back. In a run shaped like
+  42729564554 that means publications during the long turns (more m0 rewrites → more prefix-cache breaks, earlier
+  drops, earlier checkpoint retirement) — **static inference, not measured**. The summarize mini-historian path
+  (`eligibleEndOrdinal` override) and the backstop policy are unchanged.
+
+**Not covered.** No real run with either fix (both are offline only); e2e / soak scenarios written around the
+5-user-turn protection (e.g. `scripts/e2e/ci-x.sh` ST5 warm-up) were not run against the new boundary; legacy fold
+sessions (the boundary fix applies to them too, the tail fix applies to every summarize); the budget < 300 residual
+above. Suggested real check (needs separate approval, slot evo-22, cap $3): one `dsh-evo-bench` native run, 10 items,
+catalog-hist, isolate 1, turn_timeout 2400, @ `f73973a2a` — look for historian requests inside long turns, the noop
+lines, `unsummarized_tail` blocks after each compaction (none dropped), cache-hit change around publications.

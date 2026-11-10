@@ -89,6 +89,18 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   output limit (one request in that run got `max_completion_tokens: 1`). Commits `f7f3fb4c3` (RED),
   `e67beb9a0` (fix), `06c802d28` (RED for the open issue). Detail:
   `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md` §7.
+- **Round 37 phase 2 segment 9 — nothing hidden after a compaction, and the historian keeps up inside long
+  turns (adapter only, core unchanged; user instruction 2026-11-10 10:35 CST):** (1) when DSH's native
+  compaction folded away messages that Magic had not summarized yet, the compaction summary listed only those
+  with text; tool steps without text (a file read, a command) vanished from the model's view until the next
+  Magic summary (a real 10-turn run: four messages, for 89 requests). Every such message is now listed in the
+  summary's "not yet summarized" section (tool name, arguments, result size; the full output stays available
+  through `ctx_expand`). (2) Inside a long task without new user messages the background historian often ran but
+  did nothing, silently: it waited for five user messages of distance. It now uses the same size-based boundary
+  as the Pi integration (it summarizes up to the message being answered) and logs why when a run has nothing to
+  do. Expect Magic summaries to update more often during long tasks. Both verified offline only (CI); not yet in
+  a real run. Commits `3e9271ab1` (RED), `f73973a2a`. Detail:
+  `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md` §7.6.
 - **Round 36 line H — `ctx_reduce` reminder in native-roles sessions (adapter only, core unchanged;
   user-approved 2026-11-06 20:43 CST):** with the switch on, the reminder that asks the model to drop
   spent tool outputs never fired, because the measurement only counted the tool-call arguments, not the

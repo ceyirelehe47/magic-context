@@ -2808,8 +2808,9 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     Real rerun 42729564554 (§7.5, turn timeout 2400 s, 2026-11-10) reached it: compaction at main 215, checkpoint
     retired at 310 by the first publication covering its range; overlap 95 / 306 main requests (88 = designed wait
     for a checkpoint whose shadowed range ran ~4 messages past compartment 323, 7 = run ended after compaction 2)
-    vs 182 / 419 before; 0 pairing / reasoning / coverage regressions. Open: the historian fires but sends no
-    request inside long turns (silent noop, eligible end = 5th-last user message; see §7.5), not fixed.
+    vs 182 / 419 before; 0 pairing / reasoning / coverage regressions. The ~4 messages past 323 are exactly
+    324–327 (turn-06.log:118) and were shadowed with no tail line — limitation 36; the silent historian noop seen
+    in the same run is limitation 37 (both fixed in segment 9, offline only).
 35. **Round 37 phase 2 (2026-11-09) — `max_completion_tokens: 1` (run 42459290880 #426). OPEN, RED only
     (`06c802d28`, `it.failing`), not fixed by instruction.** The `1` is pi-ai 1.4.0 `clampMaxTokensToContext`
     (DSH dependency via `@deepseek-ai/dsh-llm-pi-ai` 0.2.1-rc.5): `min(maxTokens, max(1, window − estimate − 4096))`.
@@ -2823,6 +2824,36 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     pinned by `pruner-restore-churn.test.ts` P1. Side effects besides the clamp: the pruner's savings are undone
     and old tool nodes are rewritten every step (prefix churn). 55 / 419 main requests went out below the route
     maxTokens 32768 for the same reason; only #426 reached 1.
+36. **Round 37 phase 2 seg 9 (2026-11-10) — messages a native compaction shadows but no compartment covers could be
+    invisible (acceptance 5). FIXED offline (`f73973a2a`, RED `3e9271ab1`); no real run yet.** Run 42729564554, main
+    215 (first request after compaction 1): region 1–327, the summarize mini-historian covered 322–323 and left
+    324–327 `<unprocessed_from>`; `turn-06.log:118` "unsummarized tail 324-327 not carried (budget 300377 chars of
+    region 395183)". 324–327 = two tool-only round trips (reasoning + `sed`/`read` of files.py, no text, + results).
+    `renderUnsummarizedTail` kept user/assistant text only, so those messages had no line and a range made only of
+    them rendered no block: for main 215–308 they were neither summarized nor raw (ctx_expand / history view only)
+    until publication 310 covered them. **Fix (adapter):** every message of the uncovered range gets a tail line
+    (tool call: tool + clipped arguments; tool result: tool + size, output omitted; `(no text)` otherwise); over the
+    cap non-user lines go first and a note counts what is not listed (ctx_expand range always given). Plain text
+    tails unchanged. Retirement (`e67beb9a0`) unchanged: a checkpoint with a tail waits for the covering publication
+    (O6, G2). Tests `compaction-tail-coverage.test.ts` G1–G4 (production pre-step chain + real
+    MagicCompactionEngine). **Residual:** a region whose own text cannot hold compartments + tail (budget < 300 chars,
+    compaction-basic's "summary must be smaller" rule) still carries no tail (existing test pins it; now logged).
+    Evidence: `evidence-round37/phase2-i4-isolation-integration.md` §7.6.
+37. **Round 37 phase 2 seg 9 (2026-11-10) — historian `fires=true` without a request (silent noop). FIXED offline
+    (`f73973a2a`, RED `3e9271ab1`); behaviour change, no real run yet.** Run 42729564554: 92 trigger lines with
+    `fires=true`, 12 historian requests, no log line explaining the rest. Cause (source + offline reproduction H1):
+    the DSH fire called `runDshHistorian` without a boundary snapshot, so the pass used core
+    `createDefaultBoundarySnapshotForTests` (eligible end = 5th-last meaningful user message); inside a long
+    autonomous turn that end never moves and every pass is a `noop`, which was not logged. Not a core defect (core
+    ships the real resolver, Pi uses it). **Fix (adapter):** `createDshHistorianFire` (`agent/historian-fire.ts`,
+    extracted from `agent/index.ts`) hands the trigger's usage / threshold / context limit to the pass, which resolves
+    core `resolveProtectedTailBoundary(resolveBoundaryContext(…))` under the lease (token-sized tail, tool-arc
+    fences, live-prompt floor below the force band, emergency tail scale at the force band — Pi parity; fail-open to
+    the legacy default with a log line); a noop pass logs `[magic-context] historian noop: <reason; boundary,
+    protectedTailStart>` (stderr once per changed reason with `MAGIC_CONTEXT_DEBUG_HISTORIAN=1`). **Expect** more
+    publications inside long turns (up to the newest user message instead of five back): more m0 rewrites / cache
+    breaks, earlier drops and checkpoint retirement — not measured. e2e scenarios written around the 5-user-turn
+    protection (e.g. `ci-x.sh` ST5 warm-up) not re-run. Tests `historian-boundary-fire.test.ts` H1–H3.
 
 ## DSH-specific layer inventory (what cannot live in core, and why)
 

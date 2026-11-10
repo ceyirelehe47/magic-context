@@ -1,0 +1,100 @@
+# Replay of 42729564554 session.jsonl (round 37 phase 2 seg 9, offline, 2026-11-10)
+# One line per main pre-step whose trigger logged fires=true (turn logs), plus historian requests (HIST) between it and
+# the next main request. "view"/"last5users" come from replaying the DSH events through transcriptRawMessageProvider
+# WITHOUT the Magic DB (its ordinals are NOT Magic's ordinals: e.g. view 193 at main 213 vs real ordinal ~377).
+# "rendered covEnd" is in REAL Magic ordinals (m0/checkpoint coverage of the request body). The RUNNABLE/noop column
+# therefore compares two different ordinal spaces and is NOT a prediction; read only the ORDER: historian requests come
+# after the set of the last five meaningful user messages changed (or as the backstop's mini-historian 214 / 338).
+main 109 NOFIRE but HIST [110]
+main 111 pct 64 fires view 116 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   0 -> RUNNABLE
+main 112 pct 64 fires view 117 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   0 -> RUNNABLE
+main 141 pct 63 fires view 138 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 142 pct 63 fires view 139 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 146 pct 63 fires view 140 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 148 pct 64 fires view 141 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 151 pct 64 fires view 142 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 152 pct 64 fires view 143 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 153 pct 64 fires view 144 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 154 pct 65 fires view 145 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 155 pct 65 fires view 146 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 157 pct 66 fires view 147 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 158 pct 66 fires view 148 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 161 pct 67 fires view 149 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 162 pct 67 fires view 150 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 163 pct 67 fires view 151 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 164 pct 67 fires view 152 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 165 pct 68 fires view 153 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 166 pct 68 fires view 154 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 167 pct 69 fires view 155 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 170 pct 69 fires view 156 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 171 pct 70 fires view 157 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 172 pct 70 fires view 158 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 173 pct 70 fires view 159 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 174 pct 70 fires view 160 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop
+main 176 pct 70 fires view 161 last5users [4, 45, 66, 96, 113] eligibleEnd(5th-last user)   4 rendered covEnd   3 -> noop  HIST [178]
+main 179 pct 71 fires view 163 last5users [66, 96, 113, 161, 162] eligibleEnd(5th-last user)  66 rendered covEnd   3 -> RUNNABLE
+main 180 pct 71 fires view 164 last5users [66, 96, 113, 161, 162] eligibleEnd(5th-last user)  66 rendered covEnd   3 -> RUNNABLE
+main 181 pct 72 fires view 165 last5users [66, 96, 113, 161, 162] eligibleEnd(5th-last user)  66 rendered covEnd   3 -> RUNNABLE  HIST [183]
+main 184 pct 73 fires view 166 last5users [66, 96, 113, 161, 162] eligibleEnd(5th-last user)  66 rendered covEnd  83 -> noop  HIST [185]
+main 186 pct 75 fires view 168 last5users [113, 161, 162, 166, 167] eligibleEnd(5th-last user) 113 rendered covEnd 123 -> noop
+main 187 pct 77 fires view 169 last5users [113, 161, 162, 166, 167] eligibleEnd(5th-last user) 113 rendered covEnd 123 -> noop
+main 188 pct 77 fires view 170 last5users [113, 161, 162, 166, 167] eligibleEnd(5th-last user) 113 rendered covEnd 123 -> noop  HIST [190]
+main 191 pct 78 fires view 171 last5users [113, 161, 162, 166, 167] eligibleEnd(5th-last user) 113 rendered covEnd 182 -> noop
+main 192 pct 80 fires view 173 last5users [162, 166, 167, 171, 172] eligibleEnd(5th-last user) 162 rendered covEnd 182 -> noop  HIST [193]
+main 194 pct 80 fires view 174 last5users [162, 166, 167, 171, 172] eligibleEnd(5th-last user) 162 rendered covEnd 214 -> noop
+main 195 pct 81 fires view 175 last5users [162, 166, 167, 171, 172] eligibleEnd(5th-last user) 162 rendered covEnd 214 -> noop
+main 196 pct 82 fires view 176 last5users [162, 166, 167, 171, 172] eligibleEnd(5th-last user) 162 rendered covEnd 312 -> noop
+main 197 pct 83 fires view 177 last5users [162, 166, 167, 171, 172] eligibleEnd(5th-last user) 162 rendered covEnd 312 -> noop
+main 198 pct 84 fires view 178 last5users [162, 166, 167, 171, 172] eligibleEnd(5th-last user) 162 rendered covEnd 312 -> noop  HIST [199]
+main 200 pct 84 fires view 180 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 312 -> noop
+main 201 pct 81 fires view 181 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 312 -> noop
+main 202 pct 81 fires view 182 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 312 -> noop
+main 203 pct 82 fires view 183 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 312 -> noop
+main 204 pct 82 fires view 184 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 321 -> noop
+main 205 pct 82 fires view 185 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 321 -> noop
+main 206 pct 83 fires view 186 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 321 -> noop
+main 207 pct 84 fires view 187 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 321 -> noop
+main 208 pct 84 fires view 188 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 321 -> noop
+main 209 pct 84 fires view 189 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 321 -> noop
+main 210 pct 85 fires view 190 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 321 -> noop
+main 211 pct 85 fires view 191 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 321 -> noop
+main 212 pct 86 fires view 192 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 321 -> noop
+main 213 pct 86 fires view 193 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 321 -> noop  HIST [214]
+main 215 pct 87 fires view 194 last5users [166, 167, 171, 172, 179] eligibleEnd(5th-last user) 166 rendered covEnd 323 -> noop
+main 300 NOFIRE but HIST [301]
+main 302 pct 63 fires view 282 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 323 -> noop
+main 303 pct 64 fires view 283 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 323 -> noop
+main 304 pct 66 fires view 284 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 323 -> noop
+main 305 pct 66 fires view 285 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 323 -> noop
+main 306 pct 67 fires view 286 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 323 -> noop
+main 307 pct 68 fires view 287 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 323 -> noop
+main 308 pct 70 fires view 288 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 323 -> noop  HIST [309]
+main 310 pct 71 fires view 289 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 427 -> noop
+main 311 pct 73 fires view 290 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 446 -> noop
+main 312 pct 73 fires view 291 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 446 -> noop
+main 313 pct 74 fires view 292 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 446 -> noop
+main 314 pct 74 fires view 293 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 446 -> noop
+main 315 pct 74 fires view 294 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 446 -> noop
+main 316 pct 74 fires view 295 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 446 -> noop
+main 317 pct 75 fires view 296 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 446 -> noop
+main 318 pct 75 fires view 297 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 446 -> noop
+main 319 pct 75 fires view 298 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 446 -> noop
+main 320 pct 76 fires view 299 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 446 -> noop
+main 321 pct 76 fires view 300 last5users [232, 233, 239, 240, 281] eligibleEnd(5th-last user) 232 rendered covEnd 446 -> noop  HIST [322]
+main 323 pct 77 fires view 302 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 446 -> noop
+main 324 pct 78 fires view 303 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 446 -> noop
+main 325 pct 80 fires view 304 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 446 -> noop
+main 326 pct 80 fires view 305 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 446 -> noop
+main 327 pct 80 fires view 306 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 446 -> noop
+main 328 pct 81 fires view 307 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 446 -> noop
+main 329 pct 82 fires view 308 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 446 -> noop
+main 330 pct 82 fires view 309 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 446 -> noop
+main 331 pct 83 fires view 310 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 446 -> noop
+main 332 pct 84 fires view 311 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 447 -> noop
+main 333 pct 84 fires view 312 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 447 -> noop
+main 334 pct 84 fires view 313 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 447 -> noop
+main 335 pct 85 fires view 314 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 447 -> noop
+main 336 pct 85 fires view 315 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 447 -> noop
+main 337 pct 85 fires view 316 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 447 -> noop  HIST [338]
+main 339 pct 86 fires view 317 last5users [233, 239, 240, 281, 301] eligibleEnd(5th-last user) 233 rendered covEnd 543 -> noop
+{'fire': 90, 'run': 5, 'noop': 85, 'run_h': 1, 'noop_h': 9, 'h_without_fire': 0}
