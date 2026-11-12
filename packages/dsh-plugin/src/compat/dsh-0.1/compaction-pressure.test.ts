@@ -15,6 +15,22 @@ import { createAssistantMessage, createUserMessage } from "./session";
 // native policy but get a legal threshold on small windows; explicit user
 // values win.
 
+/**
+ * Round 37 seg 12: the S9 fix exports (A: available-window lines; C: doctor
+ * view). Typed locally so this file also type-checks on the pre-fix tree (RED).
+ */
+interface S9PolicyApi {
+  magicPressureLines(
+    contextWindow: number,
+    outputReserveTokens: number,
+  ): { available: number; execute: number; force: number; backstop: number | null };
+  magicPressurePercent(tokens: number, contextWindow: number, outputReserveTokens: number): number;
+  backstopPreemptsForceBand(contextWindow: number, outputReserveTokens: number, policy: { thresholdRatio: number; headroomTokens: number }): boolean;
+  thresholdPercentOfWindow(contextWindow: number, maxTokens: number, policy: { thresholdRatio: number; headroomTokens: number }): number | null;
+  describePressurePolicy(row: Record<string, unknown>): { text: string; preemptsMagic: boolean; backstopFirst: string[] };
+}
+const s9Api = async () => (await import("./pressure-policy")) as unknown as S9PolicyApi;
+
 function appendTurn(session: Session, turn: number): void {
   session.append(
     "user/message",
@@ -219,10 +235,16 @@ describe("native pressure threshold: MC leads on main sessions (round 19)", () =
 describe("pressure-policy view for setup/doctor (round 19)", () => {
   it("default magic-compaction row: main MC-led (90 % on 128k, legal on 24k/40k), child DSH native with small-window fallback", async () => {
     const { describePressurePolicy, effectivePressurePolicy, thresholdPercent } = await import("./pressure-policy");
+    const { thresholdPercentOfWindow } = await s9Api();
     const p = effectivePressurePolicy({ auto: true } as never);
     expect(p.main).toEqual({ thresholdRatio: 0.9, headroomTokens: 0, source: "magic" });
-    expect(thresholdPercent(131_072, 8_192, p.main)).toBe(90);
-    expect(thresholdPercent(24_576, 2_048, p.main)).toBe(90);
+    // Round 37 seg 12 (S9 fix A): an MC main policy is reported as a percent of
+    // the AVAILABLE window (window − maxTokens), MC's own unit — the same
+    // 90 %-of-window backstop (117 964 / 22 118 tokens) is 96 % / 98.2 % of it.
+    expect(thresholdPercentOfWindow(131_072, 8_192, p.main)).toBe(90);
+    expect(thresholdPercentOfWindow(24_576, 2_048, p.main)).toBe(90);
+    expect(thresholdPercent(131_072, 8_192, p.main)).toBe(96);
+    expect(thresholdPercent(24_576, 2_048, p.main)).toBe(98.2);
     // DSH default on 128k: 131072 − 8192 − 65536 = 57344 → 43.8 %
     expect(thresholdPercent(131_072, 8_192, p.child)).toBe(43.8);
     expect(thresholdPercent(24_576, 2_048, p.child)).toBeNull();
@@ -255,25 +277,56 @@ describe("nativeBackstopPercentage (user decision 2026-11-03: native at 90 %)", 
   });
 });
 
-// Round 36 line I, S9 (RED, fix pending a user decision — it changes what MC's
-// thresholds mean). compaction-basic caps pressure at window − maxTokens −
-// headroom; the MC main backstop sets headroom 0 and ratio 0.9, so on a route
-// whose request maxTokens is large relative to the window the cap wins:
-// 1M window + maxTokens 384 000 → min(900 000, 616 000) = 616 000 (61.6 %),
-// BELOW MC's 65 % execute threshold (650 000; MC prices pressure against the
-// whole window, reserved output not subtracted) and its 85 % force band — the
-// native backstop compacts before the historian ever fires. (The shipped
-// opencode-go catalog route reserves 0: its 384 000 is applied per request by
-// the adapter, the evo bench logged thresholdPct=90 at 1M; an explicit route
-// maxTokens — e.g. the 200k stress route, thresholdPct 83.6 — reaches the cap.)
-// it.failing: the assertions state the invariant; flip to it() with the fix.
-describe("S9: native backstop vs MC execute threshold on a 1M / 384k route (round 36 line I, RED)", () => {
-  it.failing("1M window, route maxTokens 384 000: no native pressure compaction below MC's 65 % execute threshold", async () => {
-    expect((await probe({ window: 1_000_000, maxTokens: 384_000, pct: 0.62 })).fired).toBe(false);
-    expect((await probe({ window: 1_000_000, maxTokens: 384_000, pct: 0.64 })).fired).toBe(false);
+// Round 36 line I, S9 — FIXED in round 37 seg 12 (user decision "A+C",
+// 2026-11-07, test change confirmed 2026-11-12 20:29 CST). compaction-basic
+// caps pressure at window − maxTokens − headroom; the MC main backstop sets
+// headroom 0 and ratio 0.9, so on a 1M route with request maxTokens 384 000
+// the backstop is min(900 000, 616 000) = 616 000. MC used to price its 65 % /
+// 85 % lines against the WHOLE window (650 000 / 850 000), so the backstop
+// pre-empted the historian. Fix A: MC prices against the available window
+// (window − maxTokens = 616 000): execute 400 400, force 523 600, backstop
+// 616 000 = 100 % of available. The RED (738e3312a, round 36) asserted
+// "no native compaction at 62 % / 64 % of the whole window": those numbers
+// encoded the OLD pricing (MC executing at 65 % of the whole window). Under
+// the new pricing the same invariant — the native backstop never fires before
+// MC's own lines — is stated directly: below MC's force band the backstop does
+// not fire, execute < force < backstop (exact values), and MC's own pressure
+// reading reaches its force band before the backstop's input. The 200k / 32k
+// evo route gets the same assertions.
+describe("S9: native backstop vs MC execute threshold on a 1M / 384k route (round 36 line I; fixed round 37 seg 12)", () => {
+  it("1M window, route maxTokens 384 000: execute ≈ 400k < force ≈ 524k < backstop 616k; no native compaction below the force band", async () => {
+    const { magicPressureLines, magicPressurePercent } = await s9Api();
+    const lines = magicPressureLines(1_000_000, 384_000);
+    expect(lines).toEqual({ available: 616_000, execute: 400_400, force: 523_600, backstop: 616_000 });
+    expect(lines.execute).toBeLessThan(lines.force);
+    expect(lines.force).toBeLessThan(lines.backstop!);
+    // MC's own reading (the one the historian trigger / drop ride / pressure
+    // truncation use) is at its lines at those token counts.
+    expect(magicPressurePercent(lines.execute, 1_000_000, 384_000)).toBeCloseTo(65, 2);
+    expect(magicPressurePercent(lines.force, 1_000_000, 384_000)).toBeCloseTo(85, 2);
+    // below MC's force band (and at MC's execute line) the native backstop does not fire
+    expect((await probe({ window: 1_000_000, maxTokens: 384_000, pct: 0.4004 })).fired).toBe(false);
+    expect((await probe({ window: 1_000_000, maxTokens: 384_000, pct: 0.5235 })).fired).toBe(false);
+    // between force and backstop: still MC's (its force path), not native
+    expect((await probe({ window: 1_000_000, maxTokens: 384_000, pct: 0.6155 })).fired).toBe(false);
+    // the backstop is still there, above MC's lines
+    expect((await probe({ window: 1_000_000, maxTokens: 384_000, pct: 0.617 })).fired).toBe(true);
   });
 
-  it.failing("pressure-policy view: the MC main threshold on 1M / 384k is not below the execute threshold", async () => {
+  it("200k window, route maxTokens 32 768 (evo route): execute < force < backstop; no native compaction below the force band", async () => {
+    const { magicPressureLines, magicPressurePercent } = await s9Api();
+    const lines = magicPressureLines(200_000, 32_768);
+    expect(lines).toEqual({ available: 167_232, execute: 108_700, force: 142_147, backstop: 167_232 });
+    expect(lines.execute).toBeLessThan(lines.force);
+    expect(lines.force).toBeLessThan(lines.backstop!);
+    expect(magicPressurePercent(lines.force, 200_000, 32_768)).toBeCloseTo(85, 2);
+    expect((await probe({ window: 200_000, maxTokens: 32_768, pct: 0.5435 })).fired).toBe(false);
+    expect((await probe({ window: 200_000, maxTokens: 32_768, pct: 0.7107 })).fired).toBe(false);
+    expect((await probe({ window: 200_000, maxTokens: 32_768, pct: 0.836 })).fired).toBe(false);
+    expect((await probe({ window: 200_000, maxTokens: 32_768, pct: 0.837 })).fired).toBe(true);
+  });
+
+  it("pressure-policy view: the MC main threshold on 1M / 384k is not below the execute threshold", async () => {
     const { effectivePressurePolicy, thresholdPercent } = await import("./pressure-policy");
     const main = effectivePressurePolicy({ auto: true } as never).main;
     expect(thresholdPercent(1_000_000, 384_000, main)).toBeGreaterThanOrEqual(65);
@@ -282,6 +335,19 @@ describe("S9: native backstop vs MC execute threshold on a 1M / 384k route (roun
   it("control: the same route with maxTokens 32 768 keeps the 90 % backstop (cap 967 232 not reached)", async () => {
     expect((await probe({ window: 1_000_000, maxTokens: 32_768, pct: 0.64 })).fired).toBe(false);
     expect((await probe({ window: 1_000_000, maxTokens: 32_768, pct: 0.91 })).fired).toBe(true);
+  });
+
+  it("doctor view (fix C): the default row never puts the backstop at or below MC's force band; a user headroom that does is flagged", async () => {
+    const { describePressurePolicy, backstopPreemptsForceBand } = await s9Api();
+    expect(describePressurePolicy({}).backstopFirst).toEqual([]);
+    expect(backstopPreemptsForceBand(1_000_000, 384_000, { thresholdRatio: 0.9, headroomTokens: 0 })).toBe(false);
+    // user headroom 65 536 on a 1M / 384k route: backstop 550 464 > force 523 600 → not flagged …
+    expect(backstopPreemptsForceBand(1_000_000, 384_000, { thresholdRatio: 0.9, headroomTokens: 65_536 })).toBe(false);
+    // … ratio 0.5: backstop 500 000 ≤ force 523 600 → flagged
+    expect(backstopPreemptsForceBand(1_000_000, 384_000, { thresholdRatio: 0.5, headroomTokens: 0 })).toBe(true);
+    const flagged = describePressurePolicy({ headroomTokens: 65_536 });
+    expect(flagged.backstopFirst).toContain("128k");
+    expect(flagged.text).toContain("Backstop at or below MC's force band");
   });
 });
 
