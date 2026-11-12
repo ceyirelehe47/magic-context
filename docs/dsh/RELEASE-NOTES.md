@@ -117,6 +117,21 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   debug-only "historian noop" line now prints once per reason instead of on every step. Verified offline only
   (a real run is still to do). Commits `a1f1f55e4` (RED), `51d0e90bb`. Detail:
   `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md` §7.8.
+- **Round 37 segment 12 — Magic Context counts the room the reply needs, and keeps room for the reply near a
+  full window (adapter only, core unchanged; user decisions S9 "A+C" and limitation 35 option B, 2026-11-12):**
+  Magic used to measure how full the context is against the whole window, while DSH's own safety compaction
+  already subtracts the space reserved for the model's reply. With a large reply reservation (for example a 1M
+  window that reserves 384k for output) DSH's safety net fired before Magic's own summaries got a chance. Magic
+  now measures against the window minus the reply reservation everywhere (its summary trigger, the displayed
+  percentage, dropping old outputs, shortening large tool outputs), so its own steps always come first; `doctor`
+  warns when a user setting would still let DSH's safety compaction go first. Consequence: on routes that send an
+  output reservation Magic starts summarizing earlier in absolute size (on a 200k window with 32k reserved: from
+  about 105k instead of 126k). Separately, when DSH's model adapter estimates the next request so close to the
+  window that the reply would be squeezed below 16k tokens (or a reply was just cut short below its normal limit),
+  the next step acts as if the context were at Magic's emergency level and shortens large tool outputs until the
+  room is back; the displayed percentage stays the measured one. Verified offline (CI 760 / 0); the paired real
+  run is in §7.10. Commits `6939254bf` (RED), `9382f3078`. Detail:
+  `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md` §7.9 / §7.10.
 - **Round 36 line H — `ctx_reduce` reminder in native-roles sessions (adapter only, core unchanged;
   user-approved 2026-11-06 20:43 CST):** with the switch on, the reminder that asks the model to drop
   spent tool outputs never fired, because the measurement only counted the tool-call arguments, not the

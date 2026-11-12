@@ -113,7 +113,7 @@ gold-valid 97.5–97.8 %, hit 99.2–99.6 %, **no compaction in any run** (DSH r
 route: compaction-basic 800 000, plugin backstop 900 000), cost spread inside each group larger than between
 groups; fold pending at the time of writing. Real-environment issue list (I1 historian requests HTTP 400 with
 no stderr trace, I2 zero reservation, S9 backstop below MC's 65 % on routes with an explicit maxTokens —
-RED `738e3312a`, fix options A–D await the user —, S4 / S6 / P1 fixed: `60f92181a` plugin log text,
+RED `738e3312a`; fixed in round 37 seg 12 with option A+C, see known limitation 38 —, S4 / S6 / P1 fixed: `60f92181a` plugin log text,
 `5a39caac5` / `dc916285b` bench pipeline; push CI 42273089229 / 42273703071 green):
 `evidence-round36/i-evo-bench.md`.
 Evidence: `docs/dsh/e2e/evidence-round36/README.md`.
@@ -1424,6 +1424,13 @@ patch layer, nested inserts included):
 - user-set top-level `thresholdRatio` / `headroomTokens` / retention and
   per-route `modelPolicies` win; `doctor` WARNs when they make a 128k main
   session compact before 65 %.
+- round 37 seg 12 (S9 fix A+C): MC prices its own lines against the **usable
+  window** `window − maxTokens` (the latest request header's `maxTokens`;
+  `pressure-policy.ts` `magicAvailableWindow`, the only place the reserve is
+  subtracted). The main-session percentages `setup` / `doctor` print are
+  "N % of window = M % of usable" (128k / 8k: 90 % = 96 %). `doctor` also WARNs
+  when the backstop sits at or below MC's force band (85 % of usable) on one
+  of the example routes or on 200k / 32k, 1M / 384k (`backstopFirst`).
 
 ### Enabling Magic Context per agent preset
 
@@ -2812,8 +2819,9 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     324–327 (turn-06.log:118) and were shadowed with no tail line — limitation 36; the silent historian noop seen
     in the same run is limitation 37 (both fixed in segment 9, offline only).
 35. **Round 37 phase 2 (2026-11-09) — `max_completion_tokens: 1` (run 42459290880 #426). Plugin trigger FIXED offline
-    (`51d0e90bb`, RED `a1f1f55e4` + `06c802d28`, 2026-11-10 seg 11); estimator residual OPEN (DSH / pi-ai, not ours);
-    no real run yet.** The `1` is pi-ai 1.4.0 `clampMaxTokensToContext` (via `@deepseek-ai/dsh-llm-pi-ai` 0.2.1-rc.5):
+    (`51d0e90bb`, RED `a1f1f55e4` + `06c802d28`, 2026-11-10 seg 11); estimator residual MITIGATED offline by option B
+    (`9382f3078`, RED `6939254bf`, 2026-11-12 seg 12, see the end of this item); the estimator itself is unchanged
+    (DSH / pi-ai, not ours).** The `1` is pi-ai 1.4.0 `clampMaxTokensToContext` (via `@deepseek-ai/dsh-llm-pi-ai` 0.2.1-rc.5):
     `min(maxTokens, max(1, window − estimate − 4096))`. **Corrected cause (seg 11):** rc.5 replays every assistant with
     `emptyPiUsage()` and timestamp 0, so pi never anchors on usage — the estimate is always `Σ ceil(chars / 3.5)` + tool
     schemas (recomputed from the bodies: matches every clamped main request of 42459290880 / 42805322951 within
@@ -2834,6 +2842,43 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     under the window (not done). Real-run effect (fewer tokens near the window, fewer restores / prefix breaks,
     possibly fewer native compactions) **待真实验证**. Evidence: `evidence-round37/phase2-i4-isolation-integration.md`
     §7.3 (withdrawn step 2) / §7.8, `phase2-tables/lim35-estimate-42459290880-42805322951.md`.
+    **Seg 12 — option B (user decision 2026-11-12), FIXED offline (`9382f3078`):** a SEPARATE near-window trigger
+    (`agent/near-window.ts`; every pi-specific constant there, bound to pi-ai 1.3.0 `utils/estimate.ts` /
+    `api/simple-options.ts`): (a) pi estimate (chars / 3.5 per message, tool schemas of the request header, the first
+    system message skipped as pi's systemPrompt) + 4096 + min(16 384, route maxTokens) > window, only when the latest
+    reply came from the pi-ai adapter (`replayState.response.kind`), or (b) the latest reply stopped on max tokens with
+    fewer output tokens than the route's maxTokens. When it fires the pass treats MC pressure as at the force band
+    (pressure truncation, which also frees at least the pi excess; drop ride; historian trigger); the persisted /
+    reported pressure % stays the measured one (B5). Tests `s9-lim35-window.test.ts` B1 (200k: next request
+    `max_completion_tokens` ≥ 16 384; pre-fix 9 413), B2, B3/B4 guards, B5. **Residual:** the floor is
+    min(16 384, maxTokens), not 16 384 flat (judgment call: a 24k / 4096 route would otherwise be permanently "near");
+    it only acts through pressure truncation / drops / historian — a surface without eligible tool results (≥ 3× the
+    keep window) or with drops held can stay clamped; images and multi-system-message prompts are approximated;
+    (b) needs the provider's output token count on the reply; a DSH / pi-ai upgrade that changes the estimator
+    (pi 1.5.x margin for large maxTokens) needs `near-window.ts` re-checked. Real effect: §7.10 (paired run).
+38. **Round 36 line I S9 (2026-11-06) — native backstop below MC's execute line on a route with a large request
+    maxTokens. FIXED offline in round 37 seg 12 (`9382f3078`, RED `6939254bf`, option A+C, user decision 2026-11-07,
+    test rewrite confirmed 2026-11-12 20:29 CST).** compaction-basic caps the MC main backstop at
+    min(0.9 × window, window − maxTokens − 0); with a 1M window and request maxTokens 384 000 that is 616 000, while MC
+    priced its 65 % execute / 85 % force lines against the whole window (650 000 / 850 000), so the backstop pre-empted
+    the historian. **Fix A:** MC prices every pressure reading against `window − maxTokens` (one helper,
+    `magicAvailableWindow`; historian trigger, persisted context %, historian context limit, drop ride, pressure
+    truncation): 1M / 384k → execute 400 400 < force 523 600 < backstop 616 000; 200k / 32 768 → 108 700 < 142 147 <
+    167 232. Pressure truncation's round 12 `min(32 000, maxTokens)` cap is gone (one budget for all of MC).
+    `thresholdPercent` reports an MC main policy as a percent of the usable window. **Fix C:** `doctor` WARNs when the
+    backstop is at or below MC's force line on the example routes. **Test change (documented in `6939254bf`):** the
+    round 36 RED asserted "no native compaction at 62 % / 64 % of the 1M window" — those numbers encoded the old
+    pricing (MC at 65 % of the whole window); the rewritten test states the same invariant under the new pricing,
+    exactly: no native compaction at MC's execute line, just below its force line and just below the backstop,
+    `execute < force < backstop` with the values above, MC's reading = 65 % / 85 % at those token counts, same for
+    200k / 32k. The round 19 view test's 90 % → 96 % (128k / 8k) and 98.2 % (24k / 2k) is the same backstop in the
+    new unit (the whole-window 90 % is still asserted). **Behaviour change:** on every route with a header maxTokens MC
+    now acts earlier in absolute tokens (evo 200k / 32k: historian proactive floor 63 % of 167 232 ≈ 105k instead of
+    126k; force 142k instead of 170k), i.e. earlier publications / drops / truncations — cost and quality effect see
+    §7.10. **Residual:** a route that sends no maxTokens in the request header (the shipped opencode-go 1M catalog
+    route: reserve 0, the adapter applies 384 000 per request) is still priced on the whole window, consistent with
+    the backstop there (also reserve 0); the reserve is the latest header's, a mid-session route change is priced
+    from the next request on. Evidence: `evidence-round37/phase2-i4-isolation-integration.md` §7.9.
 36. **Round 37 phase 2 seg 9 (2026-11-10) — messages a native compaction shadows but no compartment covers could be
     invisible (acceptance 5). FIXED offline (`f73973a2a`, RED `3e9271ab1`); no real run yet.** Run 42729564554, main
     215 (first request after compaction 1): region 1–327, the summarize mini-historian covered 322–323 and left

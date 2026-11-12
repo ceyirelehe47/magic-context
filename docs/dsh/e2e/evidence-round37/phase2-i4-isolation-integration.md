@@ -669,3 +669,64 @@ DSH's compaction check vs the Magic pre-step in one step (the tests run prune �
 multi-text-block tool results (identification runs on the joined text; a mismatch falls back to the old behaviour),
 the pressure-truncation interplay (S), and DSH 0.2.2 (the pruner's `PRUNE_MARKER` is identical in alpha.3 / rc.1
 package sources — S; whether 0.2.2's pi-ai adapter keeps assistant usage was not checked).
+
+### 7.9 Segment 12 (2026-11-12) — S9 fixed (A+C) and limitation 35 option B (offline)
+
+User decisions: S9 option "A+C" (2026-11-07), test rewrite "option 1" (2026-11-12 20:29 CST); limitation 35 option B
+(2026-11-12). Adapter only (core, pi-plugin, upstream DSH, `node_modules`, upstream workflows untouched). Labels as in
+§7.8: **R** reproduced (offline test), **S** static inference, **V** needs a real run (§7.10).
+
+**S9 — what was wrong (R, round 36 RED `738e3312a`).** The MC main backstop is compaction-basic's
+`min(window × 0.9, window − maxTokens − 0)`; MC priced its lines against the whole window. 1M / maxTokens 384 000:
+backstop 616 000 (61.6 % of the window) < MC execute 650 000 → native pressure compaction before the historian.
+
+**Fix A.** One helper, `pressure-policy.ts` `magicAvailableWindow(window, reserve) = window − reserve` (reserve = latest
+`request/header` `maxTokens`; ≥ window or invalid → whole window). Every MC pressure reading uses it: historian trigger
+and the persisted `session_meta.last_context_percentage`, the historian context limit when not configured, the drop
+ride's context % and usable window, pressure truncation's decision / target / force lines. Pressure truncation's
+round 12 `min(32 000, maxTokens)` cap is removed (it priced a third budget). `thresholdPercent` of an MC main policy is
+a percent of the usable window; `thresholdPercentOfWindow` keeps the old view.
+
+| route | usable | MC execute 65 % | MC force 85 % | native backstop | before (MC on whole window) |
+|---|---|---|---|---|---|
+| 1M / 384 000 | 616 000 | 400 400 | 523 600 | 616 000 | execute 650 000 > backstop 616 000 |
+| 200k / 32 768 (evo) | 167 232 | 108 700 | 142 147 | 167 232 | execute 130 000, force 170 000 > backstop 167 232 |
+| 128k / 8 192 | 122 880 | 79 872 | 104 448 | 117 964 | execute 85 197, force 111 411 |
+
+**Fix C.** `describePressurePolicy().backstopFirst` lists routes (the 24k / 40k / 80k / 128k examples, 200k / 32k,
+1M / 384k) where the backstop is at or below MC's force line; `doctor` `native-pressure.<profile>` WARNs then. With
+the default row the list is empty on every route (backstop = min(0.9 w, usable) > 0.85 usable); user headroom 65 536
+flags 128k; ratio 0.5 flags 1M / 384k.
+
+**Test change.** The RED's "no native compaction at 62 % / 64 % of the 1M window" encoded the old pricing (MC at 65 %
+of the whole window). Rewritten (`6939254bf`, commit message explains) as the same invariant, exact: lines equal the
+table above, `execute < force < backstop`, MC's own reading is 65 % / 85 % at those token counts, the backstop does not
+fire at the execute line, at 52.35 % / 61.55 % of the window, fires at 61.7 %; same for 200k / 32k (no fire at
+0.5435 / 0.7107 / 0.836, fires at 0.837). The view test S9 is unchanged (`it.failing` → `it`), control unchanged.
+Round 19 view: `thresholdPercent` 90 → 96 (128k / 8k), 90 → 98.2 (24k / 2k) — the same token backstop in the new unit;
+the 90 % of the window is still asserted.
+
+**Limitation 35 option B.** `agent/near-window.ts` (pi-ai 1.3.0 constants in one place). Trigger: (a) pi estimate +
+4096 + min(16 384, maxTokens) > window on a session whose latest reply came through the pi-ai adapter, or (b) the
+latest reply stopped on max tokens below the route's maxTokens. It is not part of the pressure %: pressure truncation
+runs as at the force band and keeps cutting until it also freed the pi excess (chars / 3.5); the drop ride and the
+historian trigger read at least the force band; `session_meta` keeps the measured %.
+
+**Tests.** `s9-lim35-window.test.ts` (pre-existing APIs only; pi estimate mirrored locally): A1 1M / 384k truncation
+at 530k (pre-fix 562k < 850k: none), not at 523k; A2 100k / 64k at 31k; A3 1M / 384k, 410k → persisted 67 %
+(pre-fix 41 %) and the historian fires; B1 200k, measured pressure below force, next user message brings the pi
+estimate to 187k → request `max_completion_tokens` ≥ 16 384 (pre-fix 9 413); B2 a `length` stop with 9 000 / 32 768
+output → truncation at 36 % measured; B3 guards (normal stop; `length` at the full maxTokens); B4 24k / 4096 route not
+triggered by an estimate the 16 384 floor alone would trigger; B5 historian fired at ≥ 85, persisted 36 %.
+CI RED **43221964976** @ `6939254bf`: dsh-plugin 749 pass / 11 fail = exactly the 11 new / changed tests,
+adapter 15 / 0, contracts 110 / 0 (rc.5, alpha.3, rc.1), test-file typecheck 0. CI FIX **43222723317** @
+`9382f3078` SUCCESS: dsh-plugin 760 / 0, adapter 15 / 0, contracts 110 / 0 ×3, test-file typecheck 0, ci-check 46 / 0,
+wf-lint 0. Local per-file 756 / 0 (116 files), src / test tsc 0. O1–O7, G, H, I4, backstop, P, N, I series unchanged
+and green; no other `it.failing` touched; no assertion loosened, no skip.
+
+**Residual / not covered.** (S) A route without a header maxTokens (shipped 1M catalog route) is priced on the whole
+window, like its backstop. (S) The 16 384 floor is min(16 384, maxTokens) (judgment call, B4). (S) Option B acts
+only through truncation / drops / historian: no eligible tool result (≥ 3× the keep window) and held drops leave the
+clamp where it is. (S) Images, mid-session system messages and DSH 0.2.2 (pi-ai adapter, estimator) not mirrored /
+not checked. (V) MC now acts earlier in absolute tokens on every route with a header maxTokens (evo 200k: proactive
+floor ≈ 105k instead of 126k): more / earlier publications and cache breaks are expected — measured in §7.10.
