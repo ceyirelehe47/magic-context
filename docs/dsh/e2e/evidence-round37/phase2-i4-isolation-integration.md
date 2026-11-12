@@ -730,3 +730,78 @@ only through truncation / drops / historian: no eligible tool result (≥ 3× th
 clamp where it is. (S) Images, mid-session system messages and DSH 0.2.2 (pi-ai adapter, estimator) not mirrored /
 not checked. (V) MC now acts earlier in absolute tokens on every route with a header maxTokens (evo 200k: proactive
 floor ≈ 105k instead of 126k): more / earlier publications and cache breaks are expected — measured in §7.10.
+
+### 7.10 Segment 13 (2026-11-12) — paired real run MC (evo-23) vs DSH native (evo-24) @ `9382f3078`
+
+Labels in this section: **O** observed in this paired run (n = 1 per group), **S** static inference, **N** not
+covered. Tables: `phase2-tables/pair-evo23-evo24-43223273703-43223280088.md` (pairscan, token decomposition,
+reduction boundaries, MC backstop lines, MC per-turn timeline); script `i3-scripts/pairscan.py`.
+
+**Runs.** Both dispatched 21:01 CST on `dsh-integration` @ `9382f3078` with identical inputs (runs 1, 10 items,
+cap $3, `evo-model-200k-catalog-hist.yml` 200k / maxTokens 32 768, isolate 1, validate false, on_timeout stop,
+turn_timeout 2400, DSH 0.2.1-rc.5). MC = group native, run **43223273703** (SUCCESS); DSH = group baseline (no
+Magic Context), run **43223280088** — bench 10/10 completed, then step *Score* FAILED on an infrastructure error
+(`prepare.py` rows API HTTP 502 ×3): no `score/`, so DSH has no F2P / P2P. Not re-run (no new bench, by instruction).
+Both groups compacted: MC 31 historian publications + 1 native (backstop) compaction; DSH 7 native compactions.
+
+| metric | MC (evo-23) | DSH (evo-24) | evo-22 ref (§7.7) |
+|---|---|---|---|
+| turns / timeouts / HTTP 429 / main without usage | 10/10/10 / 0 / 0 / 0 | 10/10/10 / 0 / 0 / 0 | 10/10/10 / 0 / 0 / 0 |
+| requests (all 200) | 412 | 597 | 555 |
+| cost total | **$1.6547** | **$1.1219** | $1.9718 |
+| main / subagent / historian (summarizer) | $1.5256 / $0.0388 / $0.0900 | $0.8740 / $0.2175 / ($0.0302) | $1.6062 / $0.1592 / $0.2060 |
+| main requests / output tokens | 365 / 175 056 | 518 / 289 809 | 487 / — |
+| cache hit all / main | 89.1 % / 89.2 % | 96.4 % / 97.0 % | 92.8 % / 93.6 % |
+| publication requests: n / hit / share of main miss | 31 / 16.9 % / 82.5 % | — | 22 / 22.1 % / 68.5 % |
+| main non-publication hit | 97.9 % | 97.0 % | 97.9 % |
+| compactions / publications / historian req | 1 / 31 / 31 | 7 / 0 / 0 (7 summarizer) | 3 / 22 / 24 |
+| native compaction before first publication | 0 | — | 0 |
+| DSH pruner outputs / Magic write-backs | 8 / **0** | 29 / 0 | 110 / 95 |
+| `max_completion_tokens` min / median / < 32 768 | **22 253** / 32 768 / 16 (all ≥ 16 384) | 32 768 / 32 768 / 0 | 4 041 / 32 768 / 59 (16 < 16 384) |
+| peak prompt | 168 061 | 102 109 | 171 289 |
+| `<unsummarized_tail>` bodies | 0 | 0 | 0 |
+| access probe leaks / pairing violations / reasoning lost | 0 / 0 / 0 | 0 / 0 / 1 | 0 / 0 / 0 |
+| F2P / P2P (bench) · prefix-match rescore (r38) | 0/8 / 310/317 · 0/8, 315/317 (items 1–10: 0/7, 315/316) | N (Score 502) | 0/8 / 310/317 · same |
+| turn time sum | 3 427 s | 6 927 s | 3 957 s |
+
+**Cost advantage: does NOT hold in this pair (O).** MC cost $0.533 (+47.5 %) more than DSH native. Prompt volume
+is the same (34.7M vs 35.3M main prompt tokens); the difference is uncached tokens: MC main miss 3.77M vs 1.07M,
+of which 3.11M (82.5 %) are the 31 publication requests (each publication rewrites m0 at the head of the prompt:
+mean hit 16.9 %). At $0.3 / M that is ≈ $0.93 — more than the whole gap. DSH compacts early (~100k of 200k, 7×,
+each to ~36k) and pays only 7 cold requests. MC's side costs are lower (historian $0.090 + subagent $0.039 vs
+summarizer $0.030 + subagent $0.218) and MC needed fewer main requests and output tokens (365 / 175k vs 518 / 290k)
+and half the turn time — but those are trajectory differences of single runs, not attributable to MC (S).
+Against evo-22 (before segments 11 / 12) MC is $0.317 cheaper, mainly main / historian; also n = 1 and a different
+commit (S).
+
+**Confidence and sample limits.** One run per group on one 10-item instance; the agent trajectory alone moves
+request counts a lot (evo-22: 487 main requests, this MC run 365, DSH 518), so a 47 % cost gap is a direction, not
+a measurement. Quality comparison is N: DSH has no score (502), MC 0/8 F2P like every recent run. What is solid (O,
+structural, not variance-driven): MC's extra spend sits in publication cache breaks; DSH's in nothing comparable.
+A cost win for MC on this route needs fewer or cheaper publications (e.g. batching publications, publishing only
+at compaction-relevant pressure, or appending instead of rewriting the head) — a design question, not done here.
+
+**Limitation 35 — real effect (O).** Magic write-backs of pruned tool results: **0** (evo-22: 95; pruner ran 8
+times in MC). Main `max_completion_tokens` minimum **22 253** (evo-22: 4 041; 42459290880: 1); 16 of 365 main
+requests below 32 768, none below 16 384. The ping-pong trigger fixed in seg 11 is gone in a real run (O). Whether
+option B's near-window trigger fired is not logged on stderr: the ≥ 16 384 floor is consistent with it but cannot be
+attributed to it (S). DSH native group: never clamped (peak 102k).
+
+**S9 order — holds in the real run (O), with one backstop compaction after MC had nothing left to do.** Every MC
+trigger line prints `usable=167232` (window − 32 768) and the backstop line `thresholdPct=83.6` (same 167 232):
+the fix-A pricing is live. First historian request main 69 (turn 2), first publication main 76; the only native
+compaction is at main 223→224 (turn 5) after 18 publications, so no backstop pre-empted MC. In turn 5 MC's
+reading stayed ≥ 85 % of usable for 39 steps (max 101 %); the historian answered `nothing to compact
+(eligibleEnd = offset; protected tail)`, the backstop deferred twice for the running historian and then compacted
+at 168 645 tokens (84.3 % of the window → 52 908). That is the backstop working as the last resort; whether MC's
+force band (pressure truncation / drops / option B) should have freed more there is open (S: the growth was inside
+the protected tail, `eligibleEnd = protectedTailStart`).
+
+**Limitation 36 — not triggered (N).** 0 `<unsummarized_tail>` blocks in any body of either run; MC's one
+compaction region was fully covered by compartments. The seg 9 renderer is still verified offline only.
+
+**Isolation / errors (O).** Access probe 0 leaks both (52 / 51 probe requests); 0 pairing violations; reasoning lost
+0 (MC) / 1 (DSH native, not our code); 0 × 429; 0 turn timeouts; every main request has usage. DSH's 7 `net
+attempts` (analyze.py: agent commands that touch the network) did not show up as probe leaks.
+
+**Spend.** MC $1.6547 + DSH $1.1219 = **$2.7766** (analyze.py list price), within the $3 / group caps.

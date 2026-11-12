@@ -129,8 +129,11 @@ Not tagged, not released. Core: upstream v0.49.35, unchanged. DSH declared (unch
   about 105k instead of 126k). Separately, when DSH's model adapter estimates the next request so close to the
   window that the reply would be squeezed below 16k tokens (or a reply was just cut short below its normal limit),
   the next step acts as if the context were at Magic's emergency level and shortens large tool outputs until the
-  room is back; the displayed percentage stays the measured one. Verified offline (CI 760 / 0); the paired real
-  run is in §7.10. Commits `6939254bf` (RED), `9382f3078`. Detail:
+  room is back; the displayed percentage stays the measured one. Verified offline (CI 760 / 0). Paired real run
+  (§7.10, one run each): the reply room held (smallest reply limit 22 253 tokens, no tool output restored after
+  DSH shortened it) and Magic's summaries came before DSH's safety compaction; on cost, the same run with plain DSH
+  compaction was cheaper ($1.12 vs $1.65), because each Magic summary update rewrites the start of the prompt and
+  loses the provider cache. Commits `6939254bf` (RED), `9382f3078`. Detail:
   `docs/dsh/e2e/evidence-round37/phase2-i4-isolation-integration.md` §7.9 / §7.10.
 - **Round 36 line H — `ctx_reduce` reminder in native-roles sessions (adapter only, core unchanged;
   user-approved 2026-11-06 20:43 CST):** with the switch on, the reminder that asks the model to drop

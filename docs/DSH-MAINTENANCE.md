@@ -2855,7 +2855,9 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     it only acts through pressure truncation / drops / historian — a surface without eligible tool results (≥ 3× the
     keep window) or with drops held can stay clamped; images and multi-system-message prompts are approximated;
     (b) needs the provider's output token count on the reply; a DSH / pi-ai upgrade that changes the estimator
-    (pi 1.5.x margin for large maxTokens) needs `near-window.ts` re-checked. Real effect: §7.10 (paired run).
+    (pi 1.5.x margin for large maxTokens) needs `near-window.ts` re-checked. **Real run 43223273703 (§7.10, n = 1):**
+    Magic write-backs 0 (evo-22: 95), main `max_completion_tokens` min 22 253 (evo-22: 4 041), none below 16 384;
+    option B's own firing is not logged on stderr (not attributed).
 38. **Round 36 line I S9 (2026-11-06) — native backstop below MC's execute line on a route with a large request
     maxTokens. FIXED offline in round 37 seg 12 (`9382f3078`, RED `6939254bf`, option A+C, user decision 2026-11-07,
     test rewrite confirmed 2026-11-12 20:29 CST).** compaction-basic caps the MC main backstop at
@@ -2878,7 +2880,11 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     §7.10. **Residual:** a route that sends no maxTokens in the request header (the shipped opencode-go 1M catalog
     route: reserve 0, the adapter applies 384 000 per request) is still priced on the whole window, consistent with
     the backstop there (also reserve 0); the reserve is the latest header's, a mid-session route change is priced
-    from the next request on. Evidence: `evidence-round37/phase2-i4-isolation-integration.md` §7.9.
+    from the next request on. Evidence: `evidence-round37/phase2-i4-isolation-integration.md` §7.9. **Real run
+    43223273703 (§7.10, n = 1):** MC lines priced on usable 167 232, first publication main 76, no native compaction
+    before it; one backstop compaction (turn 5, 84.3 % of the window) after 18 publications, 39 force-band readings and
+    historian noops (nothing eligible). Paired DSH-native run 43223280088 was cheaper ($1.12 vs $1.65): MC's 31
+    publications carry 82.5 % of its main cache-miss tokens.
 36. **Round 37 phase 2 seg 9 (2026-11-10) — messages a native compaction shadows but no compartment covers could be
     invisible (acceptance 5). FIXED offline (`f73973a2a`, RED `3e9271ab1`); no real run yet.** Run 42729564554, main
     215 (first request after compaction 1): region 1–327, the summarize mini-historian covered 322–323 and left
@@ -2896,7 +2902,7 @@ script), `MAGIC_CONTEXT_DEBUG_HISTORIAN` (1), `OPENCODE_SESSION` (random).
     Evidence: `evidence-round37/phase2-i4-isolation-integration.md` §7.6. **Real check 42805322951 (§7.7, 2026-11-10):**
     3 compactions, no message missing from both summary and raw view at any boundary (content match), but every
     region was already fully covered by compartments, so no tail was rendered — the new renderer is still verified
-    offline only.
+    offline only. Paired run 43223273703 (§7.10): again 0 tail blocks (1 compaction, region fully covered).
 37. **Round 37 phase 2 seg 9 (2026-11-10) — historian `fires=true` without a request (silent noop). FIXED offline
     (`f73973a2a`, RED `3e9271ab1`); behaviour change, no real run yet.** Run 42729564554: 92 trigger lines with
     `fires=true`, 12 historian requests, no log line explaining the rest. Cause (source + offline reproduction H1):
