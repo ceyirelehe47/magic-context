@@ -10,8 +10,10 @@
  * longer fitted: every step ended `max-tokens` after one output token, so the
  * model could not even call `ctx_reduce`. Deadlock.
  *
- * Fix: when `projected input + output reserve` (the latest `request/header`
- * `maxTokens`) reaches the force band, middle-truncate active tool results —
+ * Fix: when the projected input reaches the force band of the available
+ * window (`window − maxTokens` of the latest `request/header`; round 37 seg 12,
+ * was `input + min(32 000, maxTokens)` of the whole window), or the separate
+ * near-window trigger fires (limitation 35 option B), middle-truncate active tool results —
  * protected ones included, oldest first, the newest only if the rest is not
  * enough — down to a head + tail window that keeps the result's `§N§` prefix.
  * The original output stays in the DSH event log (the historian, `ctx_expand`
@@ -36,14 +38,18 @@
 import { createHash } from "node:crypto";
 import type { Database } from "@magic-context/core/shared/sqlite";
 import { estimateTokens } from "@magic-context/core/hooks/magic-context/read-session-formatting";
+import { magicAvailableWindow } from "../compat/dsh-0.1/pressure-policy";
 
-/**
- * Cap on the output reserve, mirroring core's window geometry
- * (`OPENCODE_OUTPUT_CAP` in shared/window-geometry: usable = window −
- * min(maxTokens, 32 000)). An uncapped 64k `maxTokens` would otherwise put a
- * 100k window over the force band at ~30 % input.
+/*
+ * Round 37 seg 12 (S9 fix A): the output reserve is no longer capped here.
+ * The round 12 cap (`min(32 000, maxTokens)`, mirroring core's
+ * `OPENCODE_OUTPUT_CAP`) priced a different budget than the rest of MC; MC now
+ * prices every pressure line against the available window
+ * (`magicAvailableWindow` = window − maxTokens, one place), and the decision
+ * below is `projected ≥ force % × available`. (A 64k maxTokens on a 100k
+ * window: available 36k, force at 30.6k input — the native backstop there is
+ * min(90k, 36k) = 36k, so MC still acts first.)
  */
-export const PRESSURE_OUTPUT_RESERVE_CAP = 32_000;
 
 /** Inputs for one pass's decision. Absent = replay only. */
 export interface PressureTruncationInput {
@@ -56,6 +62,12 @@ export interface PressureTruncationInput {
   readonly forcePercentage: number;
   /** Seq of the latest usage-bearing assistant message (batch latch). */
   readonly usageSeq: number;
+  /**
+   * Limitation 35 option B: the separate near-window trigger fired
+   * (agent/near-window). Pressure is treated as at least the force band, and
+   * the batch also frees at least `excessTokens` pi-estimated tokens.
+   */
+  readonly nearWindow?: { readonly excessTokens: number; readonly reason?: string };
 }
 
 /** A tool-result part the stage can read and rewrite (RecordingPart shape). */
@@ -240,9 +252,11 @@ export function applyPressureTruncation(
   if (input === undefined) return { decided, replayed, skipped };
   const window = input.contextWindow;
   if (!(window > 0) || !(input.projectedTokens > 0)) return { decided, replayed, skipped };
-  const effective =
-    input.projectedTokens + Math.min(PRESSURE_OUTPUT_RESERVE_CAP, Math.max(0, input.outputReserveTokens));
-  if (effective * 100 < input.forcePercentage * window) return { decided, replayed, skipped };
+  const available = magicAvailableWindow(window, input.outputReserveTokens);
+  const nearWindow = input.nearWindow;
+  const forceTokens = (input.forcePercentage / 100) * available;
+  if (nearWindow === undefined && input.projectedTokens * 100 < input.forcePercentage * available) return { decided, replayed, skipped };
+  const effective = nearWindow === undefined ? input.projectedTokens : Math.max(input.projectedTokens, forceTokens);
   const latestBasis = rows.reduce((max, row) => Math.max(max, row.basis_usage_seq), -Infinity);
   if (rows.length > 0 && input.usageSeq <= latestBasis) return { decided, replayed, skipped };
 
@@ -256,23 +270,30 @@ export function applyPressureTruncation(
     .filter((x) => x.eligible)
     .sort((a, b) => a.c.tagNumber - b.c.tagNumber);
   if (pool.length === 0) return { decided, replayed, skipped };
-  const target = (input.executePercentage / 100) * window;
-  const force = (input.forcePercentage / 100) * window;
+  const target = (input.executePercentage / 100) * available;
+  const force = forceTokens;
   let remaining = effective;
+  // Near-window: pi-estimated tokens (chars / 3.5) the batch must also free.
+  const piNeed = nearWindow === undefined ? 0 : Math.max(0, nearWindow.excessTokens);
+  let piFreed = 0;
   const saving = (x: { text: string; head: number; tail: number; c: TruncationCandidate }) =>
     Math.max(0, estimateTokens(x.text) - estimateTokens(truncateOutput(x.text, x.head, x.tail, x.c.tagNumber)));
+  const piSaving = (x: { text: string; head: number; tail: number; c: TruncationCandidate }) =>
+    Math.max(0, Math.ceil((x.text.length - truncateOutput(x.text, x.head, x.tail, x.c.tagNumber).length) / 3.5));
   const chosen: Array<(typeof pool)[number]> = [];
   // Oldest first, holding back the newest result (the one the model is most
   // likely answering about) unless the others cannot get under the force band.
   const newest = pool[pool.length - 1]!;
   for (const x of pool.slice(0, -1)) {
-    if (remaining <= target) break;
+    if (remaining <= target && piFreed >= piNeed) break;
     chosen.push(x);
     remaining -= saving(x);
+    piFreed += piSaving(x);
   }
-  if (remaining >= force) {
+  if (remaining >= force || piFreed < piNeed) {
     chosen.push(newest);
     remaining -= saving(newest);
+    piFreed += piSaving(newest);
   }
   if (chosen.length === 0) return { decided, replayed, skipped };
   const insert = db.prepare(
@@ -292,7 +313,11 @@ export function applyPressureTruncation(
   }
   log?.(
     `[magic-context] pressure truncation: ${decided.length} tool result(s) [${decided.join(",")}] ` +
-      `(input ${Math.round(input.projectedTokens)} + reserve ${Math.min(PRESSURE_OUTPUT_RESERVE_CAP, input.outputReserveTokens)} of ${window} ≥ force ${input.forcePercentage}%; est. after ≈${Math.round(remaining)})`,
+      `(input ${Math.round(input.projectedTokens)} of usable ${Math.round(available)} (window ${window} − reserve ${Math.max(0, input.outputReserveTokens)}) ` +
+      (nearWindow !== undefined
+        ? `near-window ${nearWindow.reason ?? "trigger"} (pi excess ${Math.round(piNeed)}, freed ≈${piFreed}) → force ${input.forcePercentage}%`
+        : `≥ force ${input.forcePercentage}%`) +
+      `; est. after ≈${Math.round(remaining)})`,
   );
   return { decided, replayed, skipped };
 }

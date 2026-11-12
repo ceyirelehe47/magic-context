@@ -456,15 +456,21 @@ export async function runDshDoctor(
         checks.push({
           id: `native-pressure.${name}`,
           title: `Native pressure compaction vs MC — profile ${name}`,
-          status: pressure.preemptsMagic ? "warn" : "ok",
+          status: pressure.preemptsMagic || pressure.backstopFirst.length > 0 ? "warn" : "ok",
           detail:
             pressure.text +
             (pressure.preemptsMagic
               ? " The user-set values make DSH compact a 128k main session BEFORE MC's 65 % execute threshold (MC historian/drops never run first)."
+              : "") +
+            // S9 fix C (round 37 seg 12): the backstop can fire before MC's
+            // force band (85 % of the usable window) on these routes.
+            (pressure.backstopFirst.length > 0
+              ? ` The native backstop may fire before MC's force band (85 % of window − maxTokens) on ${pressure.backstopFirst.join(", ")}: MC's own emergency path would not get the first chance.`
               : ""),
-          fix: pressure.preemptsMagic
-            ? "Remove headroomTokens/thresholdRatio from the magic-compaction row (MC then sets the backstop at its force band), or raise thresholdRatio / lower headroomTokens."
-            : undefined,
+          fix:
+            pressure.preemptsMagic || pressure.backstopFirst.length > 0
+              ? "Remove headroomTokens/thresholdRatio from the magic-compaction row (MC then sets the backstop at its force band), or raise thresholdRatio / lower headroomTokens."
+              : undefined,
         });
       }
       checks.push({

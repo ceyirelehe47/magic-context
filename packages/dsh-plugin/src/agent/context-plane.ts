@@ -45,6 +45,8 @@ import { foldLegacyBareMessageTags } from "./legacy-tag-cleanup";
 import { maybeNudgeChannels, promptTokensOf, scanSessionMetrics } from "./nudge";
 import type { PressureTruncationInput } from "./pressure-truncation";
 import { escalationBands } from "@magic-context/core/shared/escalation-bands";
+import { magicAvailableWindow, magicPressurePercent } from "../compat/dsh-0.1/pressure-policy";
+import { nearWindowSignal } from "./near-window";
 import { createTagger } from "@magic-context/core/features/magic-context/tagger";
 import { markNoteNudgeDelivered, onNoteTrigger, peekNoteNudgeText } from "@magic-context/core/hooks/magic-context/note-nudger";
 import { historyContentProvider } from "./historian-wiring";
@@ -361,10 +363,22 @@ function maybeFireHistorian(
     if (sample === undefined) return;
     const contextWindow = sample.contextWindow;
     if (typeof contextWindow !== "number" || contextWindow <= 0) return;
-    const percentage = Math.round(((sample.projectedTokens ?? 0) / contextWindow) * 100);
+    // Round 37 seg 12 (S9 fix A): percent of the AVAILABLE window
+    // (window − the route's maxTokens), the unit of MC's 65 % / 85 % lines.
+    const outputReserve = latestOutputReserveTokens(agent);
+    const availableWindow = magicAvailableWindow(contextWindow, outputReserve);
+    const percentage = Math.round(magicPressurePercent(sample.projectedTokens ?? 0, contextWindow, outputReserve));
     const config = historian.config ?? {};
     const executeThresholdPercentage =
       safeThreshold(historian, agent) ?? config.executeThresholdPercentage ?? 65;
+    // Limitation 35 option B: the separate near-window trigger lifts the
+    // reading the trigger acts on to the force band; the persisted / reported
+    // percentage stays the measured one.
+    const nearWindow = nearWindowSignal(agent, contextWindow);
+    const triggerPercentage =
+      nearWindow === undefined
+        ? percentage
+        : Math.max(percentage, escalationBands(executeThresholdPercentage).forceMaterializationPercentage);
     // The shared trigger refuses to fire with a zero budget; the DSH adapter
     // derives it exactly like Pi does (deriveTriggerBudget over the context
     // window × threshold), instead of leaving triggerBudgetTokens at 0 (which
@@ -372,7 +386,7 @@ function maybeFireHistorian(
     const contextLimit =
       typeof config.contextLimit === "number" && config.contextLimit > 0
         ? config.contextLimit
-        : contextWindow;
+        : availableWindow;
     const forceFire = process.env.MAGIC_CONTEXT_FORCE_HISTORIAN === "1" && percentage >= 0;
     const commitCfg = config.commitClusterTrigger;
     const commitClusters = recentCommitClusterCount(agent);
@@ -400,13 +414,13 @@ function maybeFireHistorian(
             deriveTriggerBudget(contextLimit, executeThresholdPercentage),
           contextLimit,
         },
-        { lastContextPercentage: percentage },
+        { lastContextPercentage: triggerPercentage },
       );
     if (process.env.MAGIC_CONTEXT_DEBUG_HISTORIAN === "1") {
       try {
         // eslint-disable-next-line no-console
         console.error(
-          `[magic-context] historian trigger: pct=${percentage} threshold=${executeThresholdPercentage} budget=${config.triggerBudgetTokens ?? deriveTriggerBudget(contextLimit, executeThresholdPercentage)} window=${contextWindow} fires=${fires}`,
+          `[magic-context] historian trigger: pct=${percentage}${nearWindow !== undefined ? ` near-window=${nearWindow.reason}→${triggerPercentage}` : ""} threshold=${executeThresholdPercentage} budget=${config.triggerBudgetTokens ?? deriveTriggerBudget(contextLimit, executeThresholdPercentage)} window=${contextWindow} usable=${availableWindow} fires=${fires}`,
         );
       } catch {
         // Diagnostics must never break the pre-step chain.
@@ -446,7 +460,7 @@ function maybeFireHistorian(
         provider: historyContentProvider(agent as unknown as Agent, sessionId),
         contextWindow,
         ...(dshSessionIdOf(agent) !== undefined ? { routeSessionId: dshSessionIdOf(agent) } : {}),
-        usage: { percentage, inputTokens: Math.max(0, Math.round(sample.projectedTokens ?? 0)) },
+        usage: { percentage: triggerPercentage, inputTokens: Math.max(0, Math.round(sample.projectedTokens ?? 0)) },
         executeThresholdPercentage,
         contextLimit,
       });
@@ -626,12 +640,37 @@ function tailFoldAfterPass(
 }
 
 /**
+ * The route's output reserve: `maxTokens` of the latest `request/header`
+ * (0 when no request was made yet / the header carries none). S9 fix A
+ * subtracts it from the window everywhere MC prices pressure.
+ */
+export function latestOutputReserveTokens(agent: Agent): number {
+  let reserve = 0;
+  try {
+    for (const event of sessionEvents(agent.session)) {
+      if (event === null || typeof event !== "object") continue;
+      const e = event as { type?: unknown; data?: { header?: { config?: { maxTokens?: unknown } } } };
+      if (e.type !== "request/header") continue;
+      const max = e.data?.header?.config?.maxTokens;
+      if (typeof max === "number" && max > 0) reserve = max;
+    }
+  } catch {
+    return 0;
+  }
+  return reserve;
+}
+
+/**
  * Pressure-truncation inputs: projected input (token-meter projection, else
  * the last provider usage), the request's output reserve (latest
  * `request/header` `maxTokens`), the execute/force bands, and the seq of the
  * latest usage-bearing assistant message (one batch per sample).
  */
-export function pressureTruncationInputFor(deps: ContextPlaneDeps, agent: Agent): PressureTruncationInput | undefined {
+export function pressureTruncationInputFor(
+  deps: ContextPlaneDeps,
+  agent: Agent,
+  pending: readonly unknown[] = [],
+): PressureTruncationInput | undefined {
   try {
     let projected: number | undefined;
     let contextWindow: number | undefined;
@@ -672,6 +711,7 @@ export function pressureTruncationInputFor(deps: ContextPlaneDeps, agent: Agent)
     const projectedTokens = meterProjected + denseSurfaceCorrection(agent, bySeq, usageSeq, meterProjected > lastPrompt);
     const executePercentage =
       safeThreshold(deps.historian, agent) ?? deps.historian?.config?.executeThresholdPercentage ?? 65;
+    const nearWindow = nearWindowSignal(agent, contextWindow, pending);
     return {
       projectedTokens,
       contextWindow,
@@ -679,6 +719,7 @@ export function pressureTruncationInputFor(deps: ContextPlaneDeps, agent: Agent)
       executePercentage,
       forcePercentage: escalationBands(executePercentage).forceMaterializationPercentage,
       usageSeq,
+      ...(nearWindow !== undefined ? { nearWindow: { excessTokens: nearWindow.excessTokens, reason: nearWindow.reason } } : {}),
     };
   } catch {
     return undefined;
@@ -796,11 +837,17 @@ export function dropRideInputFor(
     const meterWindow =
       typeof meter?.contextWindow === "number" && meter.contextWindow > 0 ? meter.contextWindow : pressure?.contextWindow;
     const meterSample = typeof meter?.projectedTokens === "number" && typeof meterWindow === "number" && meterWindow > 0;
-    const pct = meterSample
-      ? ((meter!.projectedTokens as number) / (meterWindow as number)) * 100
+    // Round 37 seg 12 (S9 fix A): percent of the available window.
+    const reserve = pressure?.outputReserveTokens ?? latestOutputReserveTokens(agent);
+    const measuredPct = meterSample
+      ? magicPressurePercent(meter!.projectedTokens as number, meterWindow as number, reserve)
       : pressure !== undefined && pressure.contextWindow > 0
-        ? (pressure.projectedTokens / pressure.contextWindow) * 100
+        ? magicPressurePercent(pressure.projectedTokens, pressure.contextWindow, reserve)
         : undefined;
+    const forceBand = pressure?.forcePercentage ?? escalationBands(execute).forceMaterializationPercentage;
+    // Limitation 35 option B: the near-window trigger reads as the force band.
+    const pct =
+      pressure?.nearWindow !== undefined ? Math.max(measuredPct ?? 0, forceBand) : measuredPct;
     const historianPublishedAt = latestHistorianPublishAt(db, sessionId);
     const knowledge = deps.knowledge;
     const baselineBehindPublication =
@@ -818,8 +865,8 @@ export function dropRideInputFor(
       // only a reading with neither is a local estimate (core contextUsageFromEstimate).
       fromEstimate: !(meterSample || (pressure !== undefined && pressure.usageSeq >= 0)),
       executePercentage: execute,
-      forcePercentage: pressure?.forcePercentage ?? escalationBands(execute).forceMaterializationPercentage,
-      usableWindow: meterWindow,
+      forcePercentage: forceBand,
+      usableWindow: typeof meterWindow === "number" && meterWindow > 0 ? magicAvailableWindow(meterWindow, reserve) : meterWindow,
       summaryCanCome: dshSummaryCanCome(db, sessionId),
     };
   } catch (error) {
@@ -971,7 +1018,7 @@ export async function runContextPlaneStep(
           // fail-open: legacy rows are inert for the plan; retry next process.
         }
       }
-      const pressureInput = pressureTruncationInputFor(deps, agent);
+      const pressureInput = pressureTruncationInputFor(deps, agent, payload.messages as readonly unknown[]);
       const plan = deriveMutationPlan(view, {
         db,
         protection,
